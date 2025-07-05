@@ -1,7 +1,12 @@
 #include "hamlib.h"
 #include <string>
+#include <vector>
 
-
+// Structure to hold rig information for the callback
+struct RigListData {
+  std::vector<Napi::Object> rigList;
+  Napi::Env env;
+};
 
 using namespace Napi;
 
@@ -450,6 +455,9 @@ Napi::Function NodeHamLib::GetClass(Napi::Env env) {
       NodeHamLib::InstanceMethod("close", & NodeHamLib::Close),
       NodeHamLib::InstanceMethod("destroy", & NodeHamLib::Destroy),
       NodeHamLib::InstanceMethod("getConnectionInfo", & NodeHamLib::GetConnectionInfo),
+      
+      // Static method to get supported rig models
+      NodeHamLib::StaticMethod("getSupportedRigs", & NodeHamLib::GetSupportedRigs),
     });
       constructor = Napi::Persistent(ret);
       constructor.SuppressDestruct();
@@ -472,5 +480,90 @@ bool NodeHamLib::isNetworkAddress(const char* path) {
   }
   
   return false;
+}
+
+// Static callback function for rig_list_foreach
+int NodeHamLib::rig_list_callback(const struct rig_caps *caps, void *data) {
+  RigListData *rig_data = static_cast<RigListData*>(data);
+  
+  // Create rig info object
+  Napi::Object rigInfo = Napi::Object::New(rig_data->env);
+  rigInfo.Set(Napi::String::New(rig_data->env, "rigModel"), 
+              Napi::Number::New(rig_data->env, caps->rig_model));
+  rigInfo.Set(Napi::String::New(rig_data->env, "modelName"), 
+              Napi::String::New(rig_data->env, caps->model_name ? caps->model_name : ""));
+  rigInfo.Set(Napi::String::New(rig_data->env, "mfgName"), 
+              Napi::String::New(rig_data->env, caps->mfg_name ? caps->mfg_name : ""));
+  rigInfo.Set(Napi::String::New(rig_data->env, "version"), 
+              Napi::String::New(rig_data->env, caps->version ? caps->version : ""));
+  rigInfo.Set(Napi::String::New(rig_data->env, "status"), 
+              Napi::String::New(rig_data->env, rig_strstatus(caps->status)));
+  
+  // Determine rig type string
+  const char* rigType = "Unknown";
+  switch (caps->rig_type & RIG_TYPE_MASK) {
+    case RIG_TYPE_TRANSCEIVER:
+      rigType = "Transceiver";
+      break;
+    case RIG_TYPE_HANDHELD:
+      rigType = "Handheld";
+      break;
+    case RIG_TYPE_MOBILE:
+      rigType = "Mobile";
+      break;
+    case RIG_TYPE_RECEIVER:
+      rigType = "Receiver";
+      break;
+    case RIG_TYPE_PCRECEIVER:
+      rigType = "PC Receiver";
+      break;
+    case RIG_TYPE_SCANNER:
+      rigType = "Scanner";
+      break;
+    case RIG_TYPE_TRUNKSCANNER:
+      rigType = "Trunk Scanner";
+      break;
+    case RIG_TYPE_COMPUTER:
+      rigType = "Computer";
+      break;
+    case RIG_TYPE_OTHER:
+      rigType = "Other";
+      break;
+  }
+  
+  rigInfo.Set(Napi::String::New(rig_data->env, "rigType"), 
+              Napi::String::New(rig_data->env, rigType));
+  
+  // Add to list
+  rig_data->rigList.push_back(rigInfo);
+  
+  return 1; // Continue iteration (returning 0 would stop)
+}
+
+// Static method to get supported rig models
+Napi::Value NodeHamLib::GetSupportedRigs(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  // Load all backends to ensure we get the complete list
+  rig_load_all_backends();
+  
+  // Prepare data structure for callback with proper initialization
+  RigListData rigData{std::vector<Napi::Object>(), env};
+  
+  // Call hamlib function to iterate through all supported rigs
+  int result = rig_list_foreach(rig_list_callback, &rigData);
+  
+  if (result != RIG_OK) {
+    Napi::Error::New(env, "Failed to retrieve supported rig list").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  // Convert std::vector to Napi::Array
+  Napi::Array rigArray = Napi::Array::New(env, rigData.rigList.size());
+  for (size_t i = 0; i < rigData.rigList.size(); i++) {
+    rigArray[i] = rigData.rigList[i];
+  }
+  
+  return rigArray;
 }
 

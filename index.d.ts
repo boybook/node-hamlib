@@ -25,6 +25,24 @@ interface ModeInfo {
 }
 
 /**
+ * Supported rig information interface
+ */
+interface SupportedRigInfo {
+  /** Rig model number */
+  rigModel: number;
+  /** Model name */
+  modelName: string;
+  /** Manufacturer name */
+  mfgName: string;
+  /** Driver version */
+  version: string;
+  /** Driver status (Alpha, Beta, Stable, etc.) */
+  status: string;
+  /** Rig type (Transceiver, Handheld, Mobile, etc.) */
+  rigType: string;
+}
+
+/**
  * VFO type
  */
 type VFO = 'VFO-A' | 'VFO-B';
@@ -56,6 +74,19 @@ declare class HamLib {
    * const rig = new HamLib(1035, 'localhost:4532');
    */
   constructor(model: number, port?: string);
+
+  /**
+   * Get list of all supported radio models
+   * @returns Array of supported radio models with details
+   * @static
+   * @example
+   * const supportedRigs = HamLib.getSupportedRigs();
+   * console.log(`Found ${supportedRigs.length} supported rigs`);
+   * supportedRigs.forEach(rig => {
+   *   console.log(`${rig.rigModel}: ${rig.mfgName} ${rig.modelName} (${rig.status})`);
+   * });
+   */
+  static getSupportedRigs(): SupportedRigInfo[];
 
   /**
    * Open connection to device
@@ -158,7 +189,7 @@ declare const nodeHamlib: {
 };
 
 // Export types for use elsewhere
-export { ConnectionInfo, ModeInfo, VFO, RadioMode, HamLib };
+export { ConnectionInfo, ModeInfo, SupportedRigInfo, VFO, RadioMode, HamLib };
 
 // Support both CommonJS and ES module exports
 export = nodeHamlib;

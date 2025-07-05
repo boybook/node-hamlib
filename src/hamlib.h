@@ -24,6 +24,10 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
   Napi::Value Close(const Napi::CallbackInfo&);
   Napi::Value Destroy(const Napi::CallbackInfo&);
   Napi::Value GetConnectionInfo(const Napi::CallbackInfo&);
+  
+  // Static method to get supported rig models
+  static Napi::Value GetSupportedRigs(const Napi::CallbackInfo&);
+  
   static Napi::Function GetClass(Napi::Env);
 
   static int freq_change_cb(RIG*, vfo_t, freq_t, void*);
@@ -41,4 +45,7 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
   
   // Helper method to detect network address format
   bool isNetworkAddress(const char* path);
+  
+  // Static callback helper for rig_list_foreach
+  static int rig_list_callback(const struct rig_caps *caps, void *data);
 };
