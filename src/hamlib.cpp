@@ -2,6 +2,16 @@
 #include <string>
 #include <vector>
 
+// Cross-platform compatibility for hamlib token types
+// Linux versions use token_t, some others use hamlib_token_t
+#ifndef HAMLIB_TOKEN_T
+#ifdef __linux__
+#define HAMLIB_TOKEN_T token_t
+#else
+#define HAMLIB_TOKEN_T hamlib_token_t
+#endif
+#endif
+
 // Structure to hold rig information for the callback
 struct RigListData {
   std::vector<Napi::Object> rigList;
@@ -1630,7 +1640,7 @@ Napi::Value NodeHamLib::SetSerialConfig(const Napi::CallbackInfo& info) {
   std::string paramValue = info[1].As<Napi::String>().Utf8Value();
   
   // Get configuration token from parameter name
-  hamlib_token_t token = rig_token_lookup(my_rig, paramName.c_str());
+  HAMLIB_TOKEN_T token = rig_token_lookup(my_rig, paramName.c_str());
   if (token == RIG_CONF_END) {
     Napi::Error::New(env, "Unknown configuration parameter").ThrowAsJavaScriptException();
     return env.Null();
@@ -1664,7 +1674,7 @@ Napi::Value NodeHamLib::GetSerialConfig(const Napi::CallbackInfo& info) {
   char value[256];
   
   // Get configuration token from parameter name
-  hamlib_token_t token = rig_token_lookup(my_rig, paramName.c_str());
+  HAMLIB_TOKEN_T token = rig_token_lookup(my_rig, paramName.c_str());
   if (token == RIG_CONF_END) {
     Napi::Error::New(env, "Unknown configuration parameter").ThrowAsJavaScriptException();
     return env.Null();
@@ -1692,7 +1702,7 @@ Napi::Value NodeHamLib::SetPttType(const Napi::CallbackInfo& info) {
   std::string pttTypeStr = info[0].As<Napi::String>().Utf8Value();
   
   // Get configuration token for ptt_type
-  hamlib_token_t token = rig_token_lookup(my_rig, "ptt_type");
+  HAMLIB_TOKEN_T token = rig_token_lookup(my_rig, "ptt_type");
   if (token == RIG_CONF_END) {
     Napi::Error::New(env, "PTT type configuration not supported").ThrowAsJavaScriptException();
     return env.Null();
@@ -1715,7 +1725,7 @@ Napi::Value NodeHamLib::GetPttType(const Napi::CallbackInfo& info) {
   char value[256];
   
   // Get configuration token for ptt_type
-  hamlib_token_t token = rig_token_lookup(my_rig, "ptt_type");
+  HAMLIB_TOKEN_T token = rig_token_lookup(my_rig, "ptt_type");
   if (token == RIG_CONF_END) {
     Napi::Error::New(env, "PTT type configuration not supported").ThrowAsJavaScriptException();
     return env.Null();
@@ -1743,7 +1753,7 @@ Napi::Value NodeHamLib::SetDcdType(const Napi::CallbackInfo& info) {
   std::string dcdTypeStr = info[0].As<Napi::String>().Utf8Value();
   
   // Get configuration token for dcd_type
-  hamlib_token_t token = rig_token_lookup(my_rig, "dcd_type");
+  HAMLIB_TOKEN_T token = rig_token_lookup(my_rig, "dcd_type");
   if (token == RIG_CONF_END) {
     Napi::Error::New(env, "DCD type configuration not supported").ThrowAsJavaScriptException();
     return env.Null();
@@ -1766,7 +1776,7 @@ Napi::Value NodeHamLib::GetDcdType(const Napi::CallbackInfo& info) {
   char value[256];
   
   // Get configuration token for dcd_type
-  hamlib_token_t token = rig_token_lookup(my_rig, "dcd_type");
+  HAMLIB_TOKEN_T token = rig_token_lookup(my_rig, "dcd_type");
   if (token == RIG_CONF_END) {
     Napi::Error::New(env, "DCD type configuration not supported").ThrowAsJavaScriptException();
     return env.Null();
