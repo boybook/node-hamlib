@@ -24,10 +24,10 @@ jobs:
             hamlib_install: |
               sudo apt-get update
               sudo apt-get install -y libhamlib-dev libhamlib-utils
-        #   - os: windows-latest
-        #     arch: x64
-        #     target: win32-x64
-        #     hamlib_install: echo "Windows hamlib will be built from source"
+          # - os: windows-latest
+          #   arch: x64
+          #   target: win32-x64
+          #   hamlib_install: echo "Windows hamlib will be built from source"
           - os: macos-latest
             arch: arm64
             target: darwin-arm64
@@ -46,174 +46,14 @@ jobs:
         node-version: '18'
         cache: 'npm'
 
-    - name: Setup MSYS2 for Windows
-      if: matrix.os == 'windows-latest'
-      uses: msys2/setup-msys2@v2
-      with:
-        msystem: MINGW64
-        install: >-
-          git
-          base-devel
-          mingw-w64-x86_64-toolchain
-          mingw-w64-x86_64-cmake
-          mingw-w64-x86_64-autotools
-          mingw-w64-x86_64-pkg-config
-          mingw-w64-x86_64-libusb
-          mingw-w64-x86_64-readline
-          mingw-w64-x86_64-python3
-          mingw-w64-x86_64-swig
-        update: true
-
-    - name: Build Hamlib from source (Windows)
-      if: matrix.os == 'windows-latest'
-      shell: msys2 {0}
-      run: |
-        echo "Building Hamlib from source..."
-        
-        # Clone Hamlib repository
-        git clone https://github.com/Hamlib/Hamlib.git /tmp/hamlib
-        cd /tmp/hamlib
-        
-        # Use latest stable release
-        git checkout $(git describe --tags --abbrev=0)
-        
-        # Configure build environment
-        export CFLAGS="-O2 -g"
-        export CXXFLAGS="-O2 -g"
-        export PKG_CONFIG_PATH="/mingw64/lib/pkgconfig"
-        
-        # Bootstrap and configure
-        ./bootstrap
-        ./configure \
-          --prefix=/mingw64 \
-          --host=x86_64-w64-mingw32 \
-          --disable-shared \
-          --enable-static \
-          --without-cxx-binding \
-          --without-perl-binding \
-          --without-python-binding \
-          --without-tcl-binding \
-          --without-lua-binding \
-          --without-readline \
-          --disable-winradio \
-          --with-xml-support=no \
-          --without-indi
-        
-        # Build and install
-        make -j$(nproc)
-        make install
-        
-        # Create environment info for node-hamlib
-        echo "HAMLIB_ROOT=/mingw64" >> $GITHUB_ENV
-        echo "PKG_CONFIG_PATH=/mingw64/lib/pkgconfig" >> $GITHUB_ENV
-        echo "CPPFLAGS=-I/mingw64/include" >> $GITHUB_ENV
-        echo "LDFLAGS=-L/mingw64/lib" >> $GITHUB_ENV
-        
-        # Verify installation
-        echo "Verifying hamlib installation..."
-        ls -la /mingw64/lib/libhamlib*
-        ls -la /mingw64/include/hamlib/
-        pkg-config --modversion hamlib
-
-    - name: Install Hamlib (Non-Windows)
-      if: matrix.os != 'windows-latest'
+    - name: Install Hamlib dependencies
       run: ${{ matrix.hamlib_install }}
 
     - name: Install Node.js dependencies
-      if: matrix.os != 'windows-latest'
       run: npm ci
 
-    - name: Build node-hamlib (Windows)
-      if: matrix.os == 'windows-latest'
-      shell: msys2 {0}
-      run: |
-        # Set up environment for node-gyp to use MinGW
-        export CC=gcc
-        export CXX=g++
-        export AR=ar
-        export LINK=g++
-        export HAMLIB_ROOT=/mingw64
-        export PKG_CONFIG_PATH=/mingw64/lib/pkgconfig
-        export MINGW_PREFIX=/mingw64
-        
-        # Add MinGW to PATH
-        export PATH="/mingw64/bin:$PATH"
-        
-        # Install Node.js in MSYS2 environment
-        pacman -S --noconfirm mingw-w64-x86_64-nodejs
-        
-        # Install dependencies
-        npm ci
-        
-        # Set up npm and node-gyp
-        npm install -g node-gyp
-        
-        # Verify hamlib is available
-        echo "Checking hamlib availability..."
-        pkg-config --exists hamlib && echo "✓ pkg-config found hamlib" || echo "⚠ pkg-config check failed"
-        pkg-config --modversion hamlib || echo "⚠ Could not get hamlib version"
-        
-        # Clean any previous build
-        rm -rf build
-        
-        # Debug environment variables
-        echo "=== Environment Debug ==="
-        echo "CC: $CC"
-        echo "CXX: $CXX"
-        echo "HAMLIB_ROOT: $HAMLIB_ROOT"
-        echo "PATH: $PATH"
-        
-        # Test if binding.gyp detects MinGW environment
-        echo "=== Testing binding.gyp MinGW detection ==="
-        node -e "console.log('HAMLIB_ROOT:', process.env.HAMLIB_ROOT);"
-        node -e "console.log('MinGW detected:', process.env.HAMLIB_ROOT === '/mingw64');"
-        
-        # Configure and build
-        echo "Configuring build..."
-        node-gyp configure
-        
-        echo "Building native module..."
-        node-gyp build
-        
-        # Verify the build
-        if [ -f "build/Release/hamlib.node" ]; then
-            echo "✓ Build successful: hamlib.node created"
-            ls -la build/Release/hamlib.node
-        else
-            echo "❌ Build failed: hamlib.node not found"
-        fi
-
-    - name: Build node-hamlib (Non-Windows)
-      if: matrix.os != 'windows-latest'
+    - name: Build node-hamlib
       run: npm run build
-
-    - name: Debug Environment (Windows)
-      if: matrix.os == 'windows-latest'
-      shell: msys2 {0}
-      run: |
-        echo "=== Environment Variables ==="
-        echo "HAMLIB_ROOT: $HAMLIB_ROOT"
-        echo "PKG_CONFIG_PATH: $PKG_CONFIG_PATH"
-        echo "PATH: $PATH"
-        
-        echo "=== Hamlib Files ==="
-        if [ -d "/mingw64/lib" ]; then
-          echo "Library files:"
-          ls -la /mingw64/lib/libhamlib*
-        fi
-        
-        if [ -d "/mingw64/include/hamlib" ]; then
-          echo "Header files:"
-          ls -la /mingw64/include/hamlib/
-        fi
-        
-        echo "=== Build Output ==="
-        if [ -f "build/Release/hamlib.node" ]; then
-          echo "Build successful: hamlib.node exists"
-          ls -la build/Release/hamlib.node
-        else
-          echo "Build failed: hamlib.node not found"
-        fi
 
     - name: Create binary package
       shell: bash
@@ -250,12 +90,29 @@ jobs:
     - name: Restructure artifacts
       run: |
         mkdir -p final-prebuilds
-        for target in linux-x64 linux-arm64 win32-x64 darwin-arm64; do
-          if [ -f "prebuilds/hamlib.node" ] && [ -d "prebuilds/$target" ]; then
-            mv "prebuilds/$target" "final-prebuilds/"
+        
+        # List what we actually downloaded
+        echo "Downloaded artifacts:"
+        find prebuilds -type f -name "*.node" || echo "No .node files found"
+        ls -la prebuilds/
+        
+        # Move all available artifacts to final-prebuilds
+        for target_dir in prebuilds/*/; do
+          if [ -d "$target_dir" ]; then
+            target_name=$(basename "$target_dir")
+            echo "Processing target: $target_name"
+            if [ -f "$target_dir/hamlib.node" ]; then
+              mkdir -p "final-prebuilds/$target_name"
+              cp "$target_dir/hamlib.node" "final-prebuilds/$target_name/"
+              echo "✓ Moved $target_name/hamlib.node"
+            else
+              echo "⚠ No hamlib.node found in $target_name"
+            fi
           fi
         done
+        
         # List final structure
+        echo "Final prebuilds structure:"
         find final-prebuilds -type f
 
     - name: Setup Node.js
@@ -263,6 +120,11 @@ jobs:
       with:
         node-version: '18'
         cache: 'npm'
+
+    - name: Install hamlib dependencies for release
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libhamlib-dev libhamlib-utils
 
     - name: Prepare package
       run: |
