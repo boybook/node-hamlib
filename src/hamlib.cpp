@@ -1485,6 +1485,15 @@ Napi::Function NodeHamLib::GetClass(Napi::Env env) {
       // Antenna Selection
       NodeHamLib::InstanceMethod("setAntenna", & NodeHamLib::SetAntenna),
       NodeHamLib::InstanceMethod("getAntenna", & NodeHamLib::GetAntenna),
+      
+      // Serial Port Configuration
+      NodeHamLib::InstanceMethod("setSerialConfig", & NodeHamLib::SetSerialConfig),
+      NodeHamLib::InstanceMethod("getSerialConfig", & NodeHamLib::GetSerialConfig),
+      NodeHamLib::InstanceMethod("setPttType", & NodeHamLib::SetPttType),
+      NodeHamLib::InstanceMethod("getPttType", & NodeHamLib::GetPttType),
+      NodeHamLib::InstanceMethod("setDcdType", & NodeHamLib::SetDcdType),
+      NodeHamLib::InstanceMethod("getDcdType", & NodeHamLib::GetDcdType),
+      NodeHamLib::InstanceMethod("getSupportedSerialConfigs", & NodeHamLib::GetSupportedSerialConfigs),
 
       NodeHamLib::InstanceMethod("close", & NodeHamLib::Close),
       NodeHamLib::InstanceMethod("destroy", & NodeHamLib::Destroy),
@@ -1599,5 +1608,252 @@ Napi::Value NodeHamLib::GetSupportedRigs(const Napi::CallbackInfo& info) {
   }
   
   return rigArray;
+}
+
+// Serial Port Configuration Methods
+
+// Set serial configuration parameter (data_bits, stop_bits, parity, handshake, etc.)
+Napi::Value NodeHamLib::SetSerialConfig(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  if (info.Length() < 2 || !info[0].IsString() || !info[1].IsString()) {
+    Napi::TypeError::New(env, "Expected parameter name and value as strings").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  std::string paramName = info[0].As<Napi::String>().Utf8Value();
+  std::string paramValue = info[1].As<Napi::String>().Utf8Value();
+  
+  // Get configuration token from parameter name
+  hamlib_token_t token = rig_token_lookup(my_rig, paramName.c_str());
+  if (token == RIG_CONF_END) {
+    Napi::Error::New(env, "Unknown configuration parameter").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  // Use rig_set_conf to set configuration parameter
+  int retcode = rig_set_conf(my_rig, token, paramValue.c_str());
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  return Napi::Number::New(env, retcode);
+}
+
+// Get serial configuration parameter
+Napi::Value NodeHamLib::GetSerialConfig(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  if (info.Length() < 1 || !info[0].IsString()) {
+    Napi::TypeError::New(env, "Expected parameter name as string").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  std::string paramName = info[0].As<Napi::String>().Utf8Value();
+  char value[256];
+  
+  // Get configuration token from parameter name
+  hamlib_token_t token = rig_token_lookup(my_rig, paramName.c_str());
+  if (token == RIG_CONF_END) {
+    Napi::Error::New(env, "Unknown configuration parameter").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  // Use rig_get_conf to get configuration parameter
+  int retcode = rig_get_conf(my_rig, token, value);
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  return Napi::String::New(env, value);
+}
+
+// Set PTT type
+Napi::Value NodeHamLib::SetPttType(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  if (info.Length() < 1 || !info[0].IsString()) {
+    Napi::TypeError::New(env, "Expected PTT type as string").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  std::string pttTypeStr = info[0].As<Napi::String>().Utf8Value();
+  
+  // Get configuration token for ptt_type
+  hamlib_token_t token = rig_token_lookup(my_rig, "ptt_type");
+  if (token == RIG_CONF_END) {
+    Napi::Error::New(env, "PTT type configuration not supported").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  // Set PTT type through configuration
+  int retcode = rig_set_conf(my_rig, token, pttTypeStr.c_str());
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  return Napi::Number::New(env, retcode);
+}
+
+// Get PTT type
+Napi::Value NodeHamLib::GetPttType(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  char value[256];
+  
+  // Get configuration token for ptt_type
+  hamlib_token_t token = rig_token_lookup(my_rig, "ptt_type");
+  if (token == RIG_CONF_END) {
+    Napi::Error::New(env, "PTT type configuration not supported").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  // Get PTT type through configuration
+  int retcode = rig_get_conf(my_rig, token, value);
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  return Napi::String::New(env, value);
+}
+
+// Set DCD type
+Napi::Value NodeHamLib::SetDcdType(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  if (info.Length() < 1 || !info[0].IsString()) {
+    Napi::TypeError::New(env, "Expected DCD type as string").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  std::string dcdTypeStr = info[0].As<Napi::String>().Utf8Value();
+  
+  // Get configuration token for dcd_type
+  hamlib_token_t token = rig_token_lookup(my_rig, "dcd_type");
+  if (token == RIG_CONF_END) {
+    Napi::Error::New(env, "DCD type configuration not supported").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  // Set DCD type through configuration
+  int retcode = rig_set_conf(my_rig, token, dcdTypeStr.c_str());
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  return Napi::Number::New(env, retcode);
+}
+
+// Get DCD type
+Napi::Value NodeHamLib::GetDcdType(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  char value[256];
+  
+  // Get configuration token for dcd_type
+  hamlib_token_t token = rig_token_lookup(my_rig, "dcd_type");
+  if (token == RIG_CONF_END) {
+    Napi::Error::New(env, "DCD type configuration not supported").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  // Get DCD type through configuration
+  int retcode = rig_get_conf(my_rig, token, value);
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  return Napi::String::New(env, value);
+}
+
+// Get supported serial configuration options
+Napi::Value NodeHamLib::GetSupportedSerialConfigs(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  // Return object with supported configuration parameters and their possible values
+  Napi::Object configs = Napi::Object::New(env);
+  
+  // Serial basic parameters
+  Napi::Object serialParams = Napi::Object::New(env);
+  
+  // Data bits options
+  Napi::Array dataBitsOptions = Napi::Array::New(env, 4);
+  dataBitsOptions[0u] = Napi::String::New(env, "5");
+  dataBitsOptions[1u] = Napi::String::New(env, "6");
+  dataBitsOptions[2u] = Napi::String::New(env, "7");
+  dataBitsOptions[3u] = Napi::String::New(env, "8");
+  serialParams.Set("data_bits", dataBitsOptions);
+  
+  // Stop bits options
+  Napi::Array stopBitsOptions = Napi::Array::New(env, 2);
+  stopBitsOptions[0u] = Napi::String::New(env, "1");
+  stopBitsOptions[1u] = Napi::String::New(env, "2");
+  serialParams.Set("stop_bits", stopBitsOptions);
+  
+  // Parity options
+  Napi::Array parityOptions = Napi::Array::New(env, 3);
+  parityOptions[0u] = Napi::String::New(env, "None");
+  parityOptions[1u] = Napi::String::New(env, "Even");
+  parityOptions[2u] = Napi::String::New(env, "Odd");
+  serialParams.Set("serial_parity", parityOptions);
+  
+  // Handshake options
+  Napi::Array handshakeOptions = Napi::Array::New(env, 3);
+  handshakeOptions[0u] = Napi::String::New(env, "None");
+  handshakeOptions[1u] = Napi::String::New(env, "Hardware");
+  handshakeOptions[2u] = Napi::String::New(env, "Software");
+  serialParams.Set("serial_handshake", handshakeOptions);
+  
+  // Control line state options
+  Napi::Array stateOptions = Napi::Array::New(env, 2);
+  stateOptions[0u] = Napi::String::New(env, "ON");
+  stateOptions[1u] = Napi::String::New(env, "OFF");
+  serialParams.Set("rts_state", stateOptions);
+  serialParams.Set("dtr_state", stateOptions);
+  
+  configs.Set("serial", serialParams);
+  
+  // PTT type options
+  Napi::Array pttTypeOptions = Napi::Array::New(env, 8);
+  pttTypeOptions[0u] = Napi::String::New(env, "RIG");
+  pttTypeOptions[1u] = Napi::String::New(env, "DTR");
+  pttTypeOptions[2u] = Napi::String::New(env, "RTS");
+  pttTypeOptions[3u] = Napi::String::New(env, "PARALLEL");
+  pttTypeOptions[4u] = Napi::String::New(env, "CM108");
+  pttTypeOptions[5u] = Napi::String::New(env, "GPIO");
+  pttTypeOptions[6u] = Napi::String::New(env, "GPION");
+  pttTypeOptions[7u] = Napi::String::New(env, "NONE");
+  configs.Set("ptt_type", pttTypeOptions);
+  
+  // DCD type options
+  Napi::Array dcdTypeOptions = Napi::Array::New(env, 9);
+  dcdTypeOptions[0u] = Napi::String::New(env, "RIG");
+  dcdTypeOptions[1u] = Napi::String::New(env, "DSR");
+  dcdTypeOptions[2u] = Napi::String::New(env, "CTS");
+  dcdTypeOptions[3u] = Napi::String::New(env, "CD");
+  dcdTypeOptions[4u] = Napi::String::New(env, "PARALLEL");
+  dcdTypeOptions[5u] = Napi::String::New(env, "CM108");
+  dcdTypeOptions[6u] = Napi::String::New(env, "GPIO");
+  dcdTypeOptions[7u] = Napi::String::New(env, "GPION");
+  dcdTypeOptions[8u] = Napi::String::New(env, "NONE");
+  configs.Set("dcd_type", dcdTypeOptions);
+  
+  return configs;
 }
 

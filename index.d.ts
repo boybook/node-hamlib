@@ -143,6 +143,47 @@ type VfoOperationType = 'CPY' | 'XCHG' | 'FROM_VFO' | 'TO_VFO' | 'MCL' | 'UP' |
                         'TUNE' | 'TOGGLE';
 
 /**
+ * Serial configuration parameter names
+ */
+type SerialConfigParam = 'data_bits' | 'stop_bits' | 'serial_parity' | 'serial_handshake' | 
+                        'rts_state' | 'dtr_state';
+
+/**
+ * PTT (Push-to-Talk) types
+ */
+type PttType = 'RIG' | 'DTR' | 'RTS' | 'PARALLEL' | 'CM108' | 'GPIO' | 'GPION' | 'NONE';
+
+/**
+ * DCD (Data Carrier Detect) types
+ */
+type DcdType = 'RIG' | 'DSR' | 'CTS' | 'CD' | 'PARALLEL' | 'CM108' | 'GPIO' | 'GPION' | 'NONE';
+
+/**
+ * Serial configuration options interface
+ */
+interface SerialConfigOptions {
+  /** Serial port basic parameters */
+  serial: {
+    /** Data bits options */
+    data_bits: string[];
+    /** Stop bits options */
+    stop_bits: string[];
+    /** Parity options */
+    serial_parity: string[];
+    /** Handshake options */
+    serial_handshake: string[];
+    /** RTS state options */
+    rts_state: string[];
+    /** DTR state options */
+    dtr_state: string[];
+  };
+  /** PTT type options */
+  ptt_type: string[];
+  /** DCD type options */
+  dcd_type: string[];
+}
+
+/**
  * HamLib class - for controlling amateur radio devices
  */
 declare class HamLib {
@@ -444,6 +485,89 @@ declare class HamLib {
    * @returns Current antenna number
    */
   getAntenna(): number;
+
+  // Serial Port Configuration
+
+  /**
+   * Set serial port configuration parameter
+   * @param paramName Parameter name ('data_bits', 'stop_bits', 'serial_parity', 'serial_handshake', 'rts_state', 'dtr_state')
+   * @param paramValue Parameter value
+   * @example
+   * // Set data bits to 8
+   * hamlib.setSerialConfig('data_bits', '8');
+   * 
+   * // Set parity to even
+   * hamlib.setSerialConfig('serial_parity', 'Even');
+   * 
+   * // Set handshake to hardware
+   * hamlib.setSerialConfig('serial_handshake', 'Hardware');
+   */
+  setSerialConfig(paramName: SerialConfigParam, paramValue: string): void;
+
+  /**
+   * Get serial port configuration parameter
+   * @param paramName Parameter name to retrieve
+   * @returns Parameter value
+   * @example
+   * // Get current data bits setting
+   * const dataBits = hamlib.getSerialConfig('data_bits');
+   * 
+   * // Get current parity setting
+   * const parity = hamlib.getSerialConfig('serial_parity');
+   */
+  getSerialConfig(paramName: SerialConfigParam): string;
+
+  /**
+   * Set PTT (Push-to-Talk) type
+   * @param pttType PTT type ('RIG', 'DTR', 'RTS', 'PARALLEL', 'CM108', 'GPIO', 'GPION', 'NONE')
+   * @example
+   * // Use DTR line for PTT
+   * hamlib.setPttType('DTR');
+   * 
+   * // Use RTS line for PTT
+   * hamlib.setPttType('RTS');
+   * 
+   * // Use CAT command for PTT
+   * hamlib.setPttType('RIG');
+   */
+  setPttType(pttType: PttType): void;
+
+  /**
+   * Get current PTT type
+   * @returns Current PTT type
+   */
+  getPttType(): string;
+
+  /**
+   * Set DCD (Data Carrier Detect) type
+   * @param dcdType DCD type ('RIG', 'DSR', 'CTS', 'CD', 'PARALLEL', 'CM108', 'GPIO', 'GPION', 'NONE')
+   * @example
+   * // Use DSR line for DCD
+   * hamlib.setDcdType('DSR');
+   * 
+   * // Use CTS line for DCD
+   * hamlib.setDcdType('CTS');
+   * 
+   * // Use CAT command for DCD
+   * hamlib.setDcdType('RIG');
+   */
+  setDcdType(dcdType: DcdType): void;
+
+  /**
+   * Get current DCD type
+   * @returns Current DCD type
+   */
+  getDcdType(): string;
+
+  /**
+   * Get supported serial configuration options
+   * @returns Object containing all supported configuration parameters and their possible values
+   * @example
+   * const configs = hamlib.getSupportedSerialConfigs();
+   * console.log('Supported data bits:', configs.serial.data_bits);
+   * console.log('Supported PTT types:', configs.ptt_type);
+   */
+  getSupportedSerialConfigs(): SerialConfigOptions;
 }
 
 /**
@@ -456,7 +580,7 @@ declare const nodeHamlib: {
 // Export types for use elsewhere
 export { ConnectionInfo, ModeInfo, SupportedRigInfo, VFO, RadioMode, MemoryChannelData, 
          MemoryChannelInfo, SplitModeInfo, SplitStatusInfo, LevelType, FunctionType, 
-         ScanType, VfoOperationType, HamLib };
+         ScanType, VfoOperationType, SerialConfigParam, PttType, DcdType, SerialConfigOptions, HamLib };
 
 // Support both CommonJS and ES module exports
 export = nodeHamlib;

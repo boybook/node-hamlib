@@ -66,6 +66,15 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
   Napi::Value SetAntenna(const Napi::CallbackInfo&);
   Napi::Value GetAntenna(const Napi::CallbackInfo&);
   
+  // Serial Port Configuration
+  Napi::Value SetSerialConfig(const Napi::CallbackInfo&);
+  Napi::Value GetSerialConfig(const Napi::CallbackInfo&);
+  Napi::Value SetPttType(const Napi::CallbackInfo&);
+  Napi::Value GetPttType(const Napi::CallbackInfo&);
+  Napi::Value SetDcdType(const Napi::CallbackInfo&);
+  Napi::Value GetDcdType(const Napi::CallbackInfo&);
+  Napi::Value GetSupportedSerialConfigs(const Napi::CallbackInfo&);
+  
   // Static method to get supported rig models
   static Napi::Value GetSupportedRigs(const Napi::CallbackInfo&);
   

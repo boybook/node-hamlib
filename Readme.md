@@ -284,6 +284,109 @@ rig.setAntenna(2);            // Select antenna 2
 const antenna = rig.getAntenna();
 ```
 
+### ⚙️ Serial Port Configuration
+
+#### `getSupportedSerialConfigs()`
+Get available serial configuration options
+```javascript
+const configs = rig.getSupportedSerialConfigs();
+console.log('Data bits:', configs.serial.data_bits);     // ['5', '6', '7', '8']
+console.log('Stop bits:', configs.serial.stop_bits);     // ['1', '2']
+console.log('Parity:', configs.serial.serial_parity);    // ['None', 'Even', 'Odd']
+console.log('Handshake:', configs.serial.serial_handshake); // ['None', 'Hardware', 'Software']
+console.log('PTT types:', configs.ptt_type);             // ['RIG', 'DTR', 'RTS', 'PARALLEL', ...]
+console.log('DCD types:', configs.dcd_type);             // ['RIG', 'DSR', 'CTS', 'CD', ...]
+```
+
+#### `setSerialConfig(param, value)` / `getSerialConfig(param)`
+Configure serial port parameters
+```javascript
+// Basic serial configuration (most common)
+rig.setSerialConfig('data_bits', '8');        // 8 data bits
+rig.setSerialConfig('stop_bits', '1');        // 1 stop bit
+rig.setSerialConfig('serial_parity', 'None'); // No parity
+rig.setSerialConfig('serial_handshake', 'None'); // No flow control
+
+// Hardware flow control (if supported)
+rig.setSerialConfig('serial_handshake', 'Hardware');
+
+// Control line states
+rig.setSerialConfig('rts_state', 'ON');       // Set RTS high
+rig.setSerialConfig('dtr_state', 'OFF');      // Set DTR low
+
+// Get current configuration
+const dataBits = rig.getSerialConfig('data_bits');
+const parity = rig.getSerialConfig('serial_parity');
+```
+
+#### `setPttType(type)` / `getPttType()`
+Configure PTT (Push-to-Talk) method
+```javascript
+// Use CAT command for PTT (recommended)
+rig.setPttType('RIG');
+
+// Use DTR line for PTT (legacy interfaces)
+rig.setPttType('DTR');
+
+// Use RTS line for PTT (alternative)
+rig.setPttType('RTS');
+
+// Disable PTT control
+rig.setPttType('NONE');
+
+// Get current PTT type
+const pttType = rig.getPttType();
+console.log('PTT method:', pttType);
+```
+
+#### `setDcdType(type)` / `getDcdType()`
+Configure DCD (Data Carrier Detect) method
+```javascript
+// Use CAT command for DCD (software squelch)
+rig.setDcdType('RIG');
+
+// Use DSR line for DCD (hardware squelch)
+rig.setDcdType('DSR');
+
+// Use CTS line for DCD (alternative)
+rig.setDcdType('CTS');
+
+// Get current DCD type
+const dcdType = rig.getDcdType();
+console.log('DCD method:', dcdType);
+```
+
+#### Common Serial Configurations
+
+**Yaesu Radios:**
+```javascript
+rig.setSerialConfig('data_bits', '8');
+rig.setSerialConfig('stop_bits', '1');
+rig.setSerialConfig('serial_parity', 'None');
+rig.setSerialConfig('serial_handshake', 'None');
+rig.setPttType('RIG');  // Use CAT command
+// Baud rate: 4800/9600 (set in constructor)
+```
+
+**Kenwood Radios:**
+```javascript
+rig.setSerialConfig('data_bits', '8');
+rig.setSerialConfig('stop_bits', '2');        // Note: 2 stop bits
+rig.setSerialConfig('serial_parity', 'None');
+rig.setSerialConfig('serial_handshake', 'None');
+rig.setPttType('RIG');
+// Baud rate: 9600
+```
+
+**Legacy Interface (DTR/RTS PTT):**
+```javascript
+rig.setSerialConfig('data_bits', '8');
+rig.setSerialConfig('stop_bits', '1');
+rig.setSerialConfig('serial_parity', 'None');
+rig.setPttType('DTR');                        // Use DTR for PTT
+rig.setDcdType('DSR');                        // Use DSR for squelch
+```
+
 ## 🎯 Complete Example
 
 ```javascript
