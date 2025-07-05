@@ -1,9 +1,16 @@
-# Build outputs
-build/
-*.node
+# Development files
+.github/
+test/
+.gitignore
+.npmignore
+*.md
+!README.md
 
-# Dependencies
-node_modules/
+# Build tools (keep source and scripts for fallback compilation)
+# node_modules/
+# *.gyp
+# src/
+# scripts/
 
 # Logs
 *.log
@@ -27,14 +34,6 @@ yarn-error.log*
 ehthumbs.db
 Thumbs.db
 
-# npm
-npm-debug.log
-.npm
-
-# nyc test coverage
-.nyc_output/
-coverage/
-
 # Temporary files
 .tmp/
 temp/
@@ -46,5 +45,6 @@ temp/
 .env.test.local
 .env.production.local
 
-build.sh
-Dockerfile
+# Coverage
+.nyc_output/
+coverage/ 

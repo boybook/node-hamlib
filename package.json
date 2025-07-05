@@ -1,20 +1,68 @@
 {
   "name": "node-hamlib",
-  "version": "0.0.8",
-  "gypfile": true,
-  "main": "./build/Release/hamlib",
-  "license": "LGPL",
-  "repository": "https://github.com/dthompso99/node-hamlib",
-  "scripts":{
-    "install": "node-gyp configure && node-gyp build",
-    "prepare": "npm run install"
+  "version": "0.1.0",
+  "description": "Node.js wrapper for hamlib radio control library",
+  "main": "index.js",
+  "module": "lib/index.mjs",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./lib/index.mjs",
+      "require": "./index.js",
+      "types": "./index.d.ts"
+    }
   },
-  "dependencies": {
-    "node-addon-api": "^4.3.0"
+  "gypfile": true,
+  "license": "LGPL",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/boybook/node-hamlib.git"
   },
   "keywords": [
     "ham",
     "radio",
-    "hamlib"
+    "hamlib",
+    "amateur-radio",
+    "transceiver",
+    "rig-control"
+  ],
+  "files": [
+    "lib/",
+    "prebuilds/",
+    "src/",
+    "index.js",
+    "index.d.ts",
+    "binding.gyp",
+    "COPYING",
+    "Readme.md"
+  ],
+  "scripts": {
+    "build": "node-gyp configure && node-gyp build",
+    "rebuild": "node-gyp rebuild",
+    "clean": "node-gyp clean",
+    "test": "node test/mod.js",
+    "test:network": "node test/test_network.js",
+    "install": "node scripts/install.js",
+    "postinstall": "node scripts/install.js",
+    "prepare": "npm run build",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "node-addon-api": "^4.3.0"
+  },
+  "devDependencies": {
+    "node-gyp": "^9.4.0"
+  },
+  "engines": {
+    "node": ">=12.0.0"
+  },
+  "os": [
+    "linux",
+    "darwin",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
   ]
 }

@@ -1,4 +1,5 @@
 #include "hamlib.h"
+#include <string>
 
 
 
@@ -15,13 +16,27 @@ NodeHamLib::NodeHamLib(const Napi::CallbackInfo & info): ObjectWrap(info) {
     return;
   }
 
-  if (info.Length() < 2) {
-    rig_set_debug_level(RIG_DEBUG_NONE);
-  }
-
   if (!info[0].IsNumber()) {
     Napi::TypeError::New(env, "Invalid Rig number").ThrowAsJavaScriptException();
     return;
+  }
+
+  // Set default port path if not provided
+  strncpy(port_path, "/dev/ttyUSB0", HAMLIB_FILPATHLEN - 1);
+  port_path[HAMLIB_FILPATHLEN - 1] = '\0';
+
+  // Check if port path is provided as second argument
+  if (info.Length() >= 2) {
+    if (info[1].IsString()) {
+      std::string portStr = info[1].As<Napi::String>().Utf8Value();
+      strncpy(port_path, portStr.c_str(), HAMLIB_FILPATHLEN - 1);
+      port_path[HAMLIB_FILPATHLEN - 1] = '\0';
+    } else {
+      // If second argument exists but is not a string, treat it as debug level (backward compatibility)
+      rig_set_debug_level(RIG_DEBUG_NONE);
+    }
+  } else {
+    rig_set_debug_level(RIG_DEBUG_NONE);
   }
   //rig_model_t myrig_model;
   //   hamlib_port_t myport;
@@ -39,6 +54,16 @@ NodeHamLib::NodeHamLib(const Napi::CallbackInfo & info): ObjectWrap(info) {
   // fprintf(stderr, "Got Rig Model %d \n", myrig_model);
 
   rig_model_t myrig_model = info[0].As < Napi::Number > ().DoubleValue();
+  original_model = myrig_model;
+
+  // Check if port_path is a network address (contains colon)
+  is_network_rig = isNetworkAddress(port_path);
+  
+  if (is_network_rig) {
+    // Use NETRIGCTL model for network connections
+    myrig_model = 2; // RIG_MODEL_NETRIGCTL
+    printf("Using network connection to %s\n", port_path);
+  }
 
   my_rig = rig_init(myrig_model);
   //int retcode = 0;
@@ -47,7 +72,15 @@ NodeHamLib::NodeHamLib(const Napi::CallbackInfo & info): ObjectWrap(info) {
     fprintf(stderr, "Please check riglist.h\n");
     Napi::TypeError::New(env, "Unable to Init Rig").ThrowAsJavaScriptException();
   }
-  strncpy(my_rig -> state.rigport.pathname, "/dev/ttyUSB0", FILPATHLEN - 1);
+  
+  // Set port path and type based on connection type
+  strncpy(my_rig -> state.rigport.pathname, port_path, HAMLIB_FILPATHLEN - 1);
+  
+  if (is_network_rig) {
+    my_rig -> state.rigport.type.rig = RIG_PORT_NETWORK;
+  } else {
+    my_rig -> state.rigport.type.rig = RIG_PORT_SERIAL;
+  }
 
   // this->freq_emit_cb = [info](freq_t freq) {
   //     Napi::Env env = info.Env();
@@ -144,7 +177,7 @@ Napi::Value NodeHamLib::SetFrequency(const Napi::CallbackInfo & info) {
     return env.Null();
   }
   if (info.Length() < 1) {
-    Napi::TypeError::New(env, "Must Specify VFO-A or VFO-B")
+    Napi::TypeError::New(env, "Must specify frequency")
       .ThrowAsJavaScriptException();
     return env.Null();
   }
@@ -155,7 +188,19 @@ Napi::Value NodeHamLib::SetFrequency(const Napi::CallbackInfo & info) {
     return env.Null();
   }
   auto freq = info[0].As < Napi::Number > ().Int32Value();
-  retcode = rig_set_freq(my_rig, RIG_VFO_CURR, freq);
+  
+  // Support optional VFO parameter
+  vfo_t vfo = RIG_VFO_CURR;
+  if (info.Length() >= 2 && info[1].IsString()) {
+    auto vfostr = info[1].As < Napi::String > ().Utf8Value().c_str();
+    if (strcmp(vfostr, "VFO-A") == 0) {
+      vfo = RIG_VFO_A;
+    } else if (strcmp(vfostr, "VFO-B") == 0) {
+      vfo = RIG_VFO_B;
+    }
+  }
+  
+  retcode = rig_set_freq(my_rig, vfo, freq);
   return Napi::Number::New(env, retcode);
 }
 
@@ -270,12 +315,24 @@ Napi::Value NodeHamLib::GetFrequency(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   int retcode;
   freq_t freq;
-  retcode = rig_get_freq(my_rig, RIG_VFO_CURR, & freq);
   if (!rig_is_open) {
     Napi::TypeError::New(env, "Rig is not open!")
       .ThrowAsJavaScriptException();
     return env.Null();
   }
+  
+  // Support optional VFO parameter
+  vfo_t vfo = RIG_VFO_CURR;
+  if (info.Length() >= 1 && info[0].IsString()) {
+    auto vfostr = info[0].As < Napi::String > ().Utf8Value().c_str();
+    if (strcmp(vfostr, "VFO-A") == 0) {
+      vfo = RIG_VFO_A;
+    } else if (strcmp(vfostr, "VFO-B") == 0) {
+      vfo = RIG_VFO_B;
+    }
+  }
+  
+  retcode = rig_get_freq(my_rig, vfo, & freq);
   if (retcode == RIG_OK) {
     return Napi::Number::New(env, freq);
   } else {
@@ -355,6 +412,24 @@ Napi::Value NodeHamLib::Destroy(const Napi::CallbackInfo & info) {
   return Napi::Number::New(env, retcode);
 }
 
+Napi::Value NodeHamLib::GetConnectionInfo(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  Napi::Object obj = Napi::Object::New(env);
+  obj.Set(Napi::String::New(env, "connectionType"), 
+          Napi::String::New(env, is_network_rig ? "network" : "serial"));
+  obj.Set(Napi::String::New(env, "portPath"), 
+          Napi::String::New(env, port_path));
+  obj.Set(Napi::String::New(env, "isOpen"), 
+          Napi::Boolean::New(env, rig_is_open));
+  obj.Set(Napi::String::New(env, "originalModel"), 
+          Napi::Number::New(env, original_model));
+  obj.Set(Napi::String::New(env, "currentModel"), 
+          Napi::Number::New(env, is_network_rig ? 2 : original_model));
+  
+  return obj;
+}
+
 Napi::Function NodeHamLib::GetClass(Napi::Env env) {
   auto ret =  DefineClass(
     env,
@@ -374,9 +449,28 @@ Napi::Function NodeHamLib::GetClass(Napi::Env env) {
 
       NodeHamLib::InstanceMethod("close", & NodeHamLib::Close),
       NodeHamLib::InstanceMethod("destroy", & NodeHamLib::Destroy),
+      NodeHamLib::InstanceMethod("getConnectionInfo", & NodeHamLib::GetConnectionInfo),
     });
       constructor = Napi::Persistent(ret);
       constructor.SuppressDestruct();
       return ret;
+}
+
+// Helper method to detect network address format (contains colon)
+bool NodeHamLib::isNetworkAddress(const char* path) {
+  if (path == nullptr) {
+    return false;
+  }
+  
+  // Check for IPv4 or hostname with port (e.g., "localhost:4532", "192.168.1.1:4532")
+  const char* colon = strchr(path, ':');
+  if (colon != nullptr) {
+    // Make sure there's something after the colon (port number)
+    if (strlen(colon + 1) > 0) {
+      return true;
+    }
+  }
+  
+  return false;
 }
 

@@ -23,6 +23,7 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
 
   Napi::Value Close(const Napi::CallbackInfo&);
   Napi::Value Destroy(const Napi::CallbackInfo&);
+  Napi::Value GetConnectionInfo(const Napi::CallbackInfo&);
   static Napi::Function GetClass(Napi::Env);
 
   static int freq_change_cb(RIG*, vfo_t, freq_t, void*);
@@ -30,8 +31,14 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
  private:
   RIG *my_rig;
   bool rig_is_open = false;
+  bool is_network_rig = false;     // Flag to indicate if using network connection
+  rig_model_t original_model = 0;  // Store original model when using network
   int count = 0;
   void* freq_emit_cb;
+  char port_path[HAMLIB_FILPATHLEN];  // Store the port path
   static Napi::FunctionReference constructor;
   Napi::CallbackInfo * m_currentInfo;
+  
+  // Helper method to detect network address format
+  bool isNetworkAddress(const char* path);
 };

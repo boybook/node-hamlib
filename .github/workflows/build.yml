@@ -1,0 +1,130 @@
+name: Build Precompiled Binaries
+
+on:
+  push:
+    branches: [ main, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x64
+            target: linux-x64
+            hamlib_install: |
+              sudo apt-get update
+              sudo apt-get install -y libhamlib-dev libhamlib-utils
+          - os: ubuntu-24.04-arm
+            arch: arm64
+            target: linux-arm64
+            hamlib_install: |
+              sudo apt-get update
+              sudo apt-get install -y libhamlib-dev libhamlib-utils
+          - os: windows-latest
+            arch: x64
+            target: win32-x64
+            hamlib_install: |
+              # Use vcpkg to install hamlib on Windows
+              vcpkg install hamlib:x64-windows
+          - os: macos-latest
+            arch: arm64
+            target: darwin-arm64
+            hamlib_install: |
+              brew install hamlib
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Install Hamlib
+      run: ${{ matrix.hamlib_install }}
+
+    - name: Setup MSVC (Windows)
+      if: matrix.os == 'windows-latest'
+      uses: ilammy/msvc-dev-cmd@v1
+
+    - name: Set vcpkg environment (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
+        echo "CMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT\\scripts\\buildsystems\\vcpkg.cmake" >> $env:GITHUB_ENV
+
+    - name: Build native module
+      run: |
+        npx node-gyp configure --target_arch=${{ matrix.arch }}
+        npx node-gyp build --target_arch=${{ matrix.arch }}
+
+    - name: Create binary directory
+      run: mkdir -p prebuilds/${{ matrix.target }}
+
+    - name: Copy binary (Linux/macOS)
+      if: matrix.os != 'windows-latest'
+      run: |
+        cp build/Release/hamlib.node prebuilds/${{ matrix.target }}/hamlib.node
+        strip prebuilds/${{ matrix.target }}/hamlib.node || true
+
+    - name: Copy binary (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        copy build\Release\hamlib.node prebuilds\${{ matrix.target }}\hamlib.node
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: prebuilds-${{ matrix.target }}
+        path: prebuilds/${{ matrix.target }}/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        registry-url: 'https://registry.npmjs.org'
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: prebuilds/
+
+    - name: Reorganize artifacts
+      run: |
+        mkdir -p prebuilds
+        for dir in prebuilds/prebuilds-*; do
+          if [ -d "$dir" ]; then
+            target=$(basename "$dir" | sed 's/prebuilds-//')
+            mkdir -p "prebuilds/$target"
+            cp -r "$dir"/* "prebuilds/$target/"
+          fi
+        done
+        rm -rf prebuilds/prebuilds-*
+
+    - name: List prebuilds
+      run: find prebuilds -type f -name "*.node"
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Publish to npm
+      run: npm publish
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }} 
