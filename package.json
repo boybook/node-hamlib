@@ -1,6 +1,6 @@
 {
-  "name": "node-hamlib",
-  "version": "0.1.0",
+  "name": "hamlib",
+  "version": "0.1.2",
   "description": "Node.js wrapper for hamlib radio control library",
   "main": "index.js",
   "module": "lib/index.mjs",
@@ -40,7 +40,7 @@
     "build": "node-gyp configure && node-gyp build",
     "rebuild": "node-gyp rebuild",
     "clean": "node-gyp clean",
-    "test": "node test/mod.js",
+    "test": "node test/test_loader.js",
     "test:network": "node test/test_network.js",
     "install": "node scripts/install.js",
     "postinstall": "node scripts/install.js",
