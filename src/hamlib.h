@@ -25,6 +25,47 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
   Napi::Value Destroy(const Napi::CallbackInfo&);
   Napi::Value GetConnectionInfo(const Napi::CallbackInfo&);
   
+  // Memory Channel Management
+  Napi::Value SetMemoryChannel(const Napi::CallbackInfo&);
+  Napi::Value GetMemoryChannel(const Napi::CallbackInfo&);
+  Napi::Value SelectMemoryChannel(const Napi::CallbackInfo&);
+  
+  // RIT/XIT Control
+  Napi::Value SetRit(const Napi::CallbackInfo&);
+  Napi::Value GetRit(const Napi::CallbackInfo&);
+  Napi::Value SetXit(const Napi::CallbackInfo&);
+  Napi::Value GetXit(const Napi::CallbackInfo&);
+  Napi::Value ClearRitXit(const Napi::CallbackInfo&);
+  
+  // Scanning Operations
+  Napi::Value StartScan(const Napi::CallbackInfo&);
+  Napi::Value StopScan(const Napi::CallbackInfo&);
+  
+  // Level Controls
+  Napi::Value SetLevel(const Napi::CallbackInfo&);
+  Napi::Value GetLevel(const Napi::CallbackInfo&);
+  Napi::Value GetSupportedLevels(const Napi::CallbackInfo&);
+  
+  // Function Controls
+  Napi::Value SetFunction(const Napi::CallbackInfo&);
+  Napi::Value GetFunction(const Napi::CallbackInfo&);
+  Napi::Value GetSupportedFunctions(const Napi::CallbackInfo&);
+  
+  // Split Operations
+  Napi::Value SetSplitFreq(const Napi::CallbackInfo&);
+  Napi::Value GetSplitFreq(const Napi::CallbackInfo&);
+  Napi::Value SetSplitMode(const Napi::CallbackInfo&);
+  Napi::Value GetSplitMode(const Napi::CallbackInfo&);
+  Napi::Value SetSplit(const Napi::CallbackInfo&);
+  Napi::Value GetSplit(const Napi::CallbackInfo&);
+  
+  // VFO Operations
+  Napi::Value VfoOperation(const Napi::CallbackInfo&);
+  
+  // Antenna Selection
+  Napi::Value SetAntenna(const Napi::CallbackInfo&);
+  Napi::Value GetAntenna(const Napi::CallbackInfo&);
+  
   // Static method to get supported rig models
   static Napi::Value GetSupportedRigs(const Napi::CallbackInfo&);
   

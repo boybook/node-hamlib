@@ -1,103 +1,406 @@
 # node-hamlib
 
-A Node.js wrapper for [Hamlib](https://hamlib.github.io/) - control amateur radio transceivers from JavaScript/TypeScript.
+A comprehensive Node.js wrapper for [Hamlib](https://hamlib.github.io/) - control amateur radio transceivers from JavaScript/TypeScript.
 
 ## 🚀 Features
 
-- **Pre-built binaries**: No compilation needed for most platforms
-- **Multi-platform support**: Windows x64, Linux x64/ARM64, macOS ARM64
-- **CommonJS & ES Modules**: Works with both `require()` and `import`
-- **TypeScript support**: Full type definitions included
-- **Serial & Network**: Direct serial connection or network via rigctld
-- **Comprehensive API**: All essential radio control functions
+- **Built-in Methods**: Complete radio control API including memory channels, RIT/XIT, scanning, levels, functions, and more
+- **303+ Supported Radios**: Works with Yaesu, Icom, Kenwood, Elecraft, FlexRadio, and many more
+- **Multi-platform**: Pre-built binaries for Windows x64, Linux x64/ARM64, macOS ARM64
+- **Connection Types**: Serial ports, network (rigctld), and direct control
+- **TypeScript Support**: Full type definitions and IntelliSense
+- **Modern JavaScript**: CommonJS and ES Modules support
 
-## 📦 Installation
+## 📦 Quick Start
 
 ```bash
 npm install node-hamlib
 ```
 
-The package will automatically:
-1. Try to use pre-built binaries for your platform
-2. Fall back to compiling from source if needed
-3. Provide helpful error messages for missing dependencies
-
-## 🔧 System Requirements
-
-### For Pre-built Binaries
-- Node.js 12.0.0 or higher
-- Supported platforms: Windows x64, Linux x64/ARM64, macOS ARM64
-
-### For Source Compilation
-- All of the above, plus:
-- **Linux**: `libhamlib-dev` package
-- **macOS**: `hamlib` via Homebrew
-- **Windows**: hamlib via vcpkg or manual installation
-- **Build tools**: `node-gyp` and platform-specific compilers
-
-### Install System Dependencies
-
-```bash
-# Ubuntu/Debian
-sudo apt-get install libhamlib-dev libhamlib-utils
-
-# macOS
-brew install hamlib
-
-# Windows (using vcpkg)
-vcpkg install hamlib:x64-windows
-```
-
-## 📋 Usage
-
-### CommonJS (Node.js)
 ```javascript
 const { HamLib } = require('node-hamlib');
 
-// Create instance with radio model and port
-const rig = new HamLib(1035, '/dev/ttyUSB0');
+// Find your radio model
+const rigs = HamLib.getSupportedRigs();
+console.log('Supported radios:', rigs.length);
 
-// Open connection
+// Connect to radio
+const rig = new HamLib(1035, '/dev/ttyUSB0'); // FT-991A
 rig.open();
 
-// Control your radio
+// Basic control
 rig.setFrequency(144390000); // 144.39 MHz
 rig.setMode('FM');
 rig.setPtt(true);
 
-// Get radio status
-console.log('Current frequency:', rig.getFrequency());
-console.log('Current mode:', rig.getMode());
-console.log('Signal strength:', rig.getStrength());
+// Get status
+console.log('Frequency:', rig.getFrequency());
+console.log('Mode:', rig.getMode());
+console.log('Signal:', rig.getStrength());
 
-// Close connection
 rig.close();
 ```
 
-### ES Modules (ESM)
+## 📡 Complete API Reference
+
+### 🔍 Radio Discovery
+
+#### `HamLib.getSupportedRigs()`
+Get all supported radio models
 ```javascript
-import { HamLib } from 'node-hamlib';
+const rigs = HamLib.getSupportedRigs();
+console.log(`Found ${rigs.length} supported radios`);
 
-const rig = new HamLib(1035, '/dev/ttyUSB0');
-// ... same API as above
+// Find your radio
+const yaesu = rigs.filter(r => r.mfgName === 'Yaesu');
+const ft991a = rigs.find(r => r.modelName === 'FT-991A');
+console.log('FT-991A Model ID:', ft991a.rigModel);
 ```
 
-### TypeScript
-```typescript
-import { HamLib, ConnectionInfo, ModeInfo } from 'node-hamlib';
+### 🔌 Connection Management
 
-const rig = new HamLib(1035, '/dev/ttyUSB0');
-rig.open();
+#### `new HamLib(model, port)`
+Create radio instance
+```javascript
+// Serial connection
+const rig = new HamLib(1035, '/dev/ttyUSB0');        // Linux
+const rig = new HamLib(1035, '/dev/cu.usbserial-1420'); // macOS  
+const rig = new HamLib(1035, 'COM3');                // Windows
 
-const info: ConnectionInfo = rig.getConnectionInfo();
-const mode: ModeInfo = rig.getMode();
+// Network connection
+const rig = new HamLib(1035, 'localhost:4532');      // rigctld
 ```
 
-## 🔌 Connection Types
+#### `open()` / `close()` / `destroy()`
+Connection control
+```javascript
+rig.open();              // Open connection
+rig.close();             // Close (can reopen)
+rig.destroy();           // Destroy permanently
+```
+
+#### `getConnectionInfo()`
+Get connection details
+```javascript
+const info = rig.getConnectionInfo();
+console.log('Connection type:', info.connectionType);
+console.log('Port:', info.port);
+console.log('Status:', info.status);
+```
+
+### 📻 Basic Radio Control
+
+#### Frequency Control
+```javascript
+// Set frequency (Hz)
+rig.setFrequency(144390000);
+rig.setFrequency(144390000, 'VFO-A');
+
+// Get frequency
+const freq = rig.getFrequency();
+const freqA = rig.getFrequency('VFO-A');
+```
+
+#### Mode Control
+```javascript
+// Set mode
+rig.setMode('FM');
+rig.setMode('USB', 'wide');
+
+// Get mode
+const mode = rig.getMode();
+console.log('Mode:', mode.mode);
+console.log('Bandwidth:', mode.bandwidth);
+```
+
+#### VFO Control
+```javascript
+// Set VFO
+rig.setVfo('VFO-A');
+rig.setVfo('VFO-B');
+
+// Get current VFO
+const vfo = rig.getVfo();
+```
+
+#### PTT Control
+```javascript
+rig.setPtt(true);   // Transmit
+rig.setPtt(false);  // Receive
+```
+
+#### Signal Monitoring
+```javascript
+const strength = rig.getStrength();
+console.log('Signal strength:', strength);
+```
+
+### 💾 Memory Channel Management
+
+#### `setMemoryChannel(channel, data)`
+Store memory channel
+```javascript
+rig.setMemoryChannel(1, {
+  frequency: 144390000,
+  mode: 'FM',
+  description: 'Local Repeater'
+});
+```
+
+#### `getMemoryChannel(channel, readOnly)`
+Retrieve memory channel
+```javascript
+const channel = rig.getMemoryChannel(1);
+console.log('Channel 1:', channel);
+```
+
+#### `selectMemoryChannel(channel)`
+Select memory channel
+```javascript
+rig.selectMemoryChannel(1);
+```
+
+### 🎛️ RIT/XIT Control
+
+#### RIT (Receiver Incremental Tuning)
+```javascript
+rig.setRit(100);        // +100 Hz offset
+const rit = rig.getRit();
+```
+
+#### XIT (Transmitter Incremental Tuning)
+```javascript
+rig.setXit(-50);        // -50 Hz offset
+const xit = rig.getXit();
+```
+
+#### Clear RIT/XIT
+```javascript
+rig.clearRitXit();      // Clear both offsets
+```
+
+### 🔍 Scanning Operations
+
+#### `startScan(type, channel)`
+Start scanning
+```javascript
+rig.startScan('VFO');     // VFO scan
+rig.startScan('MEM');     // Memory scan
+rig.startScan('PROG');    // Program scan
+```
+
+#### `stopScan()`
+Stop scanning
+```javascript
+rig.stopScan();
+```
+
+### 🎚️ Level Controls
+
+#### `getSupportedLevels()`
+Get available level controls
+```javascript
+const levels = rig.getSupportedLevels();
+console.log('Available levels:', levels);
+// ['AF', 'RF', 'SQL', 'RFPOWER', 'MICGAIN', ...]
+```
+
+#### `setLevel(type, value)` / `getLevel(type)`
+Control audio and RF levels
+```javascript
+rig.setLevel('AF', 0.7);          // Audio gain 70%
+rig.setLevel('RF', 0.5);          // RF gain 50%
+rig.setLevel('SQL', 0.3);         // Squelch 30%
+rig.setLevel('RFPOWER', 0.5);     // TX power 50%
+rig.setLevel('MICGAIN', 0.8);     // Mic gain 80%
+
+// Get levels
+const audioGain = rig.getLevel('AF');
+const rfGain = rig.getLevel('RF');
+```
+
+### 🔧 Function Controls
+
+#### `getSupportedFunctions()`
+Get available function controls
+```javascript
+const functions = rig.getSupportedFunctions();
+console.log('Available functions:', functions);
+// ['NB', 'COMP', 'VOX', 'TONE', 'TSQL', 'TUNER', ...]
+```
+
+#### `setFunction(type, enable)` / `getFunction(type)`
+Control radio functions
+```javascript
+rig.setFunction('NB', true);      // Enable noise blanker
+rig.setFunction('COMP', true);    // Enable compressor
+rig.setFunction('VOX', true);     // Enable VOX
+rig.setFunction('TUNER', true);   // Enable auto tuner
+
+// Get function status
+const nbEnabled = rig.getFunction('NB');
+const compEnabled = rig.getFunction('COMP');
+```
+
+### 📡 Split Operations
+
+#### Split Frequency
+```javascript
+rig.setSplitFreq(144340000);      // TX frequency
+const txFreq = rig.getSplitFreq();
+```
+
+#### Split Mode
+```javascript
+rig.setSplitMode('FM', 'wide');   // TX mode
+const txMode = rig.getSplitMode();
+```
+
+#### Split Control
+```javascript
+rig.setSplit(true, 'VFO-B');      // Enable split
+const splitStatus = rig.getSplit();
+```
+
+### 📻 VFO Operations
+
+#### `vfoOperation(operation)`
+VFO operations
+```javascript
+rig.vfoOperation('CPY');      // Copy VFO A to B
+rig.vfoOperation('XCHG');     // Exchange VFO A and B
+rig.vfoOperation('UP');       // Frequency up
+rig.vfoOperation('DOWN');     // Frequency down
+rig.vfoOperation('TOGGLE');   // Toggle VFO A/B
+```
+
+### 📶 Antenna Selection
+
+#### `setAntenna(antenna)` / `getAntenna()`
+Antenna control
+```javascript
+rig.setAntenna(1);            // Select antenna 1
+rig.setAntenna(2);            // Select antenna 2
+const antenna = rig.getAntenna();
+```
+
+## 🎯 Complete Example
+
+```javascript
+const { HamLib } = require('node-hamlib');
+
+async function radioControl() {
+  // Find radios
+  const rigs = HamLib.getSupportedRigs();
+  const ft991a = rigs.find(r => r.modelName === 'FT-991A');
+  
+  if (!ft991a) {
+    console.log('FT-991A not found');
+    return;
+  }
+  
+  // Connect
+  const rig = new HamLib(ft991a.rigModel, '/dev/ttyUSB0');
+  
+  try {
+    rig.open();
+    console.log('Connected to', rig.getConnectionInfo().port);
+    
+    // Set up radio
+    rig.setFrequency(144390000);
+    rig.setMode('FM');
+    rig.setLevel('RFPOWER', 0.5);
+    rig.setFunction('NB', true);
+    
+    // Store memory channel
+    rig.setMemoryChannel(1, {
+      frequency: 144390000,
+      mode: 'FM',
+      description: 'Local Repeater'
+    });
+    
+    // Monitor signal
+    setInterval(() => {
+      const freq = rig.getFrequency();
+      const mode = rig.getMode();
+      const strength = rig.getStrength();
+      
+      console.log(`${freq/1000000} MHz ${mode.mode} S:${strength}`);
+    }, 1000);
+    
+  } catch (error) {
+    console.error('Error:', error.message);
+  } finally {
+    rig.close();
+  }
+}
+
+radioControl();
+```
+
+## 📋 Supported Radios
+
+This library supports **303+ radio models** from major manufacturers:
+
+| Manufacturer | Models | Popular Radios |
+|--------------|--------|----------------|
+| **Yaesu** | 46 | FT-991A, FT-891, FT-857D, FT-817ND |
+| **Icom** | 83 | IC-7300, IC-9700, IC-705, IC-7610 |
+| **Kenwood** | 35 | TS-2000, TS-590SG, TS-890S, TH-D74 |
+| **Elecraft** | 7 | K3, K4, KX3, KX2 |
+| **FlexRadio** | 10 | 6300, 6400, 6500, 6600, 6700 |
+| **Others** | 122 | AOR, JRC, Ten-Tec, Winradio, etc. |
+
+### Finding Your Radio
+```javascript
+const rigs = HamLib.getSupportedRigs();
+
+// Search by manufacturer
+const yaesu = rigs.filter(r => r.mfgName === 'Yaesu');
+
+// Search by model name
+const ft991a = rigs.find(r => r.modelName.includes('FT-991A'));
+
+// List all radios
+rigs.forEach(rig => {
+  console.log(`${rig.rigModel}: ${rig.mfgName} ${rig.modelName}`);
+});
+```
+
+## 🛠️ Installation & Setup
+
+### System Requirements
+- Node.js 12.0.0 or higher
+- Supported platforms: Windows x64, Linux x64/ARM64, macOS ARM64
+
+### Install Dependencies (if building from source)
+```bash
+# Ubuntu/Debian
+sudo apt-get install libhamlib-dev
+
+# macOS
+brew install hamlib
+
+# Windows
+vcpkg install hamlib:x64-windows
+```
+
+### Building from Source
+```bash
+npm install
+npm run build
+```
+
+### Testing
+```bash
+npm test
+```
+
+## 🔧 Connection Types
 
 ### Serial Connection
 ```javascript
-// Linux/Raspberry Pi
+// Linux
 const rig = new HamLib(1035, '/dev/ttyUSB0');
 
 // macOS
@@ -109,145 +412,46 @@ const rig = new HamLib(1035, 'COM3');
 
 ### Network Connection (rigctld)
 ```javascript
-// Connect to rigctld daemon
 const rig = new HamLib(1035, 'localhost:4532');
-const rig = new HamLib(1035, '192.168.1.100:4532');
 ```
 
-Start rigctld daemon:
+Start rigctld:
 ```bash
-# Basic usage
-rigctld -m 1035 -r /dev/ttyUSB0
-
-# With custom port
-rigctld -m 1035 -r /dev/ttyUSB0 -t 5001
-
-# With remote access
-rigctld -m 1035 -r /dev/ttyUSB0 -T 0.0.0.0
+rigctld -m 1035 -r /dev/ttyUSB0 -t 4532
 ```
-
-## 🎛️ API Reference
-
-### Constructor
-- `new HamLib(model, port?)`: Create a new instance
-  - `model`: Radio model number (find yours with `rigctl -l`)
-  - `port`: Optional serial port or network address
-
-### Connection Methods
-- `open()`: Open connection to radio
-- `close()`: Close connection (can reopen)
-- `destroy()`: Destroy connection permanently
-
-### Control Methods
-- `setVfo(vfo)`: Set VFO ('VFO-A' or 'VFO-B')
-- `setFrequency(freq, vfo?)`: Set frequency in Hz
-- `setMode(mode, bandwidth?)`: Set mode ('USB', 'LSB', 'FM', etc.)
-- `setPtt(state)`: Set PTT on/off
-
-### Query Methods
-- `getVfo()`: Get current VFO
-- `getFrequency(vfo?)`: Get frequency in Hz
-- `getMode()`: Get current mode and bandwidth
-- `getStrength()`: Get signal strength
-- `getConnectionInfo()`: Get connection details
-
-## 🏗️ Development
-
-### Building from Source
-```bash
-# Install dependencies
-npm install
-
-# Build native module
-npm run build
-
-# Run tests
-npm test
-```
-
-### Testing the Module
-```bash
-# Test module loading
-node test/test_loader.js
-
-# Test basic functionality
-node test/mod.js
-
-# Test network connection
-node test/test_network.js
-```
-
-## 📂 Project Structure
-
-```
-node-hamlib/
-├── lib/                    # JavaScript wrapper code
-│   ├── index.js           # Main CommonJS entry
-│   ├── index.mjs          # ES Module entry
-│   └── binary-loader.js   # Binary loading logic
-├── src/                   # C++ source code
-├── prebuilds/             # Pre-built binaries
-├── scripts/               # Build and install scripts
-├── test/                  # Test files
-├── index.js               # Package entry point
-├── index.d.ts             # TypeScript definitions
-└── binding.gyp            # Build configuration
-```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-## 📋 Supported Platforms
-
-| Platform | Architecture | Status |
-|----------|-------------|---------|
-| Linux    | x64         | ✅ Pre-built (native) |
-| Linux    | ARM64       | ✅ Pre-built (native) |
-| macOS    | ARM64       | ✅ Pre-built (native) |
-| Windows  | x64         | ✅ Pre-built (native) |
 
 ## 🐛 Troubleshooting
 
-### Binary Loading Issues
-If you see "Failed to load hamlib native module":
-
-1. **Check platform support**: Ensure your platform is supported
-2. **Install system dependencies**: Follow the installation guide above
-3. **Try building from source**: `npm run build`
-4. **Check permissions**: Ensure you have access to the serial port
-
-### Serial Port Issues
+### Permission Issues (Linux)
 ```bash
-# Linux: Add user to dialout group
 sudo usermod -a -G dialout $USER
+# Log out and back in
+```
 
-# Check available ports
+### Finding Serial Ports
+```bash
+# Linux
 ls /dev/tty*
 
+# macOS
+ls /dev/cu.*
+
+# Windows
+# Use Device Manager
+```
+
+### Testing Connection
+```bash
 # Test with rigctl
 rigctl -m 1035 -r /dev/ttyUSB0 f
 ```
 
-### Network Connection Issues
-```bash
-# Test rigctld connection
-telnet localhost 4532
-
-# In telnet session:
-f  # get frequency
-q  # quit
-```
-
 ## 📄 License
 
-This project is licensed under the LGPL license - see the [COPYING](COPYING) file for details.
+LGPL - see [COPYING](COPYING) file for details.
 
-## 🔗 Related Projects
+## 🔗 Links
 
-- [Hamlib](https://hamlib.github.io/) - The underlying radio control library
-- [rigctl](https://github.com/Hamlib/Hamlib) - Command-line radio control utility
+- [Hamlib Project](https://hamlib.github.io/)
+- [Supported Radios](https://github.com/Hamlib/Hamlib/wiki/Supported-Radios)
+- [rigctl Documentation](https://hamlib.github.io/manpages/rigctl.html)

@@ -53,6 +53,96 @@ type VFO = 'VFO-A' | 'VFO-B';
 type RadioMode = 'USB' | 'LSB' | 'FM' | 'PKTFM' | 'AM' | 'CW' | 'RTTY' | 'DIG' | string;
 
 /**
+ * Memory channel data interface
+ */
+interface MemoryChannelData {
+  /** Channel frequency in Hz */
+  frequency?: number;
+  /** Radio mode */
+  mode?: RadioMode;
+  /** Bandwidth */
+  bandwidth?: number;
+  /** Channel description */
+  description?: string;
+  /** TX frequency for split operation */
+  txFrequency?: number;
+  /** CTCSS tone frequency */
+  ctcssTone?: number;
+}
+
+/**
+ * Memory channel info interface
+ */
+interface MemoryChannelInfo {
+  /** Channel number */
+  channelNumber: number;
+  /** Channel frequency */
+  frequency: number;
+  /** Radio mode */
+  mode: string;
+  /** Bandwidth */
+  bandwidth: number;
+  /** Channel description */
+  description: string;
+  /** Split operation enabled */
+  split: boolean;
+  /** TX frequency (if split enabled) */
+  txFrequency?: number;
+  /** CTCSS tone frequency */
+  ctcssTone?: number;
+}
+
+/**
+ * Split mode info interface
+ */
+interface SplitModeInfo {
+  /** TX mode */
+  mode: string;
+  /** TX bandwidth */
+  width: number;
+}
+
+/**
+ * Split status info interface
+ */
+interface SplitStatusInfo {
+  /** Split enabled status */
+  enabled: boolean;
+  /** TX VFO */
+  txVfo: string;
+}
+
+/**
+ * Level type
+ */
+type LevelType = 'AF' | 'RF' | 'SQL' | 'RFPOWER' | 'MICGAIN' | 'IF' | 'APF' | 'NR' | 
+                 'PBT_IN' | 'PBT_OUT' | 'CWPITCH' | 'KEYSPD' | 'NOTCHF' | 'COMP' | 
+                 'AGC' | 'BKINDL' | 'BALANCE' | 'VOXGAIN' | 'VOXDELAY' | 'ANTIVOX' |
+                 'STRENGTH' | 'RAWSTR' | 'SWR' | 'ALC' | 'RFPOWER_METER' | 
+                 'COMP_METER' | 'VD_METER' | 'ID_METER' | 'TEMP_METER' | string;
+
+/**
+ * Function type
+ */
+type FunctionType = 'FAGC' | 'NB' | 'COMP' | 'VOX' | 'TONE' | 'TSQL' | 'SBKIN' | 
+                    'FBKIN' | 'ANF' | 'NR' | 'AIP' | 'APF' | 'TUNER' | 'XIT' | 
+                    'RIT' | 'LOCK' | 'MUTE' | 'VSC' | 'REV' | 'SQL' | 'ABM' | 
+                    'BC' | 'MBC' | 'AFC' | 'SATMODE' | 'SCOPE' | 'RESUME' | 
+                    'TBURST' | string;
+
+/**
+ * Scan type
+ */
+type ScanType = 'VFO' | 'MEM' | 'PROG' | 'DELTA' | 'PRIO';
+
+/**
+ * VFO operation type
+ */
+type VfoOperationType = 'CPY' | 'XCHG' | 'FROM_VFO' | 'TO_VFO' | 'MCL' | 'UP' | 
+                        'DOWN' | 'BAND_UP' | 'BAND_DOWN' | 'LEFT' | 'RIGHT' | 
+                        'TUNE' | 'TOGGLE';
+
+/**
  * HamLib class - for controlling amateur radio devices
  */
 declare class HamLib {
@@ -179,6 +269,181 @@ declare class HamLib {
    * @returns Object containing connection type, port path, connection status, and model numbers
    */
   getConnectionInfo(): ConnectionInfo;
+
+  // Memory Channel Management
+
+  /**
+   * Set memory channel data
+   * @param channelNumber Memory channel number
+   * @param channelData Channel data (frequency, mode, description, etc.)
+   */
+  setMemoryChannel(channelNumber: number, channelData: MemoryChannelData): void;
+
+  /**
+   * Get memory channel data
+   * @param channelNumber Memory channel number
+   * @param readOnly Whether to read in read-only mode (default: true)
+   * @returns Channel data
+   */
+  getMemoryChannel(channelNumber: number, readOnly?: boolean): MemoryChannelInfo;
+
+  /**
+   * Select memory channel for operation
+   * @param channelNumber Memory channel number to select
+   */
+  selectMemoryChannel(channelNumber: number): void;
+
+  // RIT/XIT Control
+
+  /**
+   * Set RIT (Receiver Incremental Tuning) offset
+   * @param offsetHz RIT offset in Hz
+   */
+  setRit(offsetHz: number): void;
+
+  /**
+   * Get current RIT offset
+   * @returns RIT offset in Hz
+   */
+  getRit(): number;
+
+  /**
+   * Set XIT (Transmitter Incremental Tuning) offset
+   * @param offsetHz XIT offset in Hz
+   */
+  setXit(offsetHz: number): void;
+
+  /**
+   * Get current XIT offset
+   * @returns XIT offset in Hz
+   */
+  getXit(): number;
+
+  /**
+   * Clear both RIT and XIT offsets
+   * @returns Success status
+   */
+  clearRitXit(): boolean;
+
+  // Scanning Operations
+
+  /**
+   * Start scanning operation
+   * @param scanType Scan type ('VFO', 'MEM', 'PROG', 'DELTA', 'PRIO')
+   * @param channel Optional channel number for some scan types
+   */
+  startScan(scanType: ScanType, channel?: number): void;
+
+  /**
+   * Stop scanning operation
+   */
+  stopScan(): void;
+
+  // Level Controls
+
+  /**
+   * Set radio level (gain, volume, etc.)
+   * @param levelType Level type ('AF', 'RF', 'SQL', 'RFPOWER', etc.)
+   * @param value Level value (0.0-1.0 typically)
+   */
+  setLevel(levelType: LevelType, value: number): void;
+
+  /**
+   * Get radio level
+   * @param levelType Level type ('AF', 'RF', 'SQL', 'STRENGTH', etc.)
+   * @returns Level value
+   */
+  getLevel(levelType: LevelType): number;
+
+  /**
+   * Get list of supported level types
+   * @returns Array of supported level types
+   */
+  getSupportedLevels(): string[];
+
+  // Function Controls
+
+  /**
+   * Set radio function on/off
+   * @param functionType Function type ('NB', 'COMP', 'VOX', 'TONE', etc.)
+   * @param enable true to enable, false to disable
+   */
+  setFunction(functionType: FunctionType, enable: boolean): void;
+
+  /**
+   * Get radio function status
+   * @param functionType Function type ('NB', 'COMP', 'VOX', 'TONE', etc.)
+   * @returns Function enabled status
+   */
+  getFunction(functionType: FunctionType): boolean;
+
+  /**
+   * Get list of supported function types
+   * @returns Array of supported function types
+   */
+  getSupportedFunctions(): string[];
+
+  // Split Operations
+
+  /**
+   * Set split mode TX frequency
+   * @param txFrequency TX frequency in Hz
+   */
+  setSplitFreq(txFrequency: number): void;
+
+  /**
+   * Get split mode TX frequency
+   * @returns TX frequency in Hz
+   */
+  getSplitFreq(): number;
+
+  /**
+   * Set split mode TX mode
+   * @param txMode TX mode ('USB', 'LSB', 'FM', etc.)
+   * @param txWidth Optional TX bandwidth
+   */
+  setSplitMode(txMode: RadioMode, txWidth?: number): void;
+
+  /**
+   * Get split mode TX mode
+   * @returns TX mode and width
+   */
+  getSplitMode(): SplitModeInfo;
+
+  /**
+   * Enable/disable split operation
+   * @param enable true to enable split, false to disable
+   * @param txVfo TX VFO ('VFO-A' or 'VFO-B')
+   */
+  setSplit(enable: boolean, txVfo?: VFO): void;
+
+  /**
+   * Get split operation status
+   * @returns Split status and TX VFO
+   */
+  getSplit(): SplitStatusInfo;
+
+  // VFO Operations
+
+  /**
+   * Perform VFO operation
+   * @param operation VFO operation ('CPY', 'XCHG', 'FROM_VFO', 'TO_VFO', etc.)
+   */
+  vfoOperation(operation: VfoOperationType): void;
+
+  // Antenna Selection
+
+  /**
+   * Set antenna
+   * @param antenna Antenna number (1, 2, 3, etc.)
+   */
+  setAntenna(antenna: number): void;
+
+  /**
+   * Get current antenna
+   * @returns Current antenna number
+   */
+  getAntenna(): number;
 }
 
 /**
@@ -189,7 +454,9 @@ declare const nodeHamlib: {
 };
 
 // Export types for use elsewhere
-export { ConnectionInfo, ModeInfo, SupportedRigInfo, VFO, RadioMode, HamLib };
+export { ConnectionInfo, ModeInfo, SupportedRigInfo, VFO, RadioMode, MemoryChannelData, 
+         MemoryChannelInfo, SplitModeInfo, SplitStatusInfo, LevelType, FunctionType, 
+         ScanType, VfoOperationType, HamLib };
 
 // Support both CommonJS and ES module exports
 export = nodeHamlib;

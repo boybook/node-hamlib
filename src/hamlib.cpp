@@ -435,6 +435,1002 @@ Napi::Value NodeHamLib::GetConnectionInfo(const Napi::CallbackInfo & info) {
   return obj;
 }
 
+// Memory Channel Management
+Napi::Value NodeHamLib::SetMemoryChannel(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  if (info.Length() < 2 || !info[0].IsNumber() || !info[1].IsObject()) {
+    Napi::TypeError::New(env, "Expected (channelNumber: number, channelData: object)").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  int channel_num = info[0].As<Napi::Number>().Int32Value();
+  Napi::Object chanObj = info[1].As<Napi::Object>();
+  
+  // Create channel structure
+  channel_t chan;
+  memset(&chan, 0, sizeof(chan));
+  
+  chan.channel_num = channel_num;
+  chan.vfo = RIG_VFO_MEM;
+  
+  // Extract frequency
+  if (chanObj.Has("frequency")) {
+    chan.freq = chanObj.Get("frequency").As<Napi::Number>().DoubleValue();
+  }
+  
+  // Extract mode
+  if (chanObj.Has("mode")) {
+    std::string modeStr = chanObj.Get("mode").As<Napi::String>().Utf8Value();
+    chan.mode = rig_parse_mode(modeStr.c_str());
+  }
+  
+  // Extract bandwidth
+  if (chanObj.Has("bandwidth")) {
+    chan.width = chanObj.Get("bandwidth").As<Napi::Number>().Int32Value();
+  } else {
+    chan.width = RIG_PASSBAND_NORMAL;
+  }
+  
+  // Extract channel description
+  if (chanObj.Has("description")) {
+    std::string desc = chanObj.Get("description").As<Napi::String>().Utf8Value();
+    strncpy(chan.channel_desc, desc.c_str(), sizeof(chan.channel_desc) - 1);
+    chan.channel_desc[sizeof(chan.channel_desc) - 1] = '\0';
+  }
+  
+  // Extract TX frequency for split operation
+  if (chanObj.Has("txFrequency")) {
+    chan.tx_freq = chanObj.Get("txFrequency").As<Napi::Number>().DoubleValue();
+    chan.split = RIG_SPLIT_ON;
+  }
+  
+  // Extract CTCSS tone
+  if (chanObj.Has("ctcssTone")) {
+    chan.ctcss_tone = chanObj.Get("ctcssTone").As<Napi::Number>().Int32Value();
+  }
+  
+  int retcode = rig_set_channel(my_rig, RIG_VFO_MEM, &chan);
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  return Napi::Number::New(env, retcode);
+}
+
+Napi::Value NodeHamLib::GetMemoryChannel(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  if (info.Length() < 1 || !info[0].IsNumber()) {
+    Napi::TypeError::New(env, "Expected channel number").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  int channel_num = info[0].As<Napi::Number>().Int32Value();
+  bool read_only = true;
+  
+  if (info.Length() >= 2 && info[1].IsBoolean()) {
+    read_only = info[1].As<Napi::Boolean>().Value();
+  }
+  
+  // Create channel structure
+  channel_t chan;
+  memset(&chan, 0, sizeof(chan));
+  chan.channel_num = channel_num;
+  chan.vfo = RIG_VFO_MEM;
+  
+  int retcode = rig_get_channel(my_rig, RIG_VFO_MEM, &chan, read_only);
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  // Create result object
+  Napi::Object result = Napi::Object::New(env);
+  result.Set("channelNumber", Napi::Number::New(env, chan.channel_num));
+  result.Set("frequency", Napi::Number::New(env, chan.freq));
+  result.Set("mode", Napi::String::New(env, rig_strrmode(chan.mode)));
+  result.Set("bandwidth", Napi::Number::New(env, chan.width));
+  result.Set("description", Napi::String::New(env, chan.channel_desc));
+  
+  if (chan.split == RIG_SPLIT_ON) {
+    result.Set("txFrequency", Napi::Number::New(env, chan.tx_freq));
+    result.Set("split", Napi::Boolean::New(env, true));
+  } else {
+    result.Set("split", Napi::Boolean::New(env, false));
+  }
+  
+  if (chan.ctcss_tone > 0) {
+    result.Set("ctcssTone", Napi::Number::New(env, chan.ctcss_tone));
+  }
+  
+  return result;
+}
+
+Napi::Value NodeHamLib::SelectMemoryChannel(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  if (info.Length() < 1 || !info[0].IsNumber()) {
+    Napi::TypeError::New(env, "Expected channel number").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  int channel_num = info[0].As<Napi::Number>().Int32Value();
+  
+  int retcode = rig_set_mem(my_rig, RIG_VFO_CURR, channel_num);
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  return Napi::Number::New(env, retcode);
+}
+
+// RIT/XIT Control
+Napi::Value NodeHamLib::SetRit(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  if (info.Length() < 1 || !info[0].IsNumber()) {
+    Napi::TypeError::New(env, "Expected RIT offset in Hz").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  shortfreq_t rit_offset = info[0].As<Napi::Number>().Int32Value();
+  
+  int retcode = rig_set_rit(my_rig, RIG_VFO_CURR, rit_offset);
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  return Napi::Number::New(env, retcode);
+}
+
+Napi::Value NodeHamLib::GetRit(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  shortfreq_t rit_offset;
+  int retcode = rig_get_rit(my_rig, RIG_VFO_CURR, &rit_offset);
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  return Napi::Number::New(env, rit_offset);
+}
+
+Napi::Value NodeHamLib::SetXit(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  if (info.Length() < 1 || !info[0].IsNumber()) {
+    Napi::TypeError::New(env, "Expected XIT offset in Hz").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  shortfreq_t xit_offset = info[0].As<Napi::Number>().Int32Value();
+  
+  int retcode = rig_set_xit(my_rig, RIG_VFO_CURR, xit_offset);
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  return Napi::Number::New(env, retcode);
+}
+
+Napi::Value NodeHamLib::GetXit(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  shortfreq_t xit_offset;
+  int retcode = rig_get_xit(my_rig, RIG_VFO_CURR, &xit_offset);
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  return Napi::Number::New(env, xit_offset);
+}
+
+Napi::Value NodeHamLib::ClearRitXit(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  // Clear both RIT and XIT by setting them to 0
+  int ritCode = rig_set_rit(my_rig, RIG_VFO_CURR, 0);
+  int xitCode = rig_set_xit(my_rig, RIG_VFO_CURR, 0);
+  
+  if (ritCode != RIG_OK && ritCode != -RIG_ENAVAIL) {
+    Napi::Error::New(env, rigerror(ritCode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  if (xitCode != RIG_OK && xitCode != -RIG_ENAVAIL) {
+    Napi::Error::New(env, rigerror(xitCode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  return Napi::Boolean::New(env, true);
+}
+
+// Scanning Operations
+Napi::Value NodeHamLib::StartScan(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  if (info.Length() < 1 || !info[0].IsString()) {
+    Napi::TypeError::New(env, "Expected scan type (VFO, MEM, PROG, etc.)").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  std::string scanTypeStr = info[0].As<Napi::String>().Utf8Value();
+  scan_t scanType;
+  
+  if (scanTypeStr == "VFO") {
+    scanType = RIG_SCAN_VFO;
+  } else if (scanTypeStr == "MEM") {
+    scanType = RIG_SCAN_MEM;
+  } else if (scanTypeStr == "PROG") {
+    scanType = RIG_SCAN_PROG;
+  } else if (scanTypeStr == "DELTA") {
+    scanType = RIG_SCAN_DELTA;
+  } else if (scanTypeStr == "PRIO") {
+    scanType = RIG_SCAN_PRIO;
+  } else {
+    Napi::TypeError::New(env, "Invalid scan type").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  int channel = 0;
+  if (info.Length() >= 2 && info[1].IsNumber()) {
+    channel = info[1].As<Napi::Number>().Int32Value();
+  }
+  
+  int retcode = rig_scan(my_rig, RIG_VFO_CURR, scanType, channel);
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  return Napi::Number::New(env, retcode);
+}
+
+Napi::Value NodeHamLib::StopScan(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  int retcode = rig_scan(my_rig, RIG_VFO_CURR, RIG_SCAN_STOP, 0);
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  return Napi::Number::New(env, retcode);
+}
+
+// Level Controls
+Napi::Value NodeHamLib::SetLevel(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  if (info.Length() < 2 || !info[0].IsString() || !info[1].IsNumber()) {
+    Napi::TypeError::New(env, "Expected (levelType: string, value: number)").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  std::string levelTypeStr = info[0].As<Napi::String>().Utf8Value();
+  double levelValue = info[1].As<Napi::Number>().DoubleValue();
+  
+  // Map level type strings to hamlib constants
+  setting_t levelType;
+  if (levelTypeStr == "AF") {
+    levelType = RIG_LEVEL_AF;
+  } else if (levelTypeStr == "RF") {
+    levelType = RIG_LEVEL_RF;
+  } else if (levelTypeStr == "SQL") {
+    levelType = RIG_LEVEL_SQL;
+  } else if (levelTypeStr == "RFPOWER") {
+    levelType = RIG_LEVEL_RFPOWER;
+  } else if (levelTypeStr == "MICGAIN") {
+    levelType = RIG_LEVEL_MICGAIN;
+  } else if (levelTypeStr == "IF") {
+    levelType = RIG_LEVEL_IF;
+  } else if (levelTypeStr == "APF") {
+    levelType = RIG_LEVEL_APF;
+  } else if (levelTypeStr == "NR") {
+    levelType = RIG_LEVEL_NR;
+  } else if (levelTypeStr == "PBT_IN") {
+    levelType = RIG_LEVEL_PBT_IN;
+  } else if (levelTypeStr == "PBT_OUT") {
+    levelType = RIG_LEVEL_PBT_OUT;
+  } else if (levelTypeStr == "CWPITCH") {
+    levelType = RIG_LEVEL_CWPITCH;
+  } else if (levelTypeStr == "KEYSPD") {
+    levelType = RIG_LEVEL_KEYSPD;
+  } else if (levelTypeStr == "NOTCHF") {
+    levelType = RIG_LEVEL_NOTCHF;
+  } else if (levelTypeStr == "COMP") {
+    levelType = RIG_LEVEL_COMP;
+  } else if (levelTypeStr == "AGC") {
+    levelType = RIG_LEVEL_AGC;
+  } else if (levelTypeStr == "BKINDL") {
+    levelType = RIG_LEVEL_BKINDL;
+  } else if (levelTypeStr == "BALANCE") {
+    levelType = RIG_LEVEL_BALANCE;
+  } else if (levelTypeStr == "VOXGAIN") {
+    levelType = RIG_LEVEL_VOXGAIN;
+  } else if (levelTypeStr == "VOXDELAY") {
+    levelType = RIG_LEVEL_VOXDELAY;
+  } else if (levelTypeStr == "ANTIVOX") {
+    levelType = RIG_LEVEL_ANTIVOX;
+  } else {
+    Napi::TypeError::New(env, "Invalid level type").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  // Create value union
+  value_t val;
+  val.f = levelValue;
+  
+  int retcode = rig_set_level(my_rig, RIG_VFO_CURR, levelType, val);
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  return Napi::Number::New(env, retcode);
+}
+
+Napi::Value NodeHamLib::GetLevel(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  if (info.Length() < 1 || !info[0].IsString()) {
+    Napi::TypeError::New(env, "Expected level type string").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  std::string levelTypeStr = info[0].As<Napi::String>().Utf8Value();
+  
+  // Map level type strings to hamlib constants
+  setting_t levelType;
+  if (levelTypeStr == "AF") {
+    levelType = RIG_LEVEL_AF;
+  } else if (levelTypeStr == "RF") {
+    levelType = RIG_LEVEL_RF;
+  } else if (levelTypeStr == "SQL") {
+    levelType = RIG_LEVEL_SQL;
+  } else if (levelTypeStr == "RFPOWER") {
+    levelType = RIG_LEVEL_RFPOWER;
+  } else if (levelTypeStr == "MICGAIN") {
+    levelType = RIG_LEVEL_MICGAIN;
+  } else if (levelTypeStr == "SWR") {
+    levelType = RIG_LEVEL_SWR;
+  } else if (levelTypeStr == "ALC") {
+    levelType = RIG_LEVEL_ALC;
+  } else if (levelTypeStr == "STRENGTH") {
+    levelType = RIG_LEVEL_STRENGTH;
+  } else if (levelTypeStr == "RAWSTR") {
+    levelType = RIG_LEVEL_RAWSTR;
+  } else if (levelTypeStr == "RFPOWER_METER") {
+    levelType = RIG_LEVEL_RFPOWER_METER;
+  } else if (levelTypeStr == "COMP_METER") {
+    levelType = RIG_LEVEL_COMP_METER;
+  } else if (levelTypeStr == "VD_METER") {
+    levelType = RIG_LEVEL_VD_METER;
+  } else if (levelTypeStr == "ID_METER") {
+    levelType = RIG_LEVEL_ID_METER;
+  } else if (levelTypeStr == "TEMP_METER") {
+    levelType = RIG_LEVEL_TEMP_METER;
+  } else {
+    Napi::TypeError::New(env, "Invalid level type").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  value_t val;
+  int retcode = rig_get_level(my_rig, RIG_VFO_CURR, levelType, &val);
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  // Return the appropriate value based on the level type
+  if (levelType == RIG_LEVEL_STRENGTH || levelType == RIG_LEVEL_RAWSTR) {
+    return Napi::Number::New(env, val.i);
+  } else {
+    return Napi::Number::New(env, val.f);
+  }
+}
+
+Napi::Value NodeHamLib::GetSupportedLevels(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  setting_t levels = my_rig->state.has_get_level | my_rig->state.has_set_level;
+  Napi::Array levelArray = Napi::Array::New(env);
+  uint32_t index = 0;
+  
+  // Check each level type
+  if (levels & RIG_LEVEL_AF) levelArray[index++] = Napi::String::New(env, "AF");
+  if (levels & RIG_LEVEL_RF) levelArray[index++] = Napi::String::New(env, "RF");
+  if (levels & RIG_LEVEL_SQL) levelArray[index++] = Napi::String::New(env, "SQL");
+  if (levels & RIG_LEVEL_RFPOWER) levelArray[index++] = Napi::String::New(env, "RFPOWER");
+  if (levels & RIG_LEVEL_MICGAIN) levelArray[index++] = Napi::String::New(env, "MICGAIN");
+  if (levels & RIG_LEVEL_IF) levelArray[index++] = Napi::String::New(env, "IF");
+  if (levels & RIG_LEVEL_APF) levelArray[index++] = Napi::String::New(env, "APF");
+  if (levels & RIG_LEVEL_NR) levelArray[index++] = Napi::String::New(env, "NR");
+  if (levels & RIG_LEVEL_PBT_IN) levelArray[index++] = Napi::String::New(env, "PBT_IN");
+  if (levels & RIG_LEVEL_PBT_OUT) levelArray[index++] = Napi::String::New(env, "PBT_OUT");
+  if (levels & RIG_LEVEL_CWPITCH) levelArray[index++] = Napi::String::New(env, "CWPITCH");
+  if (levels & RIG_LEVEL_KEYSPD) levelArray[index++] = Napi::String::New(env, "KEYSPD");
+  if (levels & RIG_LEVEL_NOTCHF) levelArray[index++] = Napi::String::New(env, "NOTCHF");
+  if (levels & RIG_LEVEL_COMP) levelArray[index++] = Napi::String::New(env, "COMP");
+  if (levels & RIG_LEVEL_AGC) levelArray[index++] = Napi::String::New(env, "AGC");
+  if (levels & RIG_LEVEL_BKINDL) levelArray[index++] = Napi::String::New(env, "BKINDL");
+  if (levels & RIG_LEVEL_BALANCE) levelArray[index++] = Napi::String::New(env, "BALANCE");
+  if (levels & RIG_LEVEL_VOXGAIN) levelArray[index++] = Napi::String::New(env, "VOXGAIN");
+  if (levels & RIG_LEVEL_VOXDELAY) levelArray[index++] = Napi::String::New(env, "VOXDELAY");
+  if (levels & RIG_LEVEL_ANTIVOX) levelArray[index++] = Napi::String::New(env, "ANTIVOX");
+  if (levels & RIG_LEVEL_STRENGTH) levelArray[index++] = Napi::String::New(env, "STRENGTH");
+  if (levels & RIG_LEVEL_RAWSTR) levelArray[index++] = Napi::String::New(env, "RAWSTR");
+  if (levels & RIG_LEVEL_SWR) levelArray[index++] = Napi::String::New(env, "SWR");
+  if (levels & RIG_LEVEL_ALC) levelArray[index++] = Napi::String::New(env, "ALC");
+  if (levels & RIG_LEVEL_RFPOWER_METER) levelArray[index++] = Napi::String::New(env, "RFPOWER_METER");
+  if (levels & RIG_LEVEL_COMP_METER) levelArray[index++] = Napi::String::New(env, "COMP_METER");
+  if (levels & RIG_LEVEL_VD_METER) levelArray[index++] = Napi::String::New(env, "VD_METER");
+  if (levels & RIG_LEVEL_ID_METER) levelArray[index++] = Napi::String::New(env, "ID_METER");
+  if (levels & RIG_LEVEL_TEMP_METER) levelArray[index++] = Napi::String::New(env, "TEMP_METER");
+  
+  return levelArray;
+}
+
+// Function Controls
+Napi::Value NodeHamLib::SetFunction(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  if (info.Length() < 2 || !info[0].IsString() || !info[1].IsBoolean()) {
+    Napi::TypeError::New(env, "Expected (functionType: string, enable: boolean)").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  std::string funcTypeStr = info[0].As<Napi::String>().Utf8Value();
+  bool enable = info[1].As<Napi::Boolean>().Value();
+  
+  // Map function type strings to hamlib constants
+  setting_t funcType;
+  if (funcTypeStr == "FAGC") {
+    funcType = RIG_FUNC_FAGC;
+  } else if (funcTypeStr == "NB") {
+    funcType = RIG_FUNC_NB;
+  } else if (funcTypeStr == "COMP") {
+    funcType = RIG_FUNC_COMP;
+  } else if (funcTypeStr == "VOX") {
+    funcType = RIG_FUNC_VOX;
+  } else if (funcTypeStr == "TONE") {
+    funcType = RIG_FUNC_TONE;
+  } else if (funcTypeStr == "TSQL") {
+    funcType = RIG_FUNC_TSQL;
+  } else if (funcTypeStr == "SBKIN") {
+    funcType = RIG_FUNC_SBKIN;
+  } else if (funcTypeStr == "FBKIN") {
+    funcType = RIG_FUNC_FBKIN;
+  } else if (funcTypeStr == "ANF") {
+    funcType = RIG_FUNC_ANF;
+  } else if (funcTypeStr == "NR") {
+    funcType = RIG_FUNC_NR;
+  } else if (funcTypeStr == "AIP") {
+    funcType = RIG_FUNC_AIP;
+  } else if (funcTypeStr == "APF") {
+    funcType = RIG_FUNC_APF;
+  } else if (funcTypeStr == "TUNER") {
+    funcType = RIG_FUNC_TUNER;
+  } else if (funcTypeStr == "XIT") {
+    funcType = RIG_FUNC_XIT;
+  } else if (funcTypeStr == "RIT") {
+    funcType = RIG_FUNC_RIT;
+  } else if (funcTypeStr == "LOCK") {
+    funcType = RIG_FUNC_LOCK;
+  } else if (funcTypeStr == "MUTE") {
+    funcType = RIG_FUNC_MUTE;
+  } else if (funcTypeStr == "VSC") {
+    funcType = RIG_FUNC_VSC;
+  } else if (funcTypeStr == "REV") {
+    funcType = RIG_FUNC_REV;
+  } else if (funcTypeStr == "SQL") {
+    funcType = RIG_FUNC_SQL;
+  } else if (funcTypeStr == "ABM") {
+    funcType = RIG_FUNC_ABM;
+  } else if (funcTypeStr == "BC") {
+    funcType = RIG_FUNC_BC;
+  } else if (funcTypeStr == "MBC") {
+    funcType = RIG_FUNC_MBC;
+  } else if (funcTypeStr == "AFC") {
+    funcType = RIG_FUNC_AFC;
+  } else if (funcTypeStr == "SATMODE") {
+    funcType = RIG_FUNC_SATMODE;
+  } else if (funcTypeStr == "SCOPE") {
+    funcType = RIG_FUNC_SCOPE;
+  } else if (funcTypeStr == "RESUME") {
+    funcType = RIG_FUNC_RESUME;
+  } else if (funcTypeStr == "TBURST") {
+    funcType = RIG_FUNC_TBURST;
+  } else {
+    Napi::TypeError::New(env, "Invalid function type").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  int retcode = rig_set_func(my_rig, RIG_VFO_CURR, funcType, enable ? 1 : 0);
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  return Napi::Number::New(env, retcode);
+}
+
+Napi::Value NodeHamLib::GetFunction(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  if (info.Length() < 1 || !info[0].IsString()) {
+    Napi::TypeError::New(env, "Expected function type string").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  std::string funcTypeStr = info[0].As<Napi::String>().Utf8Value();
+  
+  // Map function type strings to hamlib constants (same as SetFunction)
+  setting_t funcType;
+  if (funcTypeStr == "FAGC") {
+    funcType = RIG_FUNC_FAGC;
+  } else if (funcTypeStr == "NB") {
+    funcType = RIG_FUNC_NB;
+  } else if (funcTypeStr == "COMP") {
+    funcType = RIG_FUNC_COMP;
+  } else if (funcTypeStr == "VOX") {
+    funcType = RIG_FUNC_VOX;
+  } else if (funcTypeStr == "TONE") {
+    funcType = RIG_FUNC_TONE;
+  } else if (funcTypeStr == "TSQL") {
+    funcType = RIG_FUNC_TSQL;
+  } else if (funcTypeStr == "SBKIN") {
+    funcType = RIG_FUNC_SBKIN;
+  } else if (funcTypeStr == "FBKIN") {
+    funcType = RIG_FUNC_FBKIN;
+  } else if (funcTypeStr == "ANF") {
+    funcType = RIG_FUNC_ANF;
+  } else if (funcTypeStr == "NR") {
+    funcType = RIG_FUNC_NR;
+  } else if (funcTypeStr == "AIP") {
+    funcType = RIG_FUNC_AIP;
+  } else if (funcTypeStr == "APF") {
+    funcType = RIG_FUNC_APF;
+  } else if (funcTypeStr == "TUNER") {
+    funcType = RIG_FUNC_TUNER;
+  } else if (funcTypeStr == "XIT") {
+    funcType = RIG_FUNC_XIT;
+  } else if (funcTypeStr == "RIT") {
+    funcType = RIG_FUNC_RIT;
+  } else if (funcTypeStr == "LOCK") {
+    funcType = RIG_FUNC_LOCK;
+  } else if (funcTypeStr == "MUTE") {
+    funcType = RIG_FUNC_MUTE;
+  } else if (funcTypeStr == "VSC") {
+    funcType = RIG_FUNC_VSC;
+  } else if (funcTypeStr == "REV") {
+    funcType = RIG_FUNC_REV;
+  } else if (funcTypeStr == "SQL") {
+    funcType = RIG_FUNC_SQL;
+  } else if (funcTypeStr == "ABM") {
+    funcType = RIG_FUNC_ABM;
+  } else if (funcTypeStr == "BC") {
+    funcType = RIG_FUNC_BC;
+  } else if (funcTypeStr == "MBC") {
+    funcType = RIG_FUNC_MBC;
+  } else if (funcTypeStr == "AFC") {
+    funcType = RIG_FUNC_AFC;
+  } else if (funcTypeStr == "SATMODE") {
+    funcType = RIG_FUNC_SATMODE;
+  } else if (funcTypeStr == "SCOPE") {
+    funcType = RIG_FUNC_SCOPE;
+  } else if (funcTypeStr == "RESUME") {
+    funcType = RIG_FUNC_RESUME;
+  } else if (funcTypeStr == "TBURST") {
+    funcType = RIG_FUNC_TBURST;
+  } else {
+    Napi::TypeError::New(env, "Invalid function type").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  int state;
+  int retcode = rig_get_func(my_rig, RIG_VFO_CURR, funcType, &state);
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  return Napi::Boolean::New(env, state != 0);
+}
+
+Napi::Value NodeHamLib::GetSupportedFunctions(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  setting_t functions = my_rig->state.has_get_func | my_rig->state.has_set_func;
+  Napi::Array funcArray = Napi::Array::New(env);
+  uint32_t index = 0;
+  
+  // Check each function type
+  if (functions & RIG_FUNC_FAGC) funcArray[index++] = Napi::String::New(env, "FAGC");
+  if (functions & RIG_FUNC_NB) funcArray[index++] = Napi::String::New(env, "NB");
+  if (functions & RIG_FUNC_COMP) funcArray[index++] = Napi::String::New(env, "COMP");
+  if (functions & RIG_FUNC_VOX) funcArray[index++] = Napi::String::New(env, "VOX");
+  if (functions & RIG_FUNC_TONE) funcArray[index++] = Napi::String::New(env, "TONE");
+  if (functions & RIG_FUNC_TSQL) funcArray[index++] = Napi::String::New(env, "TSQL");
+  if (functions & RIG_FUNC_SBKIN) funcArray[index++] = Napi::String::New(env, "SBKIN");
+  if (functions & RIG_FUNC_FBKIN) funcArray[index++] = Napi::String::New(env, "FBKIN");
+  if (functions & RIG_FUNC_ANF) funcArray[index++] = Napi::String::New(env, "ANF");
+  if (functions & RIG_FUNC_NR) funcArray[index++] = Napi::String::New(env, "NR");
+  if (functions & RIG_FUNC_AIP) funcArray[index++] = Napi::String::New(env, "AIP");
+  if (functions & RIG_FUNC_APF) funcArray[index++] = Napi::String::New(env, "APF");
+  if (functions & RIG_FUNC_TUNER) funcArray[index++] = Napi::String::New(env, "TUNER");
+  if (functions & RIG_FUNC_XIT) funcArray[index++] = Napi::String::New(env, "XIT");
+  if (functions & RIG_FUNC_RIT) funcArray[index++] = Napi::String::New(env, "RIT");
+  if (functions & RIG_FUNC_LOCK) funcArray[index++] = Napi::String::New(env, "LOCK");
+  if (functions & RIG_FUNC_MUTE) funcArray[index++] = Napi::String::New(env, "MUTE");
+  if (functions & RIG_FUNC_VSC) funcArray[index++] = Napi::String::New(env, "VSC");
+  if (functions & RIG_FUNC_REV) funcArray[index++] = Napi::String::New(env, "REV");
+  if (functions & RIG_FUNC_SQL) funcArray[index++] = Napi::String::New(env, "SQL");
+  if (functions & RIG_FUNC_ABM) funcArray[index++] = Napi::String::New(env, "ABM");
+  if (functions & RIG_FUNC_BC) funcArray[index++] = Napi::String::New(env, "BC");
+  if (functions & RIG_FUNC_MBC) funcArray[index++] = Napi::String::New(env, "MBC");
+  if (functions & RIG_FUNC_AFC) funcArray[index++] = Napi::String::New(env, "AFC");
+  if (functions & RIG_FUNC_SATMODE) funcArray[index++] = Napi::String::New(env, "SATMODE");
+  if (functions & RIG_FUNC_SCOPE) funcArray[index++] = Napi::String::New(env, "SCOPE");
+  if (functions & RIG_FUNC_RESUME) funcArray[index++] = Napi::String::New(env, "RESUME");
+  if (functions & RIG_FUNC_TBURST) funcArray[index++] = Napi::String::New(env, "TBURST");
+  
+  return funcArray;
+}
+
+// Split Operations
+Napi::Value NodeHamLib::SetSplitFreq(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  if (info.Length() < 1 || !info[0].IsNumber()) {
+    Napi::TypeError::New(env, "Expected TX frequency").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  freq_t tx_freq = info[0].As<Napi::Number>().DoubleValue();
+  
+  int retcode = rig_set_split_freq(my_rig, RIG_VFO_CURR, tx_freq);
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  return Napi::Number::New(env, retcode);
+}
+
+Napi::Value NodeHamLib::GetSplitFreq(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  freq_t tx_freq;
+  int retcode = rig_get_split_freq(my_rig, RIG_VFO_CURR, &tx_freq);
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  return Napi::Number::New(env, tx_freq);
+}
+
+Napi::Value NodeHamLib::SetSplitMode(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  if (info.Length() < 1 || !info[0].IsString()) {
+    Napi::TypeError::New(env, "Expected TX mode string").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  std::string modeStr = info[0].As<Napi::String>().Utf8Value();
+  rmode_t tx_mode = rig_parse_mode(modeStr.c_str());
+  
+  pbwidth_t tx_width = RIG_PASSBAND_NORMAL;
+  if (info.Length() >= 2 && info[1].IsNumber()) {
+    tx_width = info[1].As<Napi::Number>().Int32Value();
+  }
+  
+  int retcode = rig_set_split_mode(my_rig, RIG_VFO_CURR, tx_mode, tx_width);
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  return Napi::Number::New(env, retcode);
+}
+
+Napi::Value NodeHamLib::GetSplitMode(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  rmode_t tx_mode;
+  pbwidth_t tx_width;
+  int retcode = rig_get_split_mode(my_rig, RIG_VFO_CURR, &tx_mode, &tx_width);
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  Napi::Object result = Napi::Object::New(env);
+  result.Set("mode", Napi::String::New(env, rig_strrmode(tx_mode)));
+  result.Set("width", Napi::Number::New(env, tx_width));
+  return result;
+}
+
+Napi::Value NodeHamLib::SetSplit(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  if (info.Length() < 1 || !info[0].IsBoolean()) {
+    Napi::TypeError::New(env, "Expected boolean split enable state").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  bool split_enabled = info[0].As<Napi::Boolean>().Value();
+  
+  vfo_t tx_vfo = RIG_VFO_B;
+  if (info.Length() >= 2 && info[1].IsString()) {
+    std::string vfoStr = info[1].As<Napi::String>().Utf8Value();
+    if (vfoStr == "VFO-A") {
+      tx_vfo = RIG_VFO_A;
+    } else if (vfoStr == "VFO-B") {
+      tx_vfo = RIG_VFO_B;
+    }
+  }
+  
+  split_t split = split_enabled ? RIG_SPLIT_ON : RIG_SPLIT_OFF;
+  int retcode = rig_set_split_vfo(my_rig, RIG_VFO_CURR, split, tx_vfo);
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  return Napi::Number::New(env, retcode);
+}
+
+Napi::Value NodeHamLib::GetSplit(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  split_t split;
+  vfo_t tx_vfo;
+  int retcode = rig_get_split_vfo(my_rig, RIG_VFO_CURR, &split, &tx_vfo);
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  Napi::Object result = Napi::Object::New(env);
+  result.Set("enabled", Napi::Boolean::New(env, split == RIG_SPLIT_ON));
+  
+  std::string vfoStr = "VFO-CURR";
+  if (tx_vfo == RIG_VFO_A) {
+    vfoStr = "VFO-A";
+  } else if (tx_vfo == RIG_VFO_B) {
+    vfoStr = "VFO-B";
+  }
+  result.Set("txVfo", Napi::String::New(env, vfoStr));
+  
+  return result;
+}
+
+// VFO Operations
+Napi::Value NodeHamLib::VfoOperation(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  if (info.Length() < 1 || !info[0].IsString()) {
+    Napi::TypeError::New(env, "Expected VFO operation string").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  std::string vfoOpStr = info[0].As<Napi::String>().Utf8Value();
+  
+  vfo_op_t vfo_op;
+  if (vfoOpStr == "CPY") {
+    vfo_op = RIG_OP_CPY;
+  } else if (vfoOpStr == "XCHG") {
+    vfo_op = RIG_OP_XCHG;
+  } else if (vfoOpStr == "FROM_VFO") {
+    vfo_op = RIG_OP_FROM_VFO;
+  } else if (vfoOpStr == "TO_VFO") {
+    vfo_op = RIG_OP_TO_VFO;
+  } else if (vfoOpStr == "MCL") {
+    vfo_op = RIG_OP_MCL;
+  } else if (vfoOpStr == "UP") {
+    vfo_op = RIG_OP_UP;
+  } else if (vfoOpStr == "DOWN") {
+    vfo_op = RIG_OP_DOWN;
+  } else if (vfoOpStr == "BAND_UP") {
+    vfo_op = RIG_OP_BAND_UP;
+  } else if (vfoOpStr == "BAND_DOWN") {
+    vfo_op = RIG_OP_BAND_DOWN;
+  } else if (vfoOpStr == "LEFT") {
+    vfo_op = RIG_OP_LEFT;
+  } else if (vfoOpStr == "RIGHT") {
+    vfo_op = RIG_OP_RIGHT;
+  } else if (vfoOpStr == "TUNE") {
+    vfo_op = RIG_OP_TUNE;
+  } else if (vfoOpStr == "TOGGLE") {
+    vfo_op = RIG_OP_TOGGLE;
+  } else {
+    Napi::TypeError::New(env, "Invalid VFO operation").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  int retcode = rig_vfo_op(my_rig, RIG_VFO_CURR, vfo_op);
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  return Napi::Number::New(env, retcode);
+}
+
+// Antenna Selection
+Napi::Value NodeHamLib::SetAntenna(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  if (info.Length() < 1 || !info[0].IsNumber()) {
+    Napi::TypeError::New(env, "Expected antenna number").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  ant_t antenna = info[0].As<Napi::Number>().Int32Value();
+  value_t option = {0};  // Additional option parameter
+  
+  int retcode = rig_set_ant(my_rig, RIG_VFO_CURR, antenna, option);
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  return Napi::Number::New(env, retcode);
+}
+
+Napi::Value NodeHamLib::GetAntenna(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  ant_t antenna = RIG_ANT_CURR;
+  value_t option;
+  ant_t antenna_curr;
+  ant_t antenna_tx;
+  ant_t antenna_rx;
+  
+  int retcode = rig_get_ant(my_rig, RIG_VFO_CURR, antenna, &option, &antenna_curr, &antenna_tx, &antenna_rx);
+  if (retcode != RIG_OK) {
+    Napi::Error::New(env, rigerror(retcode)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  return Napi::Number::New(env, antenna_curr);
+}
+
 Napi::Function NodeHamLib::GetClass(Napi::Env env) {
   auto ret =  DefineClass(
     env,
@@ -449,8 +1445,46 @@ Napi::Function NodeHamLib::GetClass(Napi::Env env) {
       NodeHamLib::InstanceMethod("getMode", & NodeHamLib::GetMode),
       NodeHamLib::InstanceMethod("getStrength", & NodeHamLib::GetStrength),
       
+      // Memory Channel Management
+      NodeHamLib::InstanceMethod("setMemoryChannel", & NodeHamLib::SetMemoryChannel),
+      NodeHamLib::InstanceMethod("getMemoryChannel", & NodeHamLib::GetMemoryChannel),
+      NodeHamLib::InstanceMethod("selectMemoryChannel", & NodeHamLib::SelectMemoryChannel),
       
+      // RIT/XIT Control
+      NodeHamLib::InstanceMethod("setRit", & NodeHamLib::SetRit),
+      NodeHamLib::InstanceMethod("getRit", & NodeHamLib::GetRit),
+      NodeHamLib::InstanceMethod("setXit", & NodeHamLib::SetXit),
+      NodeHamLib::InstanceMethod("getXit", & NodeHamLib::GetXit),
+      NodeHamLib::InstanceMethod("clearRitXit", & NodeHamLib::ClearRitXit),
       
+      // Scanning Operations
+      NodeHamLib::InstanceMethod("startScan", & NodeHamLib::StartScan),
+      NodeHamLib::InstanceMethod("stopScan", & NodeHamLib::StopScan),
+      
+      // Level Controls
+      NodeHamLib::InstanceMethod("setLevel", & NodeHamLib::SetLevel),
+      NodeHamLib::InstanceMethod("getLevel", & NodeHamLib::GetLevel),
+      NodeHamLib::InstanceMethod("getSupportedLevels", & NodeHamLib::GetSupportedLevels),
+      
+      // Function Controls
+      NodeHamLib::InstanceMethod("setFunction", & NodeHamLib::SetFunction),
+      NodeHamLib::InstanceMethod("getFunction", & NodeHamLib::GetFunction),
+      NodeHamLib::InstanceMethod("getSupportedFunctions", & NodeHamLib::GetSupportedFunctions),
+      
+      // Split Operations
+      NodeHamLib::InstanceMethod("setSplitFreq", & NodeHamLib::SetSplitFreq),
+      NodeHamLib::InstanceMethod("getSplitFreq", & NodeHamLib::GetSplitFreq),
+      NodeHamLib::InstanceMethod("setSplitMode", & NodeHamLib::SetSplitMode),
+      NodeHamLib::InstanceMethod("getSplitMode", & NodeHamLib::GetSplitMode),
+      NodeHamLib::InstanceMethod("setSplit", & NodeHamLib::SetSplit),
+      NodeHamLib::InstanceMethod("getSplit", & NodeHamLib::GetSplit),
+      
+      // VFO Operations
+      NodeHamLib::InstanceMethod("vfoOperation", & NodeHamLib::VfoOperation),
+      
+      // Antenna Selection
+      NodeHamLib::InstanceMethod("setAntenna", & NodeHamLib::SetAntenna),
+      NodeHamLib::InstanceMethod("getAntenna", & NodeHamLib::GetAntenna),
 
       NodeHamLib::InstanceMethod("close", & NodeHamLib::Close),
       NodeHamLib::InstanceMethod("destroy", & NodeHamLib::Destroy),
