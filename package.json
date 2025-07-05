@@ -30,6 +30,7 @@
     "lib/",
     "prebuilds/",
     "src/",
+    "scripts/",
     "index.js",
     "index.d.ts",
     "binding.gyp",
