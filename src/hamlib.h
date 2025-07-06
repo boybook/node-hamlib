@@ -2,10 +2,26 @@
 
 #include <napi.h>
 #include <hamlib/rig.h>
+#include <memory>
 //forward declarations
 //typedef struct s_rig RIG;
 //typedef unsigned int 	vfo_t;
 //typedef double freq_t;
+
+// Forward declaration
+class NodeHamLib;
+
+// Base AsyncWorker class for hamlib operations
+class HamLibAsyncWorker : public Napi::AsyncWorker {
+public:
+    HamLibAsyncWorker(Napi::Function& callback, NodeHamLib* hamlib_instance);
+    virtual ~HamLibAsyncWorker() = default;
+
+protected:
+    NodeHamLib* hamlib_instance_;
+    int result_code_;
+    std::string error_message_;
+};
 
 
 class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
@@ -82,7 +98,7 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
 
   static int freq_change_cb(RIG*, vfo_t, freq_t, void*);
 
- private:
+ public:
   RIG *my_rig;
   bool rig_is_open = false;
   bool is_network_rig = false;     // Flag to indicate if using network connection

@@ -1,6 +1,7 @@
 #include "hamlib.h"
 #include <string>
 #include <vector>
+#include <memory>
 
 // Cross-platform compatibility for hamlib token types
 // Linux versions use token_t, some others use hamlib_token_t
@@ -22,6 +23,311 @@ using namespace Napi;
 
 Napi::FunctionReference NodeHamLib::constructor;
 Napi::ThreadSafeFunction tsfn;
+
+// Base AsyncWorker implementation
+HamLibAsyncWorker::HamLibAsyncWorker(Napi::Function& callback, NodeHamLib* hamlib_instance)
+    : AsyncWorker(callback), hamlib_instance_(hamlib_instance), result_code_(0), error_message_("") {}
+
+// Specific AsyncWorker classes for each operation
+class OpenAsyncWorker : public HamLibAsyncWorker {
+public:
+    OpenAsyncWorker(Napi::Function& callback, NodeHamLib* hamlib_instance)
+        : HamLibAsyncWorker(callback, hamlib_instance) {}
+    
+    void Execute() override {
+        result_code_ = rig_open(hamlib_instance_->my_rig);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        } else {
+            rig_set_freq_callback(hamlib_instance_->my_rig, NodeHamLib::freq_change_cb, hamlib_instance_);
+            auto ppt_cb = +[](RIG *rig, vfo_t vfo, ptt_t ptt, rig_ptr_t arg) {
+                printf("PPT pushed!");
+                return 0;
+            };
+            int cb_result = rig_set_ptt_callback(hamlib_instance_->my_rig, ppt_cb, NULL);
+            rig_set_trn(hamlib_instance_->my_rig, RIG_TRN_POLL);
+            hamlib_instance_->rig_is_open = true;
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        Callback().Call({env.Undefined(), Napi::Number::New(env, result_code_)});
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        Callback().Call({Napi::Error::New(env, error_message_).Value(), env.Undefined()});
+    }
+};
+
+class SetFrequencyAsyncWorker : public HamLibAsyncWorker {
+public:
+    SetFrequencyAsyncWorker(Napi::Function& callback, NodeHamLib* hamlib_instance, freq_t freq, vfo_t vfo)
+        : HamLibAsyncWorker(callback, hamlib_instance), freq_(freq), vfo_(vfo) {}
+    
+    void Execute() override {
+        result_code_ = rig_set_freq(hamlib_instance_->my_rig, vfo_, freq_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        Callback().Call({env.Undefined(), Napi::Number::New(env, result_code_)});
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        Callback().Call({Napi::Error::New(env, error_message_).Value(), env.Undefined()});
+    }
+    
+private:
+    freq_t freq_;
+    vfo_t vfo_;
+};
+
+class GetFrequencyAsyncWorker : public HamLibAsyncWorker {
+public:
+    GetFrequencyAsyncWorker(Napi::Function& callback, NodeHamLib* hamlib_instance, vfo_t vfo)
+        : HamLibAsyncWorker(callback, hamlib_instance), vfo_(vfo), freq_(0) {}
+    
+    void Execute() override {
+        result_code_ = rig_get_freq(hamlib_instance_->my_rig, vfo_, &freq_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        Callback().Call({env.Undefined(), Napi::Number::New(env, freq_)});
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        Callback().Call({Napi::Error::New(env, error_message_).Value(), env.Undefined()});
+    }
+    
+private:
+    vfo_t vfo_;
+    freq_t freq_;
+};
+
+class SetModeAsyncWorker : public HamLibAsyncWorker {
+public:
+    SetModeAsyncWorker(Napi::Function& callback, NodeHamLib* hamlib_instance, rmode_t mode, pbwidth_t width)
+        : HamLibAsyncWorker(callback, hamlib_instance), mode_(mode), width_(width) {}
+    
+    void Execute() override {
+        result_code_ = rig_set_mode(hamlib_instance_->my_rig, RIG_VFO_CURR, mode_, width_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        Callback().Call({env.Undefined(), Napi::Number::New(env, result_code_)});
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        Callback().Call({Napi::Error::New(env, error_message_).Value(), env.Undefined()});
+    }
+    
+private:
+    rmode_t mode_;
+    pbwidth_t width_;
+};
+
+class GetModeAsyncWorker : public HamLibAsyncWorker {
+public:
+    GetModeAsyncWorker(Napi::Function& callback, NodeHamLib* hamlib_instance)
+        : HamLibAsyncWorker(callback, hamlib_instance), mode_(0), width_(0) {}
+    
+    void Execute() override {
+        result_code_ = rig_get_mode(hamlib_instance_->my_rig, RIG_VFO_CURR, &mode_, &width_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        Napi::Object obj = Napi::Object::New(env);
+        obj.Set(Napi::String::New(env, "mode"), (char)mode_);
+        obj.Set(Napi::String::New(env, "width"), width_);
+        Callback().Call({env.Undefined(), obj});
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        Callback().Call({Napi::Error::New(env, error_message_).Value(), env.Undefined()});
+    }
+    
+private:
+    rmode_t mode_;
+    pbwidth_t width_;
+};
+
+class SetPttAsyncWorker : public HamLibAsyncWorker {
+public:
+    SetPttAsyncWorker(Napi::Function& callback, NodeHamLib* hamlib_instance, ptt_t ptt)
+        : HamLibAsyncWorker(callback, hamlib_instance), ptt_(ptt) {}
+    
+    void Execute() override {
+        result_code_ = rig_set_ptt(hamlib_instance_->my_rig, RIG_VFO_CURR, ptt_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        Callback().Call({env.Undefined(), Napi::Number::New(env, result_code_)});
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        Callback().Call({Napi::Error::New(env, error_message_).Value(), env.Undefined()});
+    }
+    
+private:
+    ptt_t ptt_;
+};
+
+class GetStrengthAsyncWorker : public HamLibAsyncWorker {
+public:
+    GetStrengthAsyncWorker(Napi::Function& callback, NodeHamLib* hamlib_instance)
+        : HamLibAsyncWorker(callback, hamlib_instance), strength_(0) {}
+    
+    void Execute() override {
+        result_code_ = rig_get_strength(hamlib_instance_->my_rig, RIG_VFO_CURR, &strength_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        Callback().Call({env.Undefined(), Napi::Number::New(env, strength_)});
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        Callback().Call({Napi::Error::New(env, error_message_).Value(), env.Undefined()});
+    }
+    
+private:
+    int strength_;
+};
+
+class SetVfoAsyncWorker : public HamLibAsyncWorker {
+public:
+    SetVfoAsyncWorker(Napi::Function& callback, NodeHamLib* hamlib_instance, vfo_t vfo)
+        : HamLibAsyncWorker(callback, hamlib_instance), vfo_(vfo) {}
+    
+    void Execute() override {
+        result_code_ = rig_set_vfo(hamlib_instance_->my_rig, vfo_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        Callback().Call({env.Undefined(), Napi::Number::New(env, result_code_)});
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        Callback().Call({Napi::Error::New(env, error_message_).Value(), env.Undefined()});
+    }
+    
+private:
+    vfo_t vfo_;
+};
+
+class GetVfoAsyncWorker : public HamLibAsyncWorker {
+public:
+    GetVfoAsyncWorker(Napi::Function& callback, NodeHamLib* hamlib_instance)
+        : HamLibAsyncWorker(callback, hamlib_instance), vfo_(0) {}
+    
+    void Execute() override {
+        result_code_ = rig_get_vfo(hamlib_instance_->my_rig, &vfo_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        Callback().Call({env.Undefined(), Napi::Number::New(env, vfo_)});
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        Callback().Call({Napi::Error::New(env, error_message_).Value(), env.Undefined()});
+    }
+    
+private:
+    vfo_t vfo_;
+};
+
+class CloseAsyncWorker : public HamLibAsyncWorker {
+public:
+    CloseAsyncWorker(Napi::Function& callback, NodeHamLib* hamlib_instance)
+        : HamLibAsyncWorker(callback, hamlib_instance) {}
+    
+    void Execute() override {
+        result_code_ = rig_close(hamlib_instance_->my_rig);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        } else {
+            hamlib_instance_->rig_is_open = false;
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        Callback().Call({env.Undefined(), Napi::Number::New(env, result_code_)});
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        Callback().Call({Napi::Error::New(env, error_message_).Value(), env.Undefined()});
+    }
+};
+
+class DestroyAsyncWorker : public HamLibAsyncWorker {
+public:
+    DestroyAsyncWorker(Napi::Function& callback, NodeHamLib* hamlib_instance)
+        : HamLibAsyncWorker(callback, hamlib_instance) {}
+    
+    void Execute() override {
+        if (hamlib_instance_->rig_is_open) {
+            rig_close(hamlib_instance_->my_rig);
+        }
+        result_code_ = rig_cleanup(hamlib_instance_->my_rig);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        } else {
+            hamlib_instance_->rig_is_open = false;
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        Callback().Call({env.Undefined(), Napi::Number::New(env, result_code_)});
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        Callback().Call({Napi::Error::New(env, error_message_).Value(), env.Undefined()});
+    }
+};
 
 NodeHamLib::NodeHamLib(const Napi::CallbackInfo & info): ObjectWrap(info) {
   Napi::Env env = info.Env();
@@ -126,73 +432,76 @@ int NodeHamLib::freq_change_cb(RIG *rig, vfo_t vfo, freq_t freq, void* arg) {
 Napi::Value NodeHamLib::Open(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  int retcode = rig_open(my_rig);
-  if (retcode != RIG_OK) {
-    printf("rig_open: error = %s\n", rigerror(retcode));
-    // Napi::TypeError::New(env, "Unable to open rig")
-    // .ThrowAsJavaScriptException();
+  if (info.Length() < 1 || !info[0].IsFunction()) {
+    Napi::TypeError::New(env, "Callback function is required").ThrowAsJavaScriptException();
+    return env.Undefined();
   }
-
-
-
-  rig_set_freq_callback(my_rig, NodeHamLib::freq_change_cb, this);
-
-  auto ppt_cb =+[](RIG *rig, vfo_t vfo, ptt_t ptt, rig_ptr_t arg) {
-    printf("PPT pushed!");
-    return 0;
-  };
-  retcode = rig_set_ptt_callback (my_rig, ppt_cb, NULL);
-  rig_set_trn(my_rig, RIG_TRN_POLL);
-  if (retcode != RIG_OK ) {
-	  printf("rig_set_trn: error = %s \n", rigerror(retcode));
-	}
-
-  printf ("callback: %s", rigerror(retcode));
-
-  rig_is_open = true;
-  return Napi::Number::New(env, retcode);
+  
+  Napi::Function callback = info[0].As<Napi::Function>();
+  OpenAsyncWorker* worker = new OpenAsyncWorker(callback, this);
+  worker->Queue();
+  
+  return env.Undefined();
 }
 
 Napi::Value NodeHamLib::SetVFO(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
-  int retcode;
 
   if (!rig_is_open) {
     Napi::TypeError::New(env, "Rig is not open!")
       .ThrowAsJavaScriptException();
     return env.Null();
   }
-  if (info.Length() < 1) {
-    Napi::TypeError::New(env, "Must Specify VFO-A or VFO-B")
+  
+  if (info.Length() < 2) {
+    Napi::TypeError::New(env, "Must specify VFO and callback")
       .ThrowAsJavaScriptException();
     return env.Null();
   }
+  
   if (!info[0].IsString()) {
-    Napi::TypeError::New(env, "Must Specify VFO-A or VFO-B as a string")
+    Napi::TypeError::New(env, "Must specify VFO-A or VFO-B as a string")
       .ThrowAsJavaScriptException();
     return env.Null();
   }
-  auto name = info[0].As < Napi::String > ().Utf8Value().c_str();
-  if (strcmp(name, "VFO-A") == 0) {
-    retcode = rig_set_vfo(my_rig, RIG_VFO_A);
-  } else if (strcmp(name, "VFO-B") == 0) {
-    retcode = rig_set_vfo(my_rig, RIG_VFO_B);
-  } else {
-    retcode = 1;
+  
+  if (!info[1].IsFunction()) {
+    Napi::TypeError::New(env, "Second parameter must be callback function")
+      .ThrowAsJavaScriptException();
+    return env.Null();
   }
-  return Napi::Number::New(env, retcode);
+  
+  auto name = info[0].As < Napi::String > ().Utf8Value().c_str();
+  vfo_t vfo;
+  
+  if (strcmp(name, "VFO-A") == 0) {
+    vfo = RIG_VFO_A;
+  } else if (strcmp(name, "VFO-B") == 0) {
+    vfo = RIG_VFO_B;
+  } else {
+    Napi::TypeError::New(env, "Invalid VFO name")
+      .ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  Napi::Function callback = info[1].As<Napi::Function>();
+  SetVfoAsyncWorker* worker = new SetVfoAsyncWorker(callback, this, vfo);
+  worker->Queue();
+  
+  return env.Undefined();
 }
 
 Napi::Value NodeHamLib::SetFrequency(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
-  int retcode;
+  
   if (!rig_is_open) {
     Napi::TypeError::New(env, "Rig is not open!")
       .ThrowAsJavaScriptException();
     return env.Null();
   }
-  if (info.Length() < 1) {
-    Napi::TypeError::New(env, "Must specify frequency")
+  
+  if (info.Length() < 2) {
+    Napi::TypeError::New(env, "Must specify frequency and callback")
       .ThrowAsJavaScriptException();
     return env.Null();
   }
@@ -202,134 +511,161 @@ Napi::Value NodeHamLib::SetFrequency(const Napi::CallbackInfo & info) {
       .ThrowAsJavaScriptException();
     return env.Null();
   }
+  
   auto freq = info[0].As < Napi::Number > ().Int32Value();
   
   // Support optional VFO parameter
   vfo_t vfo = RIG_VFO_CURR;
-  if (info.Length() >= 2 && info[1].IsString()) {
-    auto vfostr = info[1].As < Napi::String > ().Utf8Value().c_str();
-    if (strcmp(vfostr, "VFO-A") == 0) {
-      vfo = RIG_VFO_A;
-    } else if (strcmp(vfostr, "VFO-B") == 0) {
-      vfo = RIG_VFO_B;
+  Napi::Function callback;
+  
+  if (info.Length() == 2) {
+    if (!info[1].IsFunction()) {
+      Napi::TypeError::New(env, "Second parameter must be callback function")
+        .ThrowAsJavaScriptException();
+      return env.Null();
     }
+    callback = info[1].As<Napi::Function>();
+  } else if (info.Length() == 3) {
+    if (info[1].IsString()) {
+      auto vfostr = info[1].As < Napi::String > ().Utf8Value().c_str();
+      if (strcmp(vfostr, "VFO-A") == 0) {
+        vfo = RIG_VFO_A;
+      } else if (strcmp(vfostr, "VFO-B") == 0) {
+        vfo = RIG_VFO_B;
+      }
+    }
+    if (!info[2].IsFunction()) {
+      Napi::TypeError::New(env, "Third parameter must be callback function")
+        .ThrowAsJavaScriptException();
+      return env.Null();
+    }
+    callback = info[2].As<Napi::Function>();
   }
   
-  retcode = rig_set_freq(my_rig, vfo, freq);
-  return Napi::Number::New(env, retcode);
+  SetFrequencyAsyncWorker* worker = new SetFrequencyAsyncWorker(callback, this, freq, vfo);
+  worker->Queue();
+  
+  return env.Undefined();
 }
 
 Napi::Value NodeHamLib::SetMode(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
-  int retcode;
-  pbwidth_t bandwidth;
+  
   if (!rig_is_open) {
     Napi::TypeError::New(env, "Rig is not open!")
       .ThrowAsJavaScriptException();
     return env.Null();
   }
-  if (info.Length() < 1) {
-    Napi::TypeError::New(env, "Must Specify Mode")
+  
+  if (info.Length() < 2) {
+    Napi::TypeError::New(env, "Must specify mode and callback")
       .ThrowAsJavaScriptException();
     return env.Null();
   }
 
   if (!info[0].IsString()) {
-    Napi::TypeError::New(env, "Must Specify Mode as string")
+    Napi::TypeError::New(env, "Must specify mode as string")
       .ThrowAsJavaScriptException();
     return env.Null();
   }
 
   auto modestr = info[0].As < Napi::String > ().Utf8Value().c_str();
   auto mode = rig_parse_mode(modestr);
+  pbwidth_t bandwidth = RIG_PASSBAND_NORMAL;
+  Napi::Function callback;
 
-  if (info.Length() > 1) {
-    if (!info[1].IsString()) {
-      Napi::TypeError::New(env, "Must Specify Mode as string")
+  if (info.Length() == 2) {
+    if (!info[1].IsFunction()) {
+      Napi::TypeError::New(env, "Second parameter must be callback function")
         .ThrowAsJavaScriptException();
       return env.Null();
     }
-    auto bandstr = info[1].As < Napi::String > ().Utf8Value().c_str();
-    if (strcmp(bandstr, "narrow") == 0) {
-      bandwidth = rig_passband_narrow(my_rig, mode);
-    } else if (strcmp(bandstr, "wide") == 0) {
-      bandwidth = rig_passband_wide(my_rig, mode);
-    } else {
-      bandwidth = RIG_PASSBAND_NORMAL;
+    callback = info[1].As<Napi::Function>();
+  } else if (info.Length() == 3) {
+    if (info[1].IsString()) {
+      auto bandstr = info[1].As < Napi::String > ().Utf8Value().c_str();
+      if (strcmp(bandstr, "narrow") == 0) {
+        bandwidth = rig_passband_narrow(my_rig, mode);
+      } else if (strcmp(bandstr, "wide") == 0) {
+        bandwidth = rig_passband_wide(my_rig, mode);
+      }
     }
-  } else {
-    bandwidth = RIG_PASSBAND_NORMAL;
+    if (!info[2].IsFunction()) {
+      Napi::TypeError::New(env, "Third parameter must be callback function")
+        .ThrowAsJavaScriptException();
+      return env.Null();
+    }
+    callback = info[2].As<Napi::Function>();
   }
 
-  retcode = rig_set_mode(my_rig, RIG_VFO_CURR, mode, bandwidth);
-  if (retcode != RIG_OK) {
-
-    Napi::TypeError::New(env, rigerror(retcode))
-      .ThrowAsJavaScriptException();
-    return env.Null();
-  }
-  return Napi::Number::New(env, retcode);
+  SetModeAsyncWorker* worker = new SetModeAsyncWorker(callback, this, mode, bandwidth);
+  worker->Queue();
+  
+  return env.Undefined();
 }
 
 Napi::Value NodeHamLib::SetPtt(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
-  int retcode;
-  bool ptt_state;
+  
   if (!rig_is_open) {
     Napi::TypeError::New(env, "Rig is not open!")
       .ThrowAsJavaScriptException();
     return env.Null();
   }
-  if (info.Length() < 1) {
-    Napi::TypeError::New(env, "Specify true or false for ppt state")
+  
+  if (info.Length() < 2) {
+    Napi::TypeError::New(env, "Must specify PTT state and callback")
       .ThrowAsJavaScriptException();
     return env.Null();
   }
 
   if (!info[0].IsBoolean()) {
-    Napi::TypeError::New(env, "PTT state is not boolean")
+    Napi::TypeError::New(env, "PTT state must be boolean")
       .ThrowAsJavaScriptException();
     return env.Null();
   }
-  ptt_state = info[0].As < Napi::Boolean > ();
-  if (ptt_state) {
-    retcode = rig_set_ptt(my_rig, RIG_VFO_CURR, RIG_PTT_ON);
-  } else {
-    retcode = rig_set_ptt(my_rig, RIG_VFO_CURR, RIG_PTT_OFF);
-  }
-  if (retcode != RIG_OK) {
-
-    Napi::TypeError::New(env, rigerror(retcode))
+  
+  if (!info[1].IsFunction()) {
+    Napi::TypeError::New(env, "Second parameter must be callback function")
       .ThrowAsJavaScriptException();
     return env.Null();
   }
-  return Napi::Number::New(env, retcode);
+  
+  bool ptt_state = info[0].As < Napi::Boolean > ();
+  Napi::Function callback = info[1].As<Napi::Function>();
+  
+  ptt_t ptt = ptt_state ? RIG_PTT_ON : RIG_PTT_OFF;
+  SetPttAsyncWorker* worker = new SetPttAsyncWorker(callback, this, ptt);
+  worker->Queue();
+  
+  return env.Undefined();
 }
 
 Napi::Value NodeHamLib::GetVFO(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
-  int retcode;
-  vfo_t vfo;
+  
   if (!rig_is_open) {
     Napi::TypeError::New(env, "Rig is not open!")
       .ThrowAsJavaScriptException();
     return env.Null();
   }
-  retcode = rig_get_vfo(my_rig, & vfo);
-  if (retcode == RIG_OK) {
-    return Napi::Number::New(env, vfo);
-  } else {
-    //dont throw an exception here, not every radio reports vfo
-    Napi::Error::New(env, rigerror(retcode));
+  
+  if (info.Length() < 1 || !info[0].IsFunction()) {
+    Napi::TypeError::New(env, "Callback function is required")
+      .ThrowAsJavaScriptException();
     return env.Null();
   }
-
+  
+  Napi::Function callback = info[0].As<Napi::Function>();
+  GetVfoAsyncWorker* worker = new GetVfoAsyncWorker(callback, this);
+  worker->Queue();
+  
+  return env.Undefined();
 }
 
 Napi::Value NodeHamLib::GetFrequency(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
-  int retcode;
-  freq_t freq;
+  
   if (!rig_is_open) {
     Napi::TypeError::New(env, "Rig is not open!")
       .ThrowAsJavaScriptException();
@@ -338,93 +674,122 @@ Napi::Value NodeHamLib::GetFrequency(const Napi::CallbackInfo & info) {
   
   // Support optional VFO parameter
   vfo_t vfo = RIG_VFO_CURR;
-  if (info.Length() >= 1 && info[0].IsString()) {
-    auto vfostr = info[0].As < Napi::String > ().Utf8Value().c_str();
-    if (strcmp(vfostr, "VFO-A") == 0) {
-      vfo = RIG_VFO_A;
-    } else if (strcmp(vfostr, "VFO-B") == 0) {
-      vfo = RIG_VFO_B;
-    }
-  }
+  Napi::Function callback;
   
-  retcode = rig_get_freq(my_rig, vfo, & freq);
-  if (retcode == RIG_OK) {
-    return Napi::Number::New(env, freq);
+  if (info.Length() == 1) {
+    if (!info[0].IsFunction()) {
+      Napi::TypeError::New(env, "Parameter must be callback function")
+        .ThrowAsJavaScriptException();
+      return env.Null();
+    }
+    callback = info[0].As<Napi::Function>();
+  } else if (info.Length() == 2) {
+    if (info[0].IsString()) {
+      auto vfostr = info[0].As < Napi::String > ().Utf8Value().c_str();
+      if (strcmp(vfostr, "VFO-A") == 0) {
+        vfo = RIG_VFO_A;
+      } else if (strcmp(vfostr, "VFO-B") == 0) {
+        vfo = RIG_VFO_B;
+      }
+    }
+    if (!info[1].IsFunction()) {
+      Napi::TypeError::New(env, "Second parameter must be callback function")
+        .ThrowAsJavaScriptException();
+      return env.Null();
+    }
+    callback = info[1].As<Napi::Function>();
   } else {
-    Napi::Error::New(env, rigerror(retcode));
+    Napi::TypeError::New(env, "Must provide callback function")
+      .ThrowAsJavaScriptException();
     return env.Null();
   }
+  
+  GetFrequencyAsyncWorker* worker = new GetFrequencyAsyncWorker(callback, this, vfo);
+  worker->Queue();
+  
+  return env.Undefined();
 }
 
 Napi::Value NodeHamLib::GetMode(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
-  int retcode;
-  rmode_t rmode;
-  pbwidth_t width;
+  
   if (!rig_is_open) {
     Napi::TypeError::New(env, "Rig is not open!")
       .ThrowAsJavaScriptException();
     return env.Null();
   }
-  retcode = rig_get_mode(my_rig, RIG_VFO_CURR, & rmode, & width);
-  if (retcode == RIG_OK) {
-    Napi::Object obj = Napi::Object::New(env);
-    obj.Set(Napi::String::New(env, "mode"), (char)rmode);
-    obj.Set(Napi::String::New(env, "width"), width);
-    return obj;
-  } else {
-    Napi::Error::New(env, rigerror(retcode));
+  
+  if (info.Length() < 1 || !info[0].IsFunction()) {
+    Napi::TypeError::New(env, "Callback function is required")
+      .ThrowAsJavaScriptException();
     return env.Null();
   }
+  
+  Napi::Function callback = info[0].As<Napi::Function>();
+  GetModeAsyncWorker* worker = new GetModeAsyncWorker(callback, this);
+  worker->Queue();
+  
+  return env.Undefined();
 }
 
 Napi::Value NodeHamLib::GetStrength(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
-  int retcode;
-  int strength;
+  
   if (!rig_is_open) {
     Napi::TypeError::New(env, "Rig is not open!")
       .ThrowAsJavaScriptException();
     return env.Null();
   }
-  retcode = rig_get_strength(my_rig, RIG_VFO_CURR, & strength);
-  if (retcode == RIG_OK) {
-    return Napi::Number::New(env, strength);
-  } else {
-    Napi::Error::New(env, rigerror(retcode));
+  
+  if (info.Length() < 1 || !info[0].IsFunction()) {
+    Napi::TypeError::New(env, "Callback function is required")
+      .ThrowAsJavaScriptException();
     return env.Null();
   }
+  
+  Napi::Function callback = info[0].As<Napi::Function>();
+  GetStrengthAsyncWorker* worker = new GetStrengthAsyncWorker(callback, this);
+  worker->Queue();
+  
+  return env.Undefined();
 }
 
 Napi::Value NodeHamLib::Close(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
+  
   if (!rig_is_open) {
     Napi::TypeError::New(env, "Rig is not open!")
       .ThrowAsJavaScriptException();
     return env.Null();
   }
-  int retcode = rig_close(my_rig);
-  if (retcode != RIG_OK) {
-    Napi::TypeError::New(env, "Unable to open rig")
+  
+  if (info.Length() < 1 || !info[0].IsFunction()) {
+    Napi::TypeError::New(env, "Callback function is required")
       .ThrowAsJavaScriptException();
+    return env.Null();
   }
-  rig_is_open = false;
-  return Napi::Number::New(env, retcode);
+  
+  Napi::Function callback = info[0].As<Napi::Function>();
+  CloseAsyncWorker* worker = new CloseAsyncWorker(callback, this);
+  worker->Queue();
+  
+  return env.Undefined();
 }
 
 Napi::Value NodeHamLib::Destroy(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
-  if (rig_is_open) {
-    rig_close(my_rig);
-  }
-  int retcode = rig_cleanup(my_rig);
-  if (retcode != RIG_OK) {
-
-    Napi::TypeError::New(env, rigerror(retcode))
+  
+  if (info.Length() < 1 || !info[0].IsFunction()) {
+    Napi::TypeError::New(env, "Callback function is required")
       .ThrowAsJavaScriptException();
+    return env.Null();
   }
-  rig_is_open = false;
-  return Napi::Number::New(env, retcode);
+  
+  Napi::Function callback = info[0].As<Napi::Function>();
+  DestroyAsyncWorker* worker = new DestroyAsyncWorker(callback, this);
+  worker->Queue();
+  
+  return env.Undefined();
 }
 
 Napi::Value NodeHamLib::GetConnectionInfo(const Napi::CallbackInfo & info) {

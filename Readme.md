@@ -4,12 +4,32 @@ A comprehensive Node.js wrapper for [Hamlib](https://hamlib.github.io/) - contro
 
 ## 🚀 Features
 
+- **Async/Await Support**: All operations are asynchronous and non-blocking for optimal performance
 - **Built-in Methods**: Complete radio control API including memory channels, RIT/XIT, scanning, levels, functions, and more
 - **303+ Supported Radios**: Works with Yaesu, Icom, Kenwood, Elecraft, FlexRadio, and many more
 - **Multi-platform**: Pre-built binaries for Windows x64, Linux x64/ARM64, macOS ARM64
 - **Connection Types**: Serial ports, network (rigctld), and direct control
 - **TypeScript Support**: Full type definitions and IntelliSense
 - **Modern JavaScript**: CommonJS and ES Modules support
+
+## ⚡ Async Operations
+
+**All radio control operations are asynchronous** to prevent blocking the Node.js event loop during I/O operations:
+
+```javascript
+// ✅ Correct - Using async/await
+await rig.setFrequency(144390000);
+const frequency = await rig.getFrequency();
+
+// ✅ Correct - Using Promises
+rig.setFrequency(144390000)
+  .then(() => rig.getFrequency())
+  .then(freq => console.log('Frequency:', freq))
+  .catch(err => console.error('Error:', err));
+
+// ❌ Incorrect - Operations are no longer synchronous
+// rig.setFrequency(144390000); // This won't work as expected
+```
 
 ## 📦 Quick Start
 
@@ -20,25 +40,29 @@ npm install node-hamlib
 ```javascript
 const { HamLib } = require('node-hamlib');
 
-// Find your radio model
-const rigs = HamLib.getSupportedRigs();
-console.log('Supported radios:', rigs.length);
+async function controlRadio() {
+  // Find your radio model
+  const rigs = HamLib.getSupportedRigs();
+  console.log('Supported radios:', rigs.length);
 
-// Connect to radio
-const rig = new HamLib(1035, '/dev/ttyUSB0'); // FT-991A
-rig.open();
+  // Connect to radio
+  const rig = new HamLib(1035, '/dev/ttyUSB0'); // FT-991A
+  await rig.open();
 
-// Basic control
-rig.setFrequency(144390000); // 144.39 MHz
-rig.setMode('FM');
-rig.setPtt(true);
+  // Basic control
+  await rig.setFrequency(144390000); // 144.39 MHz
+  await rig.setMode('FM');
+  await rig.setPtt(true);
 
-// Get status
-console.log('Frequency:', rig.getFrequency());
-console.log('Mode:', rig.getMode());
-console.log('Signal:', rig.getStrength());
+  // Get status
+  console.log('Frequency:', await rig.getFrequency());
+  console.log('Mode:', await rig.getMode());
+  console.log('Signal:', await rig.getStrength());
 
-rig.close();
+  await rig.close();
+}
+
+controlRadio().catch(console.error);
 ```
 
 ## 📡 Complete API Reference
@@ -74,9 +98,9 @@ const rig = new HamLib(1035, 'localhost:4532');      // rigctld
 #### `open()` / `close()` / `destroy()`
 Connection control
 ```javascript
-rig.open();              // Open connection
-rig.close();             // Close (can reopen)
-rig.destroy();           // Destroy permanently
+await rig.open();        // Open connection
+await rig.close();       // Close (can reopen)
+await rig.destroy();     // Destroy permanently
 ```
 
 #### `getConnectionInfo()`
@@ -93,22 +117,22 @@ console.log('Status:', info.status);
 #### Frequency Control
 ```javascript
 // Set frequency (Hz)
-rig.setFrequency(144390000);
-rig.setFrequency(144390000, 'VFO-A');
+await rig.setFrequency(144390000);
+await rig.setFrequency(144390000, 'VFO-A');
 
 // Get frequency
-const freq = rig.getFrequency();
-const freqA = rig.getFrequency('VFO-A');
+const freq = await rig.getFrequency();
+const freqA = await rig.getFrequency('VFO-A');
 ```
 
 #### Mode Control
 ```javascript
 // Set mode
-rig.setMode('FM');
-rig.setMode('USB', 'wide');
+await rig.setMode('FM');
+await rig.setMode('USB', 'wide');
 
 // Get mode
-const mode = rig.getMode();
+const mode = await rig.getMode();
 console.log('Mode:', mode.mode);
 console.log('Bandwidth:', mode.bandwidth);
 ```
@@ -116,22 +140,22 @@ console.log('Bandwidth:', mode.bandwidth);
 #### VFO Control
 ```javascript
 // Set VFO
-rig.setVfo('VFO-A');
-rig.setVfo('VFO-B');
+await rig.setVfo('VFO-A');
+await rig.setVfo('VFO-B');
 
 // Get current VFO
-const vfo = rig.getVfo();
+const vfo = await rig.getVfo();
 ```
 
 #### PTT Control
 ```javascript
-rig.setPtt(true);   // Transmit
-rig.setPtt(false);  // Receive
+await rig.setPtt(true);   // Transmit
+await rig.setPtt(false);  // Receive
 ```
 
 #### Signal Monitoring
 ```javascript
-const strength = rig.getStrength();
+const strength = await rig.getStrength();
 console.log('Signal strength:', strength);
 ```
 
@@ -406,39 +430,48 @@ async function radioControl() {
   const rig = new HamLib(ft991a.rigModel, '/dev/ttyUSB0');
   
   try {
-    rig.open();
+    await rig.open();
     console.log('Connected to', rig.getConnectionInfo().port);
     
     // Set up radio
-    rig.setFrequency(144390000);
-    rig.setMode('FM');
-    rig.setLevel('RFPOWER', 0.5);
-    rig.setFunction('NB', true);
+    await rig.setFrequency(144390000);
+    await rig.setMode('FM');
+    await rig.setLevel('RFPOWER', 0.5);
+    await rig.setFunction('NB', true);
     
     // Store memory channel
-    rig.setMemoryChannel(1, {
+    await rig.setMemoryChannel(1, {
       frequency: 144390000,
       mode: 'FM',
       description: 'Local Repeater'
     });
     
     // Monitor signal
-    setInterval(() => {
-      const freq = rig.getFrequency();
-      const mode = rig.getMode();
-      const strength = rig.getStrength();
-      
-      console.log(`${freq/1000000} MHz ${mode.mode} S:${strength}`);
+    const monitorInterval = setInterval(async () => {
+      try {
+        const freq = await rig.getFrequency();
+        const mode = await rig.getMode();
+        const strength = await rig.getStrength();
+        
+        console.log(`${freq/1000000} MHz ${mode.mode} S:${strength}`);
+      } catch (err) {
+        console.error('Monitor error:', err.message);
+      }
     }, 1000);
+    
+    // Stop monitoring after 30 seconds
+    setTimeout(() => {
+      clearInterval(monitorInterval);
+    }, 30000);
     
   } catch (error) {
     console.error('Error:', error.message);
   } finally {
-    rig.close();
+    await rig.close();
   }
 }
 
-radioControl();
+radioControl().catch(console.error);
 ```
 
 ## 📋 Supported Radios

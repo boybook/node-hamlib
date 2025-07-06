@@ -224,25 +224,25 @@ declare class HamLib {
    * Must be called before other operations
    * @throws Throws error when connection fails
    */
-  open(): void;
+  open(): Promise<number>;
 
   /**
    * Set VFO (Variable Frequency Oscillator)
    * @param vfo VFO identifier, typically 'VFO-A' or 'VFO-B'
    * @throws Throws error when device doesn't support or operation fails
    */
-  setVfo(vfo: VFO): void;
+  setVfo(vfo: VFO): Promise<number>;
 
   /**
    * Set frequency
    * @param frequency Frequency value in hertz
    * @param vfo Optional VFO to set frequency on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
    * @example
-   * rig.setFrequency(144390000); // Set to 144.39MHz on current VFO
-   * rig.setFrequency(144390000, 'VFO-A'); // Set to 144.39MHz on VFO-A
-   * rig.setFrequency(144390000, 'VFO-B'); // Set to 144.39MHz on VFO-B
+   * await rig.setFrequency(144390000); // Set to 144.39MHz on current VFO
+   * await rig.setFrequency(144390000, 'VFO-A'); // Set to 144.39MHz on VFO-A
+   * await rig.setFrequency(144390000, 'VFO-B'); // Set to 144.39MHz on VFO-B
    */
-  setFrequency(frequency: number, vfo?: VFO): void;
+  setFrequency(frequency: number, vfo?: VFO): Promise<number>;
 
   /**
    * Set radio mode
@@ -250,60 +250,60 @@ declare class HamLib {
    * @param bandwidth Optional bandwidth setting ('narrow', 'wide', or default)
    * @note Operates on the current VFO (RIG_VFO_CURR)
    * @example
-   * rig.setMode('USB');
-   * rig.setMode('FM', 'narrow');
+   * await rig.setMode('USB');
+   * await rig.setMode('FM', 'narrow');
    */
-  setMode(mode: RadioMode, bandwidth?: 'narrow' | 'wide'): void;
+  setMode(mode: RadioMode, bandwidth?: 'narrow' | 'wide'): Promise<number>;
 
   /**
    * Set PTT (Push-to-Talk) status
    * @param state true to enable PTT, false to disable PTT
    * @note Operates on the current VFO (RIG_VFO_CURR)
    */
-  setPtt(state: boolean): void;
+  setPtt(state: boolean): Promise<number>;
 
   /**
    * Get current VFO
    * @returns Current VFO identifier
    */
-  getVfo(): string;
+  getVfo(): Promise<string>;
 
   /**
    * Get current frequency
    * @param vfo Optional VFO to get frequency from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
    * @returns Current frequency value in hertz
    * @example
-   * rig.getFrequency(); // Get frequency from current VFO
-   * rig.getFrequency('VFO-A'); // Get frequency from VFO-A
-   * rig.getFrequency('VFO-B'); // Get frequency from VFO-B
+   * await rig.getFrequency(); // Get frequency from current VFO
+   * await rig.getFrequency('VFO-A'); // Get frequency from VFO-A
+   * await rig.getFrequency('VFO-B'); // Get frequency from VFO-B
    */
-  getFrequency(vfo?: VFO): number;
+  getFrequency(vfo?: VFO): Promise<number>;
 
   /**
    * Get current radio mode
    * @returns Object containing mode and bandwidth information
    * @note Operates on the current VFO (RIG_VFO_CURR)
    */
-  getMode(): ModeInfo;
+  getMode(): Promise<ModeInfo>;
 
   /**
    * Get current signal strength
    * @returns Signal strength value
    * @note Operates on the current VFO (RIG_VFO_CURR)
    */
-  getStrength(): number;
+  getStrength(): Promise<number>;
 
   /**
    * Close connection to device
    * Does not destroy object, can re-establish connection by calling open()
    */
-  close(): void;
+  close(): Promise<number>;
 
   /**
    * Destroy connection to device
    * Should delete object reference after calling to enable garbage collection
    */
-  destroy(): void;
+  destroy(): Promise<number>;
 
   /**
    * Get connection information
