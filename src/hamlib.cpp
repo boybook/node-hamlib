@@ -3479,11 +3479,6 @@ Napi::Value NodeHamLib::GetSupportedRigs(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::SetSerialConfig(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
-  
   if (info.Length() < 2 || !info[0].IsString() || !info[1].IsString()) {
     Napi::TypeError::New(env, "Expected parameter name and value as strings").ThrowAsJavaScriptException();
     return env.Null();
@@ -3500,11 +3495,6 @@ Napi::Value NodeHamLib::SetSerialConfig(const Napi::CallbackInfo& info) {
 // Get serial configuration parameter
 Napi::Value NodeHamLib::GetSerialConfig(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   if (info.Length() < 1 || !info[0].IsString()) {
     Napi::TypeError::New(env, "Expected parameter name as string").ThrowAsJavaScriptException();

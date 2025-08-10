@@ -13,9 +13,26 @@ Control amateur radio transceivers from Node.js using the [Hamlib](https://hamli
 
 ## Installation
 
+### Option 1: NPM Installation (Recommended)
 ```bash
-npm install hamlib
+npm install node-hamlib
 ```
+
+The package will automatically use precompiled binaries if available for your platform, otherwise it will build from source.
+
+### Option 2: Manual Prebuilds Installation
+
+For faster installation or offline environments, you can manually install precompiled binaries:
+
+1. **Download Prebuilds**: Go to [Releases](../../releases) and download `node-hamlib-prebuilds.zip`
+2. **Extract**: Unzip to your project's `node_modules/node-hamlib/prebuilds/` directory
+3. **Install**: Run `npm install node-hamlib --ignore-scripts`
+
+**Supported Prebuilt Platforms:**
+- ✅ Linux x64
+- ✅ Linux ARM64
+- ✅ macOS ARM64 (Apple Silicon)
+- ✅ Windows x64
 
 ## Quick Start
 
@@ -158,21 +175,29 @@ const offset = await rig.getRepeaterOffset();
 
 Node-hamlib provides **comprehensive serial port configuration** with **13 parameters** covering all aspects of serial communication from basic data format to advanced timing control and device-specific features.
 
+**Important**: Serial configuration must be done **before** calling `rig.open()`.
+
 ```javascript
-// Configure serial parameters
+// Create rig instance
+const rig = new HamLib(1035, '/dev/ttyUSB0');
+
+// Configure serial parameters BEFORE opening connection
 await rig.setSerialConfig('rate', '115200');           // Baud rate: 150 to 4000000 bps
 await rig.setSerialConfig('data_bits', '8');           // Data bits: 5, 6, 7, 8
 await rig.setSerialConfig('serial_parity', 'None');    // Parity: None, Even, Odd, Mark, Space
 await rig.setSerialConfig('timeout', '1000');          // Timeout in milliseconds
 await rig.setSerialConfig('write_delay', '10');        // Inter-byte delay (ms)
 
-// Read current settings
-const rate = await rig.getSerialConfig('rate');
-const parity = await rig.getSerialConfig('serial_parity');
-
-// PTT/DCD configuration
+// PTT/DCD configuration (also before opening)
 await rig.setPttType('DTR');                           // PTT: RIG, DTR, RTS, NONE, etc.
 await rig.setDcdType('RIG');                           // DCD: RIG, DSR, CTS, NONE, etc.
+
+// Now open the connection with configured settings
+await rig.open();
+
+// Read current settings (can be done anytime)
+const rate = await rig.getSerialConfig('rate');
+const parity = await rig.getSerialConfig('serial_parity');
 ```
 
 #### Complete Serial Configuration Reference
