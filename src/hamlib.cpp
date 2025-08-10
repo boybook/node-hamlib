@@ -1246,15 +1246,6 @@ public:
                 result_code_ = -RIG_EINVAL;
                 error_message_ = "Flushx must be true/false or 1/0";
             }
-        } else if (param_name_ == "timeout_retry") {
-            int timeout_retry_val = std::stoi(param_value_);
-            if (timeout_retry_val >= 0) {
-                hamlib_instance_->my_rig->state.rigport.timeout_retry = (short)timeout_retry_val;
-                result_code_ = RIG_OK;
-            } else {
-                result_code_ = -RIG_EINVAL;
-                error_message_ = "Timeout retry count must be non-negative";
-            }
         } else {
             result_code_ = -RIG_EINVAL;
             error_message_ = "Unknown serial configuration parameter";
@@ -1365,9 +1356,6 @@ public:
             result_code_ = RIG_OK;
         } else if (param_name_ == "flushx") {
             param_value_ = hamlib_instance_->my_rig->state.rigport.flushx ? "true" : "false";
-            result_code_ = RIG_OK;
-        } else if (param_name_ == "timeout_retry") {
-            param_value_ = std::to_string(hamlib_instance_->my_rig->state.rigport.timeout_retry);
             result_code_ = RIG_OK;
         } else {
             result_code_ = -RIG_EINVAL;

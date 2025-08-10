@@ -192,7 +192,7 @@ type SerialConfigParam =
   // Timing control
   'write_delay' | 'post_write_delay' |
   // Advanced features
-  'flushx' | 'timeout_retry';
+  'flushx';
 
 /**
  * PTT (Push-to-Talk) types
@@ -579,7 +579,6 @@ declare class HamLib {
    * 
    * // Advanced features
    * await hamlib.setSerialConfig('flushx', 'true');
-   * await hamlib.setSerialConfig('timeout_retry', '2');
    */
   setSerialConfig(paramName: SerialConfigParam, paramValue: string): Promise<number>;
 

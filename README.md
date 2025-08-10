@@ -6,7 +6,7 @@ Control amateur radio transceivers from Node.js using the [Hamlib](https://hamli
 
 - **300+ Supported Radios** - Yaesu, Icom, Kenwood, Elecraft, FlexRadio, and more
 - **Full Async/Promise API** - Non-blocking operations with async/await support  
-- **Comprehensive Serial Control** - 14 parameters for complete serial port configuration
+- **Comprehensive Serial Control** - 13 parameters for complete serial port configuration
 - **Multiple Connections** - Serial ports, network (rigctld), direct control
 - **TypeScript Ready** - Complete type definitions included
 - **Cross-platform** - Windows, Linux, macOS
@@ -156,7 +156,7 @@ const offset = await rig.getRepeaterOffset();
 
 ### Serial Configuration
 
-Node-hamlib provides **comprehensive serial port configuration** with **14 parameters** covering all aspects of serial communication from basic data format to advanced timing control and device-specific features.
+Node-hamlib provides **comprehensive serial port configuration** with **13 parameters** covering all aspects of serial communication from basic data format to advanced timing control and device-specific features.
 
 ```javascript
 // Configure serial parameters
@@ -191,7 +191,6 @@ await rig.setDcdType('RIG');                           // DCD: RIG, DSR, CTS, NO
 | **Timing** | `write_delay` | Inter-byte delay (ms) | Any non-negative integer |
 | | `post_write_delay` | Inter-command delay (ms) | Any non-negative integer |
 | **Advanced** | `flushx` | MicroHam flush mode | `true`, `false` |
-| | `timeout_retry` | Timeout retry count | Any non-negative integer |
 
 ## Complete Example
 

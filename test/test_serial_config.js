@@ -105,8 +105,7 @@ try {
       { name: 'post_write_delay', testValue: '50', category: 'Timing' },
       
       // Advanced features
-      { name: 'flushx', testValue: 'false', category: 'Advanced' },
-      { name: 'timeout_retry', testValue: '2', category: 'Advanced' }
+      { name: 'flushx', testValue: 'false', category: 'Advanced' }
     ];
     
     // Group parameters by category for better output
@@ -254,12 +253,12 @@ try {
     
     console.log('\n📊 Test Summary');
     console.log('===============');
-    console.log('✅ All 14 serial configuration parameters are available and functional:');
+    console.log('✅ All 13 serial configuration parameters are available and functional:');
     console.log('  • Basic Serial (4): data_bits, stop_bits, serial_parity, serial_handshake');
     console.log('  • Control Signals (2): rts_state, dtr_state');
     console.log('  • Communication (3): rate, timeout, retry');
     console.log('  • Timing (2): write_delay, post_write_delay');
-    console.log('  • Advanced (2): flushx, timeout_retry');
+    console.log('  • Advanced (1): flushx');
     console.log('✅ Parameter validation and error handling work correctly');
     console.log('✅ PTT and DCD type configuration works as expected');
     console.log('✅ Comprehensive baud rate support (150 bps to 4 Mbps)');
