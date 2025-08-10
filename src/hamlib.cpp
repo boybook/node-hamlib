@@ -54,7 +54,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -77,7 +81,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -104,7 +112,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, freq_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, freq_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -131,7 +143,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -159,12 +175,16 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        Napi::Object obj = Napi::Object::New(env);
-        // Convert mode to string using rig_strrmode
-        const char* mode_str = rig_strrmode(mode_);
-        obj.Set(Napi::String::New(env, "mode"), Napi::String::New(env, mode_str));
-        obj.Set(Napi::String::New(env, "bandwidth"), width_);
-        deferred_.Resolve(obj);
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            Napi::Object obj = Napi::Object::New(env);
+            // Convert mode to string using rig_strrmode
+            const char* mode_str = rig_strrmode(mode_);
+            obj.Set(Napi::String::New(env, "mode"), Napi::String::New(env, mode_str));
+            obj.Set(Napi::String::New(env, "bandwidth"), width_);
+            deferred_.Resolve(obj);
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -191,7 +211,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -217,7 +241,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, strength_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, strength_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -244,7 +272,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -273,7 +305,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, value_.f));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, value_.f));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -300,7 +336,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -327,7 +367,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Boolean::New(env, state_ != 0));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Boolean::New(env, state_ != 0));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -354,7 +398,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -436,7 +484,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -462,7 +514,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -488,7 +544,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, rit_offset_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, rit_offset_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -514,7 +574,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -540,7 +604,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, xit_offset_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, xit_offset_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -574,7 +642,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -597,7 +669,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -624,7 +700,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, tx_freq_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, tx_freq_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -651,7 +731,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -679,16 +763,20 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        Napi::Object obj = Napi::Object::New(env);
-        obj.Set(Napi::String::New(env, "enabled"), Napi::Boolean::New(env, split_ == RIG_SPLIT_ON));
-        
-        const char* vfo_str = "VFO-B";
-        if (tx_vfo_ == RIG_VFO_A) {
-            vfo_str = "VFO-A";
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            Napi::Object obj = Napi::Object::New(env);
+            obj.Set(Napi::String::New(env, "enabled"), Napi::Boolean::New(env, split_ == RIG_SPLIT_ON));
+            
+            const char* vfo_str = "VFO-B";
+            if (tx_vfo_ == RIG_VFO_A) {
+                vfo_str = "VFO-A";
+            }
+            obj.Set(Napi::String::New(env, "txVfo"), Napi::String::New(env, vfo_str));
+            
+            deferred_.Resolve(obj);
         }
-        obj.Set(Napi::String::New(env, "txVfo"), Napi::String::New(env, vfo_str));
-        
-        deferred_.Resolve(obj);
     }
     
     void OnError(const Napi::Error& e) override {
@@ -716,7 +804,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -805,7 +897,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -833,7 +929,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -857,7 +957,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -885,7 +989,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -909,7 +1017,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -936,7 +1048,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -967,14 +1083,18 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        Napi::Object result = Napi::Object::New(env);
-        
-        result.Set("currentAntenna", Napi::Number::New(env, antenna_curr_));
-        result.Set("txAntenna", Napi::Number::New(env, antenna_tx_));
-        result.Set("rxAntenna", Napi::Number::New(env, antenna_rx_));
-        result.Set("option", Napi::Number::New(env, option_.f));
-        
-        deferred_.Resolve(result);
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            Napi::Object result = Napi::Object::New(env);
+            
+            result.Set("currentAntenna", Napi::Number::New(env, antenna_curr_));
+            result.Set("txAntenna", Napi::Number::New(env, antenna_tx_));
+            result.Set("rxAntenna", Napi::Number::New(env, antenna_rx_));
+            result.Set("option", Napi::Number::New(env, option_.f));
+            
+            deferred_.Resolve(result);
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -1006,7 +1126,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, mwpower_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, mwpower_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -1036,7 +1160,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, power_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, power_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -1066,7 +1194,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -1095,12 +1227,16 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        Napi::Object obj = Napi::Object::New(env);
-        // Convert mode to string using rig_strrmode
-        const char* mode_str = rig_strrmode(tx_mode_);
-        obj.Set(Napi::String::New(env, "mode"), Napi::String::New(env, mode_str));
-        obj.Set(Napi::String::New(env, "width"), tx_width_);
-        deferred_.Resolve(obj);
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            Napi::Object obj = Napi::Object::New(env);
+            // Convert mode to string using rig_strrmode
+            const char* mode_str = rig_strrmode(tx_mode_);
+            obj.Set(Napi::String::New(env, "mode"), Napi::String::New(env, mode_str));
+            obj.Set(Napi::String::New(env, "width"), tx_width_);
+            deferred_.Resolve(obj);
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -1254,7 +1390,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -1365,7 +1505,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::String::New(env, param_value_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::String::New(env, param_value_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -1414,7 +1558,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -1469,7 +1617,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::String::New(env, ptt_type_str_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::String::New(env, ptt_type_str_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -1519,7 +1671,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -1577,7 +1733,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::String::New(env, dcd_type_str_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::String::New(env, dcd_type_str_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -1604,7 +1764,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -1630,7 +1794,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, static_cast<int>(status_)));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, static_cast<int>(status_)));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -1657,7 +1825,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Boolean::New(env, ptt_ == RIG_PTT_ON));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Boolean::New(env, ptt_ == RIG_PTT_ON));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -1685,7 +1857,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Boolean::New(env, dcd_ == RIG_DCD_ON));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Boolean::New(env, dcd_ == RIG_DCD_ON));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -1713,7 +1889,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -1740,7 +1920,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, ts_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, ts_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -1768,7 +1952,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -1823,7 +2011,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -1850,7 +2042,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, offset_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, offset_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -3788,7 +3984,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -3815,7 +4015,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, tone_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, tone_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -3842,7 +4046,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -3869,7 +4077,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -3896,7 +4108,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -3923,7 +4139,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, tone_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, tone_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -3950,7 +4170,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -3977,7 +4201,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -4005,7 +4233,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -4034,7 +4266,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, value_.f));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, value_.f));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -4062,7 +4298,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -4092,10 +4332,14 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        Napi::Object obj = Napi::Object::New(env);
-        obj.Set(Napi::String::New(env, "digits"), Napi::String::New(env, digits_.substr(0, length_)));
-        obj.Set(Napi::String::New(env, "length"), Napi::Number::New(env, length_));
-        deferred_.Resolve(obj);
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            Napi::Object obj = Napi::Object::New(env);
+            obj.Set(Napi::String::New(env, "digits"), Napi::String::New(env, digits_.substr(0, length_)));
+            obj.Set(Napi::String::New(env, "length"), Napi::Number::New(env, length_));
+            deferred_.Resolve(obj);
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -4125,7 +4369,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, ch_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, ch_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -4152,7 +4400,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -4182,7 +4434,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, count_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, count_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -4209,7 +4465,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -4236,7 +4496,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -4262,7 +4526,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -4289,7 +4557,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -4323,7 +4595,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -4359,7 +4635,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -4395,11 +4675,15 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        Napi::Object obj = Napi::Object::New(env);
-        obj.Set(Napi::String::New(env, "txFrequency"), Napi::Number::New(env, static_cast<double>(tx_freq_)));
-        obj.Set(Napi::String::New(env, "txMode"), Napi::String::New(env, rig_strrmode(tx_mode_)));
-        obj.Set(Napi::String::New(env, "txWidth"), Napi::Number::New(env, static_cast<double>(tx_width_)));
-        deferred_.Resolve(obj);
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            Napi::Object obj = Napi::Object::New(env);
+            obj.Set(Napi::String::New(env, "txFrequency"), Napi::Number::New(env, static_cast<double>(tx_freq_)));
+            obj.Set(Napi::String::New(env, "txMode"), Napi::String::New(env, rig_strrmode(tx_mode_)));
+            obj.Set(Napi::String::New(env, "txWidth"), Napi::Number::New(env, static_cast<double>(tx_width_)));
+            deferred_.Resolve(obj);
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -4429,7 +4713,11 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, result_code_));
+        if (result_code_ != RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
