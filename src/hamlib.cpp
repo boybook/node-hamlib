@@ -1,4 +1,5 @@
 #include "hamlib.h"
+#include "hamlib_compat.h"
 #include <string>
 #include <vector>
 #include <memory>
@@ -4238,10 +4239,17 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo) {}
     
     void Execute() override {
+        #if HAVE_RIG_STOP_VOICE_MEM
         result_code_ = rig_stop_voice_mem(hamlib_instance_->my_rig, vfo_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
         }
+        #else
+        // rig_stop_voice_mem function is not available in this hamlib version
+        // Return not implemented for compatibility with older hamlib versions
+        result_code_ = -RIG_ENIMPL;
+        error_message_ = "rig_stop_voice_mem not available in this hamlib version";
+        #endif
     }
     
     void OnOK() override {
@@ -4267,10 +4275,17 @@ public:
           tx_mode_(tx_mode), tx_width_(tx_width) {}
     
     void Execute() override {
+        #if HAVE_RIG_SPLIT_FREQ_MODE
         result_code_ = rig_set_split_freq_mode(hamlib_instance_->my_rig, vfo_, tx_freq_, tx_mode_, tx_width_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
         }
+        #else
+        // rig_set_split_freq_mode function is not available in this hamlib version
+        // Fall back to using separate calls
+        result_code_ = -RIG_ENIMPL;
+        error_message_ = "rig_set_split_freq_mode not available - use setSplitFreq and setSplitMode separately";
+        #endif
     }
     
     void OnOK() override {
@@ -4296,10 +4311,17 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tx_freq_(0), tx_mode_(RIG_MODE_NONE), tx_width_(0) {}
     
     void Execute() override {
+        #if HAVE_RIG_SPLIT_FREQ_MODE
         result_code_ = rig_get_split_freq_mode(hamlib_instance_->my_rig, vfo_, &tx_freq_, &tx_mode_, &tx_width_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
         }
+        #else
+        // rig_get_split_freq_mode function is not available in this hamlib version
+        // Fall back to using separate calls
+        result_code_ = -RIG_ENIMPL;
+        error_message_ = "rig_get_split_freq_mode not available - use getSplitFreq and getSplitMode separately";
+        #endif
     }
     
     void OnOK() override {
