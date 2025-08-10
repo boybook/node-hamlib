@@ -1,6 +1,6 @@
 {
   "name": "hamlib",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Node.js wrapper for hamlib radio control library",
   "main": "index.js",
   "module": "lib/index.mjs",
