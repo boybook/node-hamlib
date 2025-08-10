@@ -117,11 +117,11 @@ private:
 
 class SetModeAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, rmode_t mode, pbwidth_t width)
-        : HamLibAsyncWorker(env, hamlib_instance), mode_(mode), width_(width) {}
+    SetModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, rmode_t mode, pbwidth_t width, vfo_t vfo = RIG_VFO_CURR)
+        : HamLibAsyncWorker(env, hamlib_instance), mode_(mode), width_(width), vfo_(vfo) {}
     
     void Execute() override {
-        result_code_ = rig_set_mode(hamlib_instance_->my_rig, RIG_VFO_CURR, mode_, width_);
+        result_code_ = rig_set_mode(hamlib_instance_->my_rig, vfo_, mode_, width_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
         }
@@ -140,6 +140,7 @@ public:
 private:
     rmode_t mode_;
     pbwidth_t width_;
+    vfo_t vfo_;
 };
 
 class GetModeAsyncWorker : public HamLibAsyncWorker {
@@ -202,11 +203,11 @@ private:
 
 class GetStrengthAsyncWorker : public HamLibAsyncWorker {
 public:
-    GetStrengthAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
-        : HamLibAsyncWorker(env, hamlib_instance), strength_(0) {}
+    GetStrengthAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
+        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), strength_(0) {}
     
     void Execute() override {
-        result_code_ = rig_get_strength(hamlib_instance_->my_rig, RIG_VFO_CURR, &strength_);
+        result_code_ = rig_get_strength(hamlib_instance_->my_rig, vfo_, &strength_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
         }
@@ -223,6 +224,7 @@ public:
     }
     
 private:
+    vfo_t vfo_;
     int strength_;
 };
 
@@ -663,11 +665,11 @@ private:
 
 class GetSplitAsyncWorker : public HamLibAsyncWorker {
 public:
-    GetSplitAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
-        : HamLibAsyncWorker(env, hamlib_instance), split_(RIG_SPLIT_OFF), tx_vfo_(RIG_VFO_B) {}
+    GetSplitAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo = RIG_VFO_CURR)
+        : HamLibAsyncWorker(env, hamlib_instance), split_(RIG_SPLIT_OFF), tx_vfo_(RIG_VFO_B), vfo_(vfo) {}
     
     void Execute() override {
-        result_code_ = rig_get_split_vfo(hamlib_instance_->my_rig, RIG_VFO_CURR, &split_, &tx_vfo_);
+        result_code_ = rig_get_split_vfo(hamlib_instance_->my_rig, vfo_, &split_, &tx_vfo_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
         }
@@ -695,6 +697,7 @@ public:
 private:
     split_t split_;
     vfo_t tx_vfo_;
+    vfo_t vfo_;
 };
 
 class SetVfoAsyncWorker : public HamLibAsyncWorker {
@@ -731,13 +734,38 @@ public:
     void Execute() override {
         result_code_ = rig_get_vfo(hamlib_instance_->my_rig, &vfo_);
         if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+            // 提供更清晰的错误信息
+            switch (result_code_) {
+                case RIG_ENAVAIL:
+                case -11:  // Feature not available
+                    error_message_ = "VFO query not supported by this radio";
+                    break;
+                case RIG_EIO:
+                    error_message_ = "I/O error during VFO query";
+                    break;
+                case RIG_ETIMEOUT:
+                    error_message_ = "Timeout during VFO query";
+                    break;
+                case RIG_EPROTO:
+                    error_message_ = "Protocol error during VFO query";
+                    break;
+                default:
+                    error_message_ = "VFO query failed with code " + std::to_string(result_code_);
+                    break;
+            }
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        const char* vfo_str = "CURR";
+        
+        // 如果API调用失败，reject Promise
+        if (result_code_ != RIG_OK) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+            return;
+        }
+        
+        const char* vfo_str = "VFO-CURR";  // 默认值
         if (vfo_ == RIG_VFO_A) {
             vfo_str = "VFO-A";
         } else if (vfo_ == RIG_VFO_B) {
@@ -894,12 +922,11 @@ private:
 // Set Antenna AsyncWorker
 class SetAntennaAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetAntennaAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, ant_t antenna)
-        : HamLibAsyncWorker(env, hamlib_instance), antenna_(antenna) {}
+    SetAntennaAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, ant_t antenna, vfo_t vfo, value_t option)
+        : HamLibAsyncWorker(env, hamlib_instance), antenna_(antenna), vfo_(vfo), option_(option) {}
     
     void Execute() override {
-        value_t option = {0};
-        result_code_ = rig_set_ant(hamlib_instance_->my_rig, RIG_VFO_CURR, antenna_, option);
+        result_code_ = rig_set_ant(hamlib_instance_->my_rig, vfo_, antenna_, option_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
         }
@@ -917,21 +944,20 @@ public:
     
 private:
     ant_t antenna_;
+    vfo_t vfo_;
+    value_t option_;
 };
 
 // Get Antenna AsyncWorker
 class GetAntennaAsyncWorker : public HamLibAsyncWorker {
 public:
-    GetAntennaAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
-        : HamLibAsyncWorker(env, hamlib_instance), antenna_curr_(0) {}
+    GetAntennaAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo, ant_t antenna)
+        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), antenna_(antenna), antenna_curr_(0), antenna_tx_(0), antenna_rx_(0) {}
     
     void Execute() override {
-        ant_t antenna = RIG_ANT_CURR;
-        value_t option = {0};
-        ant_t antenna_tx;
-        ant_t antenna_rx;
+        option_ = {0};
         
-        result_code_ = rig_get_ant(hamlib_instance_->my_rig, RIG_VFO_CURR, antenna, &option, &antenna_curr_, &antenna_tx, &antenna_rx);
+        result_code_ = rig_get_ant(hamlib_instance_->my_rig, vfo_, antenna_, &option_, &antenna_curr_, &antenna_tx_, &antenna_rx_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
         }
@@ -939,7 +965,14 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::Number::New(env, antenna_curr_));
+        Napi::Object result = Napi::Object::New(env);
+        
+        result.Set("currentAntenna", Napi::Number::New(env, antenna_curr_));
+        result.Set("txAntenna", Napi::Number::New(env, antenna_tx_));
+        result.Set("rxAntenna", Napi::Number::New(env, antenna_rx_));
+        result.Set("option", Napi::Number::New(env, option_.f));
+        
+        deferred_.Resolve(result);
     }
     
     void OnError(const Napi::Error& e) override {
@@ -948,7 +981,72 @@ public:
     }
     
 private:
+    vfo_t vfo_;
+    ant_t antenna_;
     ant_t antenna_curr_;
+    ant_t antenna_tx_;
+    ant_t antenna_rx_;
+    value_t option_;
+};
+
+// Power to mW Conversion AsyncWorker
+class Power2mWAsyncWorker : public HamLibAsyncWorker {
+public:
+    Power2mWAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, float power, freq_t freq, rmode_t mode)
+        : HamLibAsyncWorker(env, hamlib_instance), power_(power), freq_(freq), mode_(mode), mwpower_(0) {}
+    
+    void Execute() override {
+        result_code_ = rig_power2mW(hamlib_instance_->my_rig, &mwpower_, power_, freq_, mode_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        deferred_.Resolve(Napi::Number::New(env, mwpower_));
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+    }
+    
+private:
+    float power_;
+    freq_t freq_;
+    rmode_t mode_;
+    unsigned int mwpower_;
+};
+
+// mW to Power Conversion AsyncWorker
+class MW2PowerAsyncWorker : public HamLibAsyncWorker {
+public:
+    MW2PowerAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, unsigned int mwpower, freq_t freq, rmode_t mode)
+        : HamLibAsyncWorker(env, hamlib_instance), mwpower_(mwpower), freq_(freq), mode_(mode), power_(0.0) {}
+    
+    void Execute() override {
+        result_code_ = rig_mW2power(hamlib_instance_->my_rig, &power_, mwpower_, freq_, mode_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        deferred_.Resolve(Napi::Number::New(env, power_));
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+    }
+    
+private:
+    unsigned int mwpower_;
+    freq_t freq_;
+    rmode_t mode_;
+    float power_;
 };
 
 // Set Split Mode AsyncWorker
@@ -1870,6 +1968,12 @@ Napi::Value NodeHamLib::SetFrequency(const Napi::CallbackInfo & info) {
   
   freq_t freq = info[0].As<Napi::Number>().DoubleValue();
   
+  // Basic frequency range validation
+  if (freq < 1000 || freq > 10000000000) { // 1 kHz to 10 GHz reasonable range
+    Napi::Error::New(env, "Frequency out of range (1 kHz - 10 GHz)").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
   // Support optional VFO parameter
   vfo_t vfo = RIG_VFO_CURR;
   
@@ -1911,18 +2015,34 @@ Napi::Value NodeHamLib::SetMode(const Napi::CallbackInfo & info) {
 
   std::string modestr = info[0].As<Napi::String>().Utf8Value();
   rmode_t mode = rig_parse_mode(modestr.c_str());
+  
+  if (mode == RIG_MODE_NONE) {
+    Napi::Error::New(env, "Invalid mode: " + modestr).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
   pbwidth_t bandwidth = RIG_PASSBAND_NORMAL;
+  vfo_t vfo = RIG_VFO_CURR;
 
+  // Parse parameters: setMode(mode) or setMode(mode, bandwidth) or setMode(mode, bandwidth, vfo)
   if (info.Length() >= 2 && info[1].IsString()) {
     std::string bandstr = info[1].As<Napi::String>().Utf8Value();
     if (bandstr == "narrow") {
       bandwidth = rig_passband_narrow(my_rig, mode);
     } else if (bandstr == "wide") {
       bandwidth = rig_passband_wide(my_rig, mode);
+    } else {
+      // If second parameter is not "narrow" or "wide", might be VFO
+      vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
     }
   }
+  
+  // Check for third parameter (VFO) if bandwidth was specified
+  if (info.Length() >= 3) {
+    vfo = parseVfoParameter(info, 2, RIG_VFO_CURR);
+  }
 
-  SetModeAsyncWorker* worker = new SetModeAsyncWorker(env, this, mode, bandwidth);
+  SetModeAsyncWorker* worker = new SetModeAsyncWorker(env, this, mode, bandwidth, vfo);
   worker->Queue();
   
   return worker->GetPromise();
@@ -2024,7 +2144,14 @@ Napi::Value NodeHamLib::GetStrength(const Napi::CallbackInfo & info) {
     return env.Null();
   }
   
-  GetStrengthAsyncWorker* worker = new GetStrengthAsyncWorker(env, this);
+  // Support optional VFO parameter: getStrength() or getStrength(vfo)
+  vfo_t vfo = RIG_VFO_CURR;
+  
+  if (info.Length() >= 1 && info[0].IsString()) {
+    vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  }
+  
+  GetStrengthAsyncWorker* worker = new GetStrengthAsyncWorker(env, this, vfo);
   worker->Queue();
   
   return worker->GetPromise();
@@ -2724,6 +2851,13 @@ Napi::Value NodeHamLib::SetSplitFreq(const Napi::CallbackInfo & info) {
   }
   
   freq_t tx_freq = info[0].As<Napi::Number>().DoubleValue();
+  
+  // Basic frequency range validation
+  if (tx_freq < 1000 || tx_freq > 10000000000) { // 1 kHz to 10 GHz reasonable range
+    Napi::Error::New(env, "Frequency out of range (1 kHz - 10 GHz)").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
   vfo_t vfo = RIG_VFO_CURR;
   
   if (info.Length() >= 2 && info[1].IsString()) {
@@ -2772,6 +2906,12 @@ Napi::Value NodeHamLib::SetSplitMode(const Napi::CallbackInfo & info) {
   
   std::string modeStr = info[0].As<Napi::String>().Utf8Value();
   rmode_t tx_mode = rig_parse_mode(modeStr.c_str());
+  
+  if (tx_mode == RIG_MODE_NONE) {
+    Napi::Error::New(env, "Invalid mode: " + modeStr).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
   pbwidth_t tx_width = RIG_PASSBAND_NORMAL;
   vfo_t vfo = RIG_VFO_CURR;
   
@@ -2836,10 +2976,20 @@ Napi::Value NodeHamLib::SetSplit(const Napi::CallbackInfo & info) {
   vfo_t rx_vfo = RIG_VFO_CURR;
   vfo_t tx_vfo = RIG_VFO_B;  // Default TX VFO
   
+  // ⚠️  CRITICAL HISTORICAL ISSUE WARNING ⚠️
+  // This Split API had a severe parameter order bug that caused AI to repeatedly
+  // modify but never correctly fix. See CLAUDE.md for full details.
+  // 
   // Parse different overloads:
   // setSplit(enable)
   // setSplit(enable, rxVfo) - rxVfo here is RX VFO
-  // setSplit(enable, txVfo, rxVfo) - txVfo and RX VFO
+  // setSplit(enable, rxVfo, txVfo) - RX VFO and TX VFO
+  // 
+  // ⚠️  VERIFIED PARAMETER ORDER (2024-08-10):
+  // - info[1] = rxVfo (RX VFO) 
+  // - info[2] = txVfo (TX VFO)
+  // - Must match JavaScript: setSplit(enable, rxVfo, txVfo)
+  // - Must match TypeScript: setSplit(enable: boolean, rxVfo?: VFO, txVfo?: VFO)
   
   if (info.Length() == 2 && info[1].IsString()) {
     // setSplit(enable, rxVfo) - treating vfo as RX VFO for current VFO operation
@@ -2850,20 +3000,23 @@ Napi::Value NodeHamLib::SetSplit(const Napi::CallbackInfo & info) {
       rx_vfo = RIG_VFO_B;
     }
   } else if (info.Length() == 3 && info[1].IsString() && info[2].IsString()) {
-    // setSplit(enable, txVfo, rxVfo)
-    std::string txVfoStr = info[1].As<Napi::String>().Utf8Value();
-    std::string rxVfoStr = info[2].As<Napi::String>().Utf8Value();
-    
-    if (txVfoStr == "VFO-A") {
-      tx_vfo = RIG_VFO_A;
-    } else if (txVfoStr == "VFO-B") {
-      tx_vfo = RIG_VFO_B;
-    }
+    // setSplit(enable, rxVfo, txVfo)
+    // ⚠️  CRITICAL: Parameter assignment was WRONG before 2024-08-10 fix!
+    // ⚠️  Previous bug: info[1] -> txVfoStr, info[2] -> rxVfoStr (WRONG!)
+    // ⚠️  Correct now: info[1] -> rxVfoStr, info[2] -> txVfoStr (RIGHT!)
+    std::string rxVfoStr = info[1].As<Napi::String>().Utf8Value();  // ✅ CORRECT: info[1] is rxVfo
+    std::string txVfoStr = info[2].As<Napi::String>().Utf8Value();  // ✅ CORRECT: info[2] is txVfo
     
     if (rxVfoStr == "VFO-A") {
       rx_vfo = RIG_VFO_A;
     } else if (rxVfoStr == "VFO-B") {
       rx_vfo = RIG_VFO_B;
+    }
+    
+    if (txVfoStr == "VFO-A") {
+      tx_vfo = RIG_VFO_A;
+    } else if (txVfoStr == "VFO-B") {
+      tx_vfo = RIG_VFO_B;
     }
   }
   
@@ -2880,7 +3033,15 @@ Napi::Value NodeHamLib::GetSplit(const Napi::CallbackInfo & info) {
     return env.Null();
   }
   
-  GetSplitAsyncWorker* asyncWorker = new GetSplitAsyncWorker(env, this);
+  vfo_t vfo = RIG_VFO_CURR;
+  
+  if (info.Length() >= 1 && info[0].IsString()) {
+    // getSplit(vfo)
+    vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  }
+  // Otherwise use default RIG_VFO_CURR for getSplit()
+  
+  GetSplitAsyncWorker* asyncWorker = new GetSplitAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
   return asyncWorker->GetPromise();
 }
@@ -2954,7 +3115,16 @@ Napi::Value NodeHamLib::SetAntenna(const Napi::CallbackInfo & info) {
   
   ant_t antenna = info[0].As<Napi::Number>().Int32Value();
   
-  SetAntennaAsyncWorker* asyncWorker = new SetAntennaAsyncWorker(env, this, antenna);
+  // Support optional VFO parameter: setAntenna(antenna) or setAntenna(antenna, vfo)
+  vfo_t vfo = RIG_VFO_CURR;
+  if (info.Length() >= 2 && info[1].IsString()) {
+    vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+  }
+  
+  // Default option value (can be extended later if needed)
+  value_t option = {0};
+  
+  SetAntennaAsyncWorker* asyncWorker = new SetAntennaAsyncWorker(env, this, antenna, vfo, option);
   asyncWorker->Queue();
   return asyncWorker->GetPromise();
 }
@@ -2967,7 +3137,16 @@ Napi::Value NodeHamLib::GetAntenna(const Napi::CallbackInfo & info) {
     return env.Null();
   }
   
-  GetAntennaAsyncWorker* asyncWorker = new GetAntennaAsyncWorker(env, this);
+  // Support optional VFO parameter: getAntenna() or getAntenna(vfo)
+  vfo_t vfo = RIG_VFO_CURR;
+  if (info.Length() >= 1 && info[0].IsString()) {
+    vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  }
+  
+  // Default antenna query (RIG_ANT_CURR gets all antenna info)
+  ant_t antenna = RIG_ANT_CURR;
+  
+  GetAntennaAsyncWorker* asyncWorker = new GetAntennaAsyncWorker(env, this, vfo, antenna);
   asyncWorker->Queue();
   return asyncWorker->GetPromise();
 }
@@ -3055,6 +3234,49 @@ Napi::Function NodeHamLib::GetClass(Napi::Env env) {
       NodeHamLib::InstanceMethod("getRepeaterShift", & NodeHamLib::GetRepeaterShift),
       NodeHamLib::InstanceMethod("setRepeaterOffset", & NodeHamLib::SetRepeaterOffset),
       NodeHamLib::InstanceMethod("getRepeaterOffset", & NodeHamLib::GetRepeaterOffset),
+      
+      // CTCSS/DCS Tone Control
+      NodeHamLib::InstanceMethod("setCtcssTone", & NodeHamLib::SetCtcssTone),
+      NodeHamLib::InstanceMethod("getCtcssTone", & NodeHamLib::GetCtcssTone),
+      NodeHamLib::InstanceMethod("setDcsCode", & NodeHamLib::SetDcsCode),
+      NodeHamLib::InstanceMethod("getDcsCode", & NodeHamLib::GetDcsCode),
+      NodeHamLib::InstanceMethod("setCtcssSql", & NodeHamLib::SetCtcssSql),
+      NodeHamLib::InstanceMethod("getCtcssSql", & NodeHamLib::GetCtcssSql),
+      NodeHamLib::InstanceMethod("setDcsSql", & NodeHamLib::SetDcsSql),
+      NodeHamLib::InstanceMethod("getDcsSql", & NodeHamLib::GetDcsSql),
+      
+      // Parameter Control
+      NodeHamLib::InstanceMethod("setParm", & NodeHamLib::SetParm),
+      NodeHamLib::InstanceMethod("getParm", & NodeHamLib::GetParm),
+      
+      // DTMF Support
+      NodeHamLib::InstanceMethod("sendDtmf", & NodeHamLib::SendDtmf),
+      NodeHamLib::InstanceMethod("recvDtmf", & NodeHamLib::RecvDtmf),
+      
+      // Memory Channel Advanced Operations
+      NodeHamLib::InstanceMethod("getMem", & NodeHamLib::GetMem),
+      NodeHamLib::InstanceMethod("setBank", & NodeHamLib::SetBank),
+      NodeHamLib::InstanceMethod("memCount", & NodeHamLib::MemCount),
+      
+      // Morse Code Support
+      NodeHamLib::InstanceMethod("sendMorse", & NodeHamLib::SendMorse),
+      NodeHamLib::InstanceMethod("stopMorse", & NodeHamLib::StopMorse),
+      NodeHamLib::InstanceMethod("waitMorse", & NodeHamLib::WaitMorse),
+      
+      // Voice Memory Support
+      NodeHamLib::InstanceMethod("sendVoiceMem", & NodeHamLib::SendVoiceMem),
+      NodeHamLib::InstanceMethod("stopVoiceMem", & NodeHamLib::StopVoiceMem),
+      
+      // Complex Split Frequency/Mode Operations
+      NodeHamLib::InstanceMethod("setSplitFreqMode", & NodeHamLib::SetSplitFreqMode),
+      NodeHamLib::InstanceMethod("getSplitFreqMode", & NodeHamLib::GetSplitFreqMode),
+      
+      // Power Conversion Functions
+      NodeHamLib::InstanceMethod("power2mW", & NodeHamLib::Power2mW),
+      NodeHamLib::InstanceMethod("mW2power", & NodeHamLib::MW2Power),
+      
+      // Reset Function
+      NodeHamLib::InstanceMethod("reset", & NodeHamLib::Reset),
 
       NodeHamLib::InstanceMethod("close", & NodeHamLib::Close),
       NodeHamLib::InstanceMethod("destroy", & NodeHamLib::Destroy),
@@ -3477,6 +3699,1091 @@ Napi::Value NodeHamLib::GetRepeaterOffset(const Napi::CallbackInfo& info) {
   vfo_t vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
   
   GetRepeaterOffsetAsyncWorker* asyncWorker = new GetRepeaterOffsetAsyncWorker(env, this, vfo);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+// CTCSS/DCS Tone Control AsyncWorker classes
+class SetCtcssToneAsyncWorker : public HamLibAsyncWorker {
+public:
+    SetCtcssToneAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo, tone_t tone)
+        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tone_(tone) {}
+    
+    void Execute() override {
+        result_code_ = rig_set_ctcss_tone(hamlib_instance_->my_rig, vfo_, tone_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        deferred_.Resolve(Napi::Number::New(env, result_code_));
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+    }
+    
+private:
+    vfo_t vfo_;
+    tone_t tone_;
+};
+
+class GetCtcssToneAsyncWorker : public HamLibAsyncWorker {
+public:
+    GetCtcssToneAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
+        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tone_(0) {}
+    
+    void Execute() override {
+        result_code_ = rig_get_ctcss_tone(hamlib_instance_->my_rig, vfo_, &tone_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        deferred_.Resolve(Napi::Number::New(env, tone_));
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+    }
+    
+private:
+    vfo_t vfo_;
+    tone_t tone_;
+};
+
+class SetDcsCodeAsyncWorker : public HamLibAsyncWorker {
+public:
+    SetDcsCodeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo, tone_t code)
+        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), code_(code) {}
+    
+    void Execute() override {
+        result_code_ = rig_set_dcs_code(hamlib_instance_->my_rig, vfo_, code_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        deferred_.Resolve(Napi::Number::New(env, result_code_));
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+    }
+    
+private:
+    vfo_t vfo_;
+    tone_t code_;
+};
+
+class GetDcsCodeAsyncWorker : public HamLibAsyncWorker {
+public:
+    GetDcsCodeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
+        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), code_(0) {}
+    
+    void Execute() override {
+        result_code_ = rig_get_dcs_code(hamlib_instance_->my_rig, vfo_, &code_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        deferred_.Resolve(Napi::Number::New(env, code_));
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+    }
+    
+private:
+    vfo_t vfo_;
+    tone_t code_;
+};
+
+class SetCtcssSqlAsyncWorker : public HamLibAsyncWorker {
+public:
+    SetCtcssSqlAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo, tone_t tone)
+        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tone_(tone) {}
+    
+    void Execute() override {
+        result_code_ = rig_set_ctcss_sql(hamlib_instance_->my_rig, vfo_, tone_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        deferred_.Resolve(Napi::Number::New(env, result_code_));
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+    }
+    
+private:
+    vfo_t vfo_;
+    tone_t tone_;
+};
+
+class GetCtcssSqlAsyncWorker : public HamLibAsyncWorker {
+public:
+    GetCtcssSqlAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
+        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tone_(0) {}
+    
+    void Execute() override {
+        result_code_ = rig_get_ctcss_sql(hamlib_instance_->my_rig, vfo_, &tone_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        deferred_.Resolve(Napi::Number::New(env, tone_));
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+    }
+    
+private:
+    vfo_t vfo_;
+    tone_t tone_;
+};
+
+class SetDcsSqlAsyncWorker : public HamLibAsyncWorker {
+public:
+    SetDcsSqlAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo, tone_t code)
+        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), code_(code) {}
+    
+    void Execute() override {
+        result_code_ = rig_set_dcs_sql(hamlib_instance_->my_rig, vfo_, code_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        deferred_.Resolve(Napi::Number::New(env, result_code_));
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+    }
+    
+private:
+    vfo_t vfo_;
+    tone_t code_;
+};
+
+class GetDcsSqlAsyncWorker : public HamLibAsyncWorker {
+public:
+    GetDcsSqlAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
+        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), code_(0) {}
+    
+    void Execute() override {
+        result_code_ = rig_get_dcs_sql(hamlib_instance_->my_rig, vfo_, &code_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        deferred_.Resolve(Napi::Number::New(env, code_));
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+    }
+    
+private:
+    vfo_t vfo_;
+    tone_t code_;
+};
+
+// Parameter Control AsyncWorker classes
+class SetParmAsyncWorker : public HamLibAsyncWorker {
+public:
+    SetParmAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, setting_t parm, value_t value)
+        : HamLibAsyncWorker(env, hamlib_instance), parm_(parm), value_(value) {}
+    
+    void Execute() override {
+        result_code_ = rig_set_parm(hamlib_instance_->my_rig, parm_, value_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        deferred_.Resolve(Napi::Number::New(env, result_code_));
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+    }
+    
+private:
+    setting_t parm_;
+    value_t value_;
+};
+
+class GetParmAsyncWorker : public HamLibAsyncWorker {
+public:
+    GetParmAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, setting_t parm)
+        : HamLibAsyncWorker(env, hamlib_instance), parm_(parm) {
+        value_.f = 0.0;
+    }
+    
+    void Execute() override {
+        result_code_ = rig_get_parm(hamlib_instance_->my_rig, parm_, &value_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        deferred_.Resolve(Napi::Number::New(env, value_.f));
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+    }
+    
+private:
+    setting_t parm_;
+    value_t value_;
+};
+
+// DTMF Support AsyncWorker classes
+class SendDtmfAsyncWorker : public HamLibAsyncWorker {
+public:
+    SendDtmfAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo, const std::string& digits)
+        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), digits_(digits) {}
+    
+    void Execute() override {
+        result_code_ = rig_send_dtmf(hamlib_instance_->my_rig, vfo_, digits_.c_str());
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        deferred_.Resolve(Napi::Number::New(env, result_code_));
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+    }
+    
+private:
+    vfo_t vfo_;
+    std::string digits_;
+};
+
+class RecvDtmfAsyncWorker : public HamLibAsyncWorker {
+public:
+    RecvDtmfAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo, int maxLength)
+        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), max_length_(maxLength), length_(0) {
+        digits_.resize(maxLength + 1, '\0');
+    }
+    
+    void Execute() override {
+        length_ = max_length_;
+        result_code_ = rig_recv_dtmf(hamlib_instance_->my_rig, vfo_, digits_.data(), &length_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        Napi::Object obj = Napi::Object::New(env);
+        obj.Set(Napi::String::New(env, "digits"), Napi::String::New(env, digits_.substr(0, length_)));
+        obj.Set(Napi::String::New(env, "length"), Napi::Number::New(env, length_));
+        deferred_.Resolve(obj);
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+    }
+    
+private:
+    vfo_t vfo_;
+    int max_length_;
+    int length_;
+    std::string digits_;
+};
+
+// Memory Channel Advanced Operations AsyncWorker classes
+class GetMemAsyncWorker : public HamLibAsyncWorker {
+public:
+    GetMemAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
+        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), ch_(0) {}
+    
+    void Execute() override {
+        result_code_ = rig_get_mem(hamlib_instance_->my_rig, vfo_, &ch_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        deferred_.Resolve(Napi::Number::New(env, ch_));
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+    }
+    
+private:
+    vfo_t vfo_;
+    int ch_;
+};
+
+class SetBankAsyncWorker : public HamLibAsyncWorker {
+public:
+    SetBankAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo, int bank)
+        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), bank_(bank) {}
+    
+    void Execute() override {
+        result_code_ = rig_set_bank(hamlib_instance_->my_rig, vfo_, bank_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        deferred_.Resolve(Napi::Number::New(env, result_code_));
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+    }
+    
+private:
+    vfo_t vfo_;
+    int bank_;
+};
+
+class MemCountAsyncWorker : public HamLibAsyncWorker {
+public:
+    MemCountAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
+        : HamLibAsyncWorker(env, hamlib_instance), count_(0) {}
+    
+    void Execute() override {
+        count_ = rig_mem_count(hamlib_instance_->my_rig);
+        if (count_ < 0) {
+            result_code_ = count_;
+            error_message_ = rigerror(result_code_);
+        } else {
+            result_code_ = RIG_OK;
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        deferred_.Resolve(Napi::Number::New(env, count_));
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+    }
+    
+private:
+    int count_;
+};
+
+// Morse Code Support AsyncWorker classes
+class SendMorseAsyncWorker : public HamLibAsyncWorker {
+public:
+    SendMorseAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo, const std::string& msg)
+        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), msg_(msg) {}
+    
+    void Execute() override {
+        result_code_ = rig_send_morse(hamlib_instance_->my_rig, vfo_, msg_.c_str());
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        deferred_.Resolve(Napi::Number::New(env, result_code_));
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+    }
+    
+private:
+    vfo_t vfo_;
+    std::string msg_;
+};
+
+class StopMorseAsyncWorker : public HamLibAsyncWorker {
+public:
+    StopMorseAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
+        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo) {}
+    
+    void Execute() override {
+        result_code_ = rig_stop_morse(hamlib_instance_->my_rig, vfo_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        deferred_.Resolve(Napi::Number::New(env, result_code_));
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+    }
+    
+private:
+    vfo_t vfo_;
+};
+
+class WaitMorseAsyncWorker : public HamLibAsyncWorker {
+public:
+    WaitMorseAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
+        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo) {}
+    
+    void Execute() override {
+        result_code_ = rig_wait_morse(hamlib_instance_->my_rig, vfo_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        deferred_.Resolve(Napi::Number::New(env, result_code_));
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+    }
+    
+private:
+    vfo_t vfo_;
+};
+
+// Voice Memory Support AsyncWorker classes
+class SendVoiceMemAsyncWorker : public HamLibAsyncWorker {
+public:
+    SendVoiceMemAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo, int ch)
+        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), ch_(ch) {}
+    
+    void Execute() override {
+        result_code_ = rig_send_voice_mem(hamlib_instance_->my_rig, vfo_, ch_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        deferred_.Resolve(Napi::Number::New(env, result_code_));
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+    }
+    
+private:
+    vfo_t vfo_;
+    int ch_;
+};
+
+class StopVoiceMemAsyncWorker : public HamLibAsyncWorker {
+public:
+    StopVoiceMemAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
+        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo) {}
+    
+    void Execute() override {
+        result_code_ = rig_stop_voice_mem(hamlib_instance_->my_rig, vfo_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        deferred_.Resolve(Napi::Number::New(env, result_code_));
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+    }
+    
+private:
+    vfo_t vfo_;
+};
+
+// Complex Split Frequency/Mode Operations AsyncWorker classes
+class SetSplitFreqModeAsyncWorker : public HamLibAsyncWorker {
+public:
+    SetSplitFreqModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo, 
+                               freq_t tx_freq, rmode_t tx_mode, pbwidth_t tx_width)
+        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tx_freq_(tx_freq), 
+          tx_mode_(tx_mode), tx_width_(tx_width) {}
+    
+    void Execute() override {
+        result_code_ = rig_set_split_freq_mode(hamlib_instance_->my_rig, vfo_, tx_freq_, tx_mode_, tx_width_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        deferred_.Resolve(Napi::Number::New(env, result_code_));
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+    }
+    
+private:
+    vfo_t vfo_;
+    freq_t tx_freq_;
+    rmode_t tx_mode_;
+    pbwidth_t tx_width_;
+};
+
+class GetSplitFreqModeAsyncWorker : public HamLibAsyncWorker {
+public:
+    GetSplitFreqModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
+        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tx_freq_(0), tx_mode_(RIG_MODE_NONE), tx_width_(0) {}
+    
+    void Execute() override {
+        result_code_ = rig_get_split_freq_mode(hamlib_instance_->my_rig, vfo_, &tx_freq_, &tx_mode_, &tx_width_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        Napi::Object obj = Napi::Object::New(env);
+        obj.Set(Napi::String::New(env, "txFrequency"), Napi::Number::New(env, static_cast<double>(tx_freq_)));
+        obj.Set(Napi::String::New(env, "txMode"), Napi::String::New(env, rig_strrmode(tx_mode_)));
+        obj.Set(Napi::String::New(env, "txWidth"), Napi::Number::New(env, static_cast<double>(tx_width_)));
+        deferred_.Resolve(obj);
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+    }
+    
+private:
+    vfo_t vfo_;
+    freq_t tx_freq_;
+    rmode_t tx_mode_;
+    pbwidth_t tx_width_;
+};
+
+// Reset Function AsyncWorker class
+class ResetAsyncWorker : public HamLibAsyncWorker {
+public:
+    ResetAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, reset_t reset)
+        : HamLibAsyncWorker(env, hamlib_instance), reset_(reset) {}
+    
+    void Execute() override {
+        result_code_ = rig_reset(hamlib_instance_->my_rig, reset_);
+        if (result_code_ != RIG_OK) {
+            error_message_ = rigerror(result_code_);
+        }
+    }
+    
+    void OnOK() override {
+        Napi::Env env = Env();
+        deferred_.Resolve(Napi::Number::New(env, result_code_));
+    }
+    
+    void OnError(const Napi::Error& e) override {
+        Napi::Env env = Env();
+        deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+    }
+    
+private:
+    reset_t reset_;
+};
+
+// CTCSS/DCS Tone Control Methods Implementation
+Napi::Value NodeHamLib::SetCtcssTone(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  if (info.Length() < 1 || !info[0].IsNumber()) {
+    Napi::TypeError::New(env, "Expected tone frequency as number").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  tone_t tone = static_cast<tone_t>(info[0].As<Napi::Number>().Uint32Value());
+  vfo_t vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+  
+  SetCtcssToneAsyncWorker* asyncWorker = new SetCtcssToneAsyncWorker(env, this, vfo, tone);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+Napi::Value NodeHamLib::GetCtcssTone(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  vfo_t vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  
+  GetCtcssToneAsyncWorker* asyncWorker = new GetCtcssToneAsyncWorker(env, this, vfo);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+Napi::Value NodeHamLib::SetDcsCode(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  if (info.Length() < 1 || !info[0].IsNumber()) {
+    Napi::TypeError::New(env, "Expected DCS code as number").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  tone_t code = static_cast<tone_t>(info[0].As<Napi::Number>().Uint32Value());
+  vfo_t vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+  
+  SetDcsCodeAsyncWorker* asyncWorker = new SetDcsCodeAsyncWorker(env, this, vfo, code);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+Napi::Value NodeHamLib::GetDcsCode(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  vfo_t vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  
+  GetDcsCodeAsyncWorker* asyncWorker = new GetDcsCodeAsyncWorker(env, this, vfo);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+Napi::Value NodeHamLib::SetCtcssSql(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  if (info.Length() < 1 || !info[0].IsNumber()) {
+    Napi::TypeError::New(env, "Expected CTCSS SQL tone frequency as number").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  tone_t tone = static_cast<tone_t>(info[0].As<Napi::Number>().Uint32Value());
+  vfo_t vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+  
+  SetCtcssSqlAsyncWorker* asyncWorker = new SetCtcssSqlAsyncWorker(env, this, vfo, tone);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+Napi::Value NodeHamLib::GetCtcssSql(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  vfo_t vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  
+  GetCtcssSqlAsyncWorker* asyncWorker = new GetCtcssSqlAsyncWorker(env, this, vfo);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+Napi::Value NodeHamLib::SetDcsSql(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  if (info.Length() < 1 || !info[0].IsNumber()) {
+    Napi::TypeError::New(env, "Expected DCS SQL code as number").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  tone_t code = static_cast<tone_t>(info[0].As<Napi::Number>().Uint32Value());
+  vfo_t vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+  
+  SetDcsSqlAsyncWorker* asyncWorker = new SetDcsSqlAsyncWorker(env, this, vfo, code);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+Napi::Value NodeHamLib::GetDcsSql(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  vfo_t vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  
+  GetDcsSqlAsyncWorker* asyncWorker = new GetDcsSqlAsyncWorker(env, this, vfo);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+// Parameter Control Methods Implementation
+Napi::Value NodeHamLib::SetParm(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  if (info.Length() < 2 || !info[0].IsString() || !info[1].IsNumber()) {
+    Napi::TypeError::New(env, "Expected parameter name as string and value as number").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  std::string parm_str = info[0].As<Napi::String>().Utf8Value();
+  setting_t parm = rig_parse_parm(parm_str.c_str());
+  
+  if (parm == 0) {
+    Napi::Error::New(env, "Invalid parameter name: " + parm_str).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  value_t value;
+  value.f = info[1].As<Napi::Number>().FloatValue();
+  
+  SetParmAsyncWorker* asyncWorker = new SetParmAsyncWorker(env, this, parm, value);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+Napi::Value NodeHamLib::GetParm(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  if (info.Length() < 1 || !info[0].IsString()) {
+    Napi::TypeError::New(env, "Expected parameter name as string").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  std::string parm_str = info[0].As<Napi::String>().Utf8Value();
+  setting_t parm = rig_parse_parm(parm_str.c_str());
+  
+  if (parm == 0) {
+    Napi::Error::New(env, "Invalid parameter name: " + parm_str).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  GetParmAsyncWorker* asyncWorker = new GetParmAsyncWorker(env, this, parm);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+// DTMF Support Methods Implementation
+Napi::Value NodeHamLib::SendDtmf(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  if (info.Length() < 1 || !info[0].IsString()) {
+    Napi::TypeError::New(env, "Expected DTMF digits as string").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  std::string digits = info[0].As<Napi::String>().Utf8Value();
+  vfo_t vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+  
+  SendDtmfAsyncWorker* asyncWorker = new SendDtmfAsyncWorker(env, this, vfo, digits);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+Napi::Value NodeHamLib::RecvDtmf(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  int maxLength = 32; // Default max length
+  if (info.Length() > 0 && info[0].IsNumber()) {
+    maxLength = info[0].As<Napi::Number>().Int32Value();
+  }
+  
+  vfo_t vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+  
+  RecvDtmfAsyncWorker* asyncWorker = new RecvDtmfAsyncWorker(env, this, vfo, maxLength);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+// Memory Channel Advanced Operations Methods Implementation
+Napi::Value NodeHamLib::GetMem(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  vfo_t vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  
+  GetMemAsyncWorker* asyncWorker = new GetMemAsyncWorker(env, this, vfo);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+Napi::Value NodeHamLib::SetBank(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  if (info.Length() < 1 || !info[0].IsNumber()) {
+    Napi::TypeError::New(env, "Expected bank number").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  int bank = info[0].As<Napi::Number>().Int32Value();
+  vfo_t vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+  
+  SetBankAsyncWorker* asyncWorker = new SetBankAsyncWorker(env, this, vfo, bank);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+Napi::Value NodeHamLib::MemCount(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  MemCountAsyncWorker* asyncWorker = new MemCountAsyncWorker(env, this);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+// Morse Code Support Methods Implementation
+Napi::Value NodeHamLib::SendMorse(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  if (info.Length() < 1 || !info[0].IsString()) {
+    Napi::TypeError::New(env, "Expected message as string").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  std::string msg = info[0].As<Napi::String>().Utf8Value();
+  vfo_t vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+  
+  SendMorseAsyncWorker* asyncWorker = new SendMorseAsyncWorker(env, this, vfo, msg);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+Napi::Value NodeHamLib::StopMorse(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  vfo_t vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  
+  StopMorseAsyncWorker* asyncWorker = new StopMorseAsyncWorker(env, this, vfo);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+Napi::Value NodeHamLib::WaitMorse(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  vfo_t vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  
+  WaitMorseAsyncWorker* asyncWorker = new WaitMorseAsyncWorker(env, this, vfo);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+// Voice Memory Support Methods Implementation
+Napi::Value NodeHamLib::SendVoiceMem(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  if (info.Length() < 1 || !info[0].IsNumber()) {
+    Napi::TypeError::New(env, "Expected channel number").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  int ch = info[0].As<Napi::Number>().Int32Value();
+  vfo_t vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+  
+  SendVoiceMemAsyncWorker* asyncWorker = new SendVoiceMemAsyncWorker(env, this, vfo, ch);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+Napi::Value NodeHamLib::StopVoiceMem(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  vfo_t vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  
+  StopVoiceMemAsyncWorker* asyncWorker = new StopVoiceMemAsyncWorker(env, this, vfo);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+// Complex Split Frequency/Mode Operations Methods Implementation
+Napi::Value NodeHamLib::SetSplitFreqMode(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  if (info.Length() < 3 || !info[0].IsNumber() || !info[1].IsString() || !info[2].IsNumber()) {
+    Napi::TypeError::New(env, "Expected TX frequency, mode, and width").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  freq_t tx_freq = static_cast<freq_t>(info[0].As<Napi::Number>().DoubleValue());
+  
+  // Basic frequency range validation
+  if (tx_freq < 1000 || tx_freq > 10000000000) { // 1 kHz to 10 GHz reasonable range
+    Napi::Error::New(env, "Frequency out of range (1 kHz - 10 GHz)").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  std::string mode_str = info[1].As<Napi::String>().Utf8Value();
+  pbwidth_t tx_width = static_cast<pbwidth_t>(info[2].As<Napi::Number>().DoubleValue());
+  vfo_t vfo = parseVfoParameter(info, 3, RIG_VFO_CURR);
+  
+  rmode_t tx_mode = rig_parse_mode(mode_str.c_str());
+  if (tx_mode == RIG_MODE_NONE) {
+    Napi::Error::New(env, "Invalid mode: " + mode_str).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  SetSplitFreqModeAsyncWorker* asyncWorker = new SetSplitFreqModeAsyncWorker(env, this, vfo, tx_freq, tx_mode, tx_width);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+Napi::Value NodeHamLib::GetSplitFreqMode(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  vfo_t vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  
+  GetSplitFreqModeAsyncWorker* asyncWorker = new GetSplitFreqModeAsyncWorker(env, this, vfo);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+// Power2mW Method Implementation  
+Napi::Value NodeHamLib::Power2mW(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  if (info.Length() < 3 || !info[0].IsNumber() || !info[1].IsNumber() || !info[2].IsString()) {
+    Napi::TypeError::New(env, "Expected power2mW(power, frequency, mode)").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  float power = info[0].As<Napi::Number>().FloatValue();
+  freq_t freq = info[1].As<Napi::Number>().DoubleValue();
+  std::string mode_str = info[2].As<Napi::String>().Utf8Value();
+  
+  // Validate power (0.0 to 1.0)
+  if (power < 0.0 || power > 1.0) {
+    Napi::Error::New(env, "Power must be between 0.0 and 1.0").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  // Validate frequency range
+  if (freq < 1000 || freq > 10000000000) { // 1 kHz to 10 GHz
+    Napi::Error::New(env, "Frequency out of range (1 kHz - 10 GHz)").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  // Parse mode string
+  rmode_t mode = rig_parse_mode(mode_str.c_str());
+  if (mode == RIG_MODE_NONE) {
+    Napi::Error::New(env, "Invalid mode: " + mode_str).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  Power2mWAsyncWorker* asyncWorker = new Power2mWAsyncWorker(env, this, power, freq, mode);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+// MW2Power Method Implementation
+Napi::Value NodeHamLib::MW2Power(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  if (info.Length() < 3 || !info[0].IsNumber() || !info[1].IsNumber() || !info[2].IsString()) {
+    Napi::TypeError::New(env, "Expected mW2power(milliwatts, frequency, mode)").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  unsigned int mwpower = info[0].As<Napi::Number>().Uint32Value();
+  freq_t freq = info[1].As<Napi::Number>().DoubleValue();
+  std::string mode_str = info[2].As<Napi::String>().Utf8Value();
+  
+  // Validate milliwatts (reasonable range)
+  if (mwpower > 10000000) { // 10kW max
+    Napi::Error::New(env, "Milliwatts out of reasonable range (max 10,000,000 mW)").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  // Validate frequency range
+  if (freq < 1000 || freq > 10000000000) { // 1 kHz to 10 GHz
+    Napi::Error::New(env, "Frequency out of range (1 kHz - 10 GHz)").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  // Parse mode string
+  rmode_t mode = rig_parse_mode(mode_str.c_str());
+  if (mode == RIG_MODE_NONE) {
+    Napi::Error::New(env, "Invalid mode: " + mode_str).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  
+  MW2PowerAsyncWorker* asyncWorker = new MW2PowerAsyncWorker(env, this, mwpower, freq, mode);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+// Reset Function Method Implementation
+Napi::Value NodeHamLib::Reset(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  
+  reset_t reset = RIG_RESET_SOFT; // Default to soft reset
+  
+  if (info.Length() > 0 && info[0].IsString()) {
+    std::string reset_str = info[0].As<Napi::String>().Utf8Value();
+    if (reset_str == "NONE") {
+      reset = RIG_RESET_NONE;
+    } else if (reset_str == "SOFT") {
+      reset = RIG_RESET_SOFT;
+    } else if (reset_str == "MCALL") {
+      reset = RIG_RESET_MCALL;
+    } else if (reset_str == "MASTER") {
+      reset = RIG_RESET_MASTER;
+    } else if (reset_str == "VFO") {
+      reset = RIG_RESET_VFO;
+    } else {
+      Napi::Error::New(env, "Invalid reset type: " + reset_str + 
+                      " (valid: NONE, SOFT, VFO, MCALL, MASTER)").ThrowAsJavaScriptException();
+      return env.Null();
+    }
+  }
+  
+  ResetAsyncWorker* asyncWorker = new ResetAsyncWorker(env, this, reset);
   asyncWorker->Queue();
   return asyncWorker->GetPromise();
 }

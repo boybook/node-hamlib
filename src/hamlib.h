@@ -115,6 +115,49 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
   Napi::Value SetRepeaterOffset(const Napi::CallbackInfo&);
   Napi::Value GetRepeaterOffset(const Napi::CallbackInfo&);
   
+  // CTCSS/DCS Tone Control
+  Napi::Value SetCtcssTone(const Napi::CallbackInfo&);
+  Napi::Value GetCtcssTone(const Napi::CallbackInfo&);
+  Napi::Value SetDcsCode(const Napi::CallbackInfo&);
+  Napi::Value GetDcsCode(const Napi::CallbackInfo&);
+  Napi::Value SetCtcssSql(const Napi::CallbackInfo&);
+  Napi::Value GetCtcssSql(const Napi::CallbackInfo&);
+  Napi::Value SetDcsSql(const Napi::CallbackInfo&);
+  Napi::Value GetDcsSql(const Napi::CallbackInfo&);
+  
+  // Parameter Control
+  Napi::Value SetParm(const Napi::CallbackInfo&);
+  Napi::Value GetParm(const Napi::CallbackInfo&);
+  
+  // DTMF Support
+  Napi::Value SendDtmf(const Napi::CallbackInfo&);
+  Napi::Value RecvDtmf(const Napi::CallbackInfo&);
+  
+  // Memory Channel Advanced Operations
+  Napi::Value GetMem(const Napi::CallbackInfo&);
+  Napi::Value SetBank(const Napi::CallbackInfo&);
+  Napi::Value MemCount(const Napi::CallbackInfo&);
+  
+  // Morse Code Support
+  Napi::Value SendMorse(const Napi::CallbackInfo&);
+  Napi::Value StopMorse(const Napi::CallbackInfo&);
+  Napi::Value WaitMorse(const Napi::CallbackInfo&);
+  
+  // Voice Memory Support
+  Napi::Value SendVoiceMem(const Napi::CallbackInfo&);
+  Napi::Value StopVoiceMem(const Napi::CallbackInfo&);
+  
+  // Complex Split Frequency/Mode Operations
+  Napi::Value SetSplitFreqMode(const Napi::CallbackInfo&);
+  Napi::Value GetSplitFreqMode(const Napi::CallbackInfo&);
+  
+  // Power Conversion Functions
+  Napi::Value Power2mW(const Napi::CallbackInfo&);
+  Napi::Value MW2Power(const Napi::CallbackInfo&);
+  
+  // Reset Function
+  Napi::Value Reset(const Napi::CallbackInfo&);
+  
   // Static method to get supported rig models
   static Napi::Value GetSupportedRigs(const Napi::CallbackInfo&);
   

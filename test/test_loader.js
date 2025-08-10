@@ -1,40 +1,132 @@
 /**
- * Test file for binary loader and module exports
+ * 基础模块加载和功能测试
+ * Tests module loading, instantiation, method existence, and static methods
  */
 
 const { HamLib } = require('../index.js');
 
-console.log('Testing node-hamlib module loading...');
+console.log('🧪 测试node-hamlib模块加载和基础功能...\n');
+
+let testsPassed = 0;
+let testsFailed = 0;
+
+function test(description, testFn) {
+  try {
+    const result = testFn();
+    if (result !== false) {
+      console.log(`✅ ${description}`);
+      testsPassed++;
+    } else {
+      console.log(`❌ ${description}`);
+      testsFailed++;
+    }
+  } catch (error) {
+    console.log(`❌ ${description} - ${error.message}`);
+    testsFailed++;
+  }
+}
 
 try {
-  // Test module loading
-  console.log('✓ Successfully loaded HamLib class');
+  // 1. 模块加载测试
+  console.log('📦 模块加载测试:');
+  test('HamLib类成功加载', () => HamLib && typeof HamLib === 'function');
+  test('HamLib构造函数可用', () => typeof HamLib === 'function');
   
-  // Test basic instantiation (don't actually connect)
-  console.log('Testing HamLib instantiation...');
+  // 2. 静态方法测试
+  console.log('\n📊 静态方法测试:');
+  test('getSupportedRigs静态方法存在', () => typeof HamLib.getSupportedRigs === 'function');
   
-  // Use a dummy model number for testing
-  const testRig = new HamLib(1035, '/dev/null');
-  console.log('✓ Successfully created HamLib instance');
-  
-  // Test method existence
-  const methods = [
-    'open', 'close', 'destroy', 'setVfo', 'setFrequency', 'setMode', 'setPtt',
-    'getVfo', 'getFrequency', 'getMode', 'getStrength', 'getConnectionInfo'
-  ];
-  
-  for (const method of methods) {
-    if (typeof testRig[method] === 'function') {
-      console.log(`✓ Method ${method} exists`);
-    } else {
-      console.log(`✗ Method ${method} missing`);
-    }
+  try {
+    const supportedRigs = HamLib.getSupportedRigs();
+    test('getSupportedRigs返回数组', () => Array.isArray(supportedRigs));
+    test('getSupportedRigs返回非空数据', () => supportedRigs.length > 0);
+    test('支持的电台数据结构正确', () => {
+      if (supportedRigs.length === 0) return false;
+      const first = supportedRigs[0];
+      return first.rigModel && first.modelName && first.mfgName;
+    });
+    console.log(`   📈 找到 ${supportedRigs.length} 个支持的电台型号`);
+  } catch (e) {
+    console.log(`❌ getSupportedRigs调用失败: ${e.message}`);
+    testsFailed++;
   }
   
-  console.log('\n✓ All tests passed!');
-  console.log('Note: This test only verifies module loading, not actual hardware communication.');
+  // 3. 实例化测试
+  console.log('\n🔧 实例化测试:');
+  const testRig = new HamLib(1035, '/dev/null');
+  test('HamLib实例创建成功', () => testRig && typeof testRig === 'object');
+  
+  // 4. 基础方法存在性测试
+  console.log('\n🔍 基础方法存在性测试:');
+  const coreMethods = [
+    'open', 'close', 'destroy', 'getConnectionInfo',
+    'setVfo', 'getVfo', 'setFrequency', 'getFrequency', 
+    'setMode', 'getMode', 'setPtt', 'getStrength'
+  ];
+  
+  coreMethods.forEach(method => {
+    test(`方法 ${method} 存在`, () => typeof testRig[method] === 'function');
+  });
+  
+  // 5. 新增方法存在性测试 (之前缺失的方法)
+  console.log('\n🆕 新增方法存在性测试:');
+  const newMethods = [
+    'getPtt', 'getDcd', 'setPowerstat', 'getPowerstat',
+    'setTuningStep', 'getTuningStep', 
+    'setRepeaterShift', 'getRepeaterShift',
+    'setRepeaterOffset', 'getRepeaterOffset'
+  ];
+  
+  newMethods.forEach(method => {
+    test(`新增方法 ${method} 存在`, () => typeof testRig[method] === 'function');
+  });
+  
+  // 6. 方法计数测试
+  console.log('\n📊 API完整性测试:');
+  const instanceMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(testRig))
+    .filter(name => name !== 'constructor' && typeof testRig[name] === 'function');
+  
+  const staticMethods = Object.getOwnPropertyNames(HamLib)
+    .filter(name => typeof HamLib[name] === 'function');
+  
+  const totalMethods = instanceMethods.length + staticMethods.length;
+  
+  test(`实例方法数量正确 (79个)`, () => instanceMethods.length === 79);
+  test(`静态方法数量正确 (1个)`, () => staticMethods.length === 1);
+  test(`总方法数量正确 (80个)`, () => totalMethods === 80);
+  
+  console.log(`   📊 实例方法: ${instanceMethods.length}个`);
+  console.log(`   📊 静态方法: ${staticMethods.length}个`);
+  console.log(`   📊 总计: ${totalMethods}个方法`);
+  
+  // 7. 连接信息测试
+  console.log('\n🔗 连接信息测试:');
+  try {
+    const connInfo = testRig.getConnectionInfo();
+    test('getConnectionInfo返回对象', () => connInfo && typeof connInfo === 'object');
+    test('连接信息包含必要字段', () => {
+      return connInfo.hasOwnProperty('connectionType') && 
+             connInfo.hasOwnProperty('portPath') && 
+             connInfo.hasOwnProperty('isOpen');
+    });
+  } catch (e) {
+    console.log(`❌ getConnectionInfo调用失败: ${e.message}`);
+    testsFailed++;
+  }
+  
+  // 输出测试结果
+  console.log(`\n📋 测试完成: ${testsPassed}个通过, ${testsFailed}个失败`);
+  
+  if (testsFailed === 0) {
+    console.log('🎉 所有基础功能测试通过！');
+    console.log('💡 注意: 此测试仅验证模块加载和方法存在，不进行实际硬件通信。');
+  } else {
+    console.log('⚠️  存在测试失败项，请检查模块完整性。');
+    process.exit(1);
+  }
   
 } catch (error) {
-  console.error('✗ Test failed:', error.message);
+  console.error('❌ 测试运行失败:', error.message);
+  console.error(error.stack);
   process.exit(1);
 } 

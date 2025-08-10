@@ -43,6 +43,20 @@ interface SupportedRigInfo {
 }
 
 /**
+ * Antenna information interface
+ */
+interface AntennaInfo {
+  /** Currently selected antenna */
+  currentAntenna: number;
+  /** TX antenna selection */
+  txAntenna: number;
+  /** RX antenna selection */
+  rxAntenna: number;
+  /** Additional antenna option/parameter */
+  option: number;
+}
+
+/**
  * VFO type
  */
 type VFO = 'VFO-A' | 'VFO-B';
@@ -248,12 +262,13 @@ declare class HamLib {
    * Set radio mode
    * @param mode Radio mode (such as 'USB', 'LSB', 'FM', 'PKTFM')
    * @param bandwidth Optional bandwidth setting ('narrow', 'wide', or default)
-   * @note Operates on the current VFO (RIG_VFO_CURR)
+   * @param vfo Optional VFO to set mode on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
    * @example
    * await rig.setMode('USB');
    * await rig.setMode('FM', 'narrow');
+   * await rig.setMode('USB', 'wide', 'VFO-A');
    */
-  setMode(mode: RadioMode, bandwidth?: 'narrow' | 'wide'): Promise<number>;
+  setMode(mode: RadioMode, bandwidth?: 'narrow' | 'wide', vfo?: VFO): Promise<number>;
 
   /**
    * Set PTT (Push-to-Talk) status
@@ -288,10 +303,13 @@ declare class HamLib {
 
   /**
    * Get current signal strength
+   * @param vfo Optional VFO to get signal strength from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
    * @returns Signal strength value
-   * @note Operates on the current VFO (RIG_VFO_CURR)
+   * @example
+   * const strength = await rig.getStrength(); // Get strength from current VFO
+   * const strengthA = await rig.getStrength('VFO-A'); // Get strength from VFO-A
    */
-  getStrength(): Promise<number>;
+  getStrength(vfo?: VFO): Promise<number>;
 
   /**
    * Close connection to device
@@ -473,17 +491,14 @@ declare class HamLib {
   /**
    * Enable/disable split operation
    * @param enable true to enable split, false to disable
-   * @param rxVfo Optional RX VFO to operate on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param rxVfo Optional RX VFO ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param txVfo Optional TX VFO ('VFO-A' or 'VFO-B'). If not specified, uses VFO-B
+   * @example
+   * await rig.setSplit(true);                    // Enable split with defaults
+   * await rig.setSplit(true, 'VFO-A');          // Enable split, RX on VFO-A, TX on VFO-B
+   * await rig.setSplit(true, 'VFO-A', 'VFO-B'); // Enable split, explicit RX and TX VFOs
    */
-  setSplit(enable: boolean, rxVfo?: VFO): Promise<number>;
-
-  /**
-   * Enable/disable split operation with explicit TX and RX VFOs
-   * @param enable true to enable split, false to disable
-   * @param txVfo TX VFO ('VFO-A' or 'VFO-B')
-   * @param rxVfo RX VFO to operate on ('VFO-A' or 'VFO-B')
-   */
-  setSplit(enable: boolean, txVfo: VFO, rxVfo: VFO): Promise<number>;
+  setSplit(enable: boolean, rxVfo?: VFO, txVfo?: VFO): Promise<number>;
 
   /**
    * Get split operation status
@@ -502,17 +517,7 @@ declare class HamLib {
 
   // Antenna Selection
 
-  /**
-   * Set antenna
-   * @param antenna Antenna number (1, 2, 3, etc.)
-   */
-  setAntenna(antenna: number): Promise<number>;
-
-  /**
-   * Get current antenna
-   * @returns Current antenna number
-   */
-  getAntenna(): Promise<number>;
+  // Note: setAntenna and getAntenna are defined later with full VFO support
 
   // Serial Port Configuration
 
@@ -717,6 +722,317 @@ declare class HamLib {
    * console.log(`Repeater offset: ${offset} Hz`);
    */
   getRepeaterOffset(vfo?: VFO): Promise<number>;
+
+  // CTCSS/DCS Tone Control
+  
+  /**
+   * Set CTCSS tone frequency
+   * @param tone CTCSS tone frequency in tenths of Hz (e.g., 1000 for 100.0 Hz)
+   * @param vfo Optional VFO to set tone on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Success status
+   * @example
+   * await rig.setCtcssTone(1000); // Set 100.0 Hz CTCSS tone
+   * await rig.setCtcssTone(1318); // Set 131.8 Hz CTCSS tone
+   */
+  setCtcssTone(tone: number, vfo?: VFO): Promise<number>;
+
+  /**
+   * Get current CTCSS tone frequency
+   * @param vfo Optional VFO to get tone from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Current CTCSS tone frequency in tenths of Hz
+   * @example
+   * const tone = await rig.getCtcssTone();
+   * console.log(`CTCSS tone: ${tone / 10} Hz`);
+   */
+  getCtcssTone(vfo?: VFO): Promise<number>;
+
+  /**
+   * Set DCS code
+   * @param code DCS code (e.g., 23, 174, 754)
+   * @param vfo Optional VFO to set code on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Success status
+   * @example
+   * await rig.setDcsCode(23);  // Set DCS code 023
+   * await rig.setDcsCode(174); // Set DCS code 174
+   */
+  setDcsCode(code: number, vfo?: VFO): Promise<number>;
+
+  /**
+   * Get current DCS code
+   * @param vfo Optional VFO to get code from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Current DCS code
+   * @example
+   * const code = await rig.getDcsCode();
+   * console.log(`DCS code: ${code.toString().padStart(3, '0')}`);
+   */
+  getDcsCode(vfo?: VFO): Promise<number>;
+
+  /**
+   * Set CTCSS SQL (squelch) tone frequency
+   * @param tone CTCSS SQL tone frequency in tenths of Hz (e.g., 1000 for 100.0 Hz)
+   * @param vfo Optional VFO to set tone on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Success status
+   * @example
+   * await rig.setCtcssSql(1000); // Set 100.0 Hz CTCSS SQL tone
+   */
+  setCtcssSql(tone: number, vfo?: VFO): Promise<number>;
+
+  /**
+   * Get current CTCSS SQL tone frequency
+   * @param vfo Optional VFO to get tone from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Current CTCSS SQL tone frequency in tenths of Hz
+   * @example
+   * const tone = await rig.getCtcssSql();
+   * console.log(`CTCSS SQL tone: ${tone / 10} Hz`);
+   */
+  getCtcssSql(vfo?: VFO): Promise<number>;
+
+  /**
+   * Set DCS SQL (squelch) code
+   * @param code DCS SQL code (e.g., 23, 174, 754)
+   * @param vfo Optional VFO to set code on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Success status
+   * @example
+   * await rig.setDcsSql(23); // Set DCS SQL code 023
+   */
+  setDcsSql(code: number, vfo?: VFO): Promise<number>;
+
+  /**
+   * Get current DCS SQL code
+   * @param vfo Optional VFO to get code from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Current DCS SQL code
+   * @example
+   * const code = await rig.getDcsSql();
+   * console.log(`DCS SQL code: ${code.toString().padStart(3, '0')}`);
+   */
+  getDcsSql(vfo?: VFO): Promise<number>;
+
+  // Parameter Control
+
+  /**
+   * Set radio parameter
+   * @param paramName Parameter name (e.g., 'ANN', 'APO', 'BACKLIGHT', 'BEEP', 'TIME', 'BAT')
+   * @param value Parameter value (numeric)
+   * @returns Success status
+   * @example
+   * await rig.setParm('BACKLIGHT', 0.5); // Set backlight to 50%
+   * await rig.setParm('BEEP', 1);        // Enable beep
+   */
+  setParm(paramName: string, value: number): Promise<number>;
+
+  /**
+   * Get radio parameter value
+   * @param paramName Parameter name (e.g., 'ANN', 'APO', 'BACKLIGHT', 'BEEP', 'TIME', 'BAT')
+   * @returns Parameter value
+   * @example
+   * const backlight = await rig.getParm('BACKLIGHT');
+   * const beep = await rig.getParm('BEEP');
+   */
+  getParm(paramName: string): Promise<number>;
+
+  // DTMF Support
+
+  /**
+   * Send DTMF digits
+   * @param digits DTMF digits to send (0-9, A-D, *, #)
+   * @param vfo Optional VFO to send from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Success status
+   * @example
+   * await rig.sendDtmf('1234'); // Send DTMF sequence 1234
+   * await rig.sendDtmf('*70#'); // Send *70# sequence
+   */
+  sendDtmf(digits: string, vfo?: VFO): Promise<number>;
+
+  /**
+   * Receive DTMF digits
+   * @param maxLength Maximum number of digits to receive (default: 32)
+   * @param vfo Optional VFO to receive from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Received DTMF digits and count
+   * @example
+   * const result = await rig.recvDtmf(10);
+   * console.log(`Received DTMF: ${result.digits} (${result.length} digits)`);
+   */
+  recvDtmf(maxLength?: number, vfo?: VFO): Promise<{digits: string, length: number}>;
+
+  // Memory Channel Advanced Operations
+
+  /**
+   * Get current memory channel number
+   * @param vfo Optional VFO to get memory channel from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Current memory channel number
+   * @example
+   * const currentChannel = await rig.getMem();
+   * console.log(`Current memory channel: ${currentChannel}`);
+   */
+  getMem(vfo?: VFO): Promise<number>;
+
+  /**
+   * Set memory bank
+   * @param bank Bank number to select
+   * @param vfo Optional VFO to set bank on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Success status
+   * @example
+   * await rig.setBank(1); // Select memory bank 1
+   * await rig.setBank(2); // Select memory bank 2
+   */
+  setBank(bank: number, vfo?: VFO): Promise<number>;
+
+  /**
+   * Get total number of memory channels available
+   * @returns Total number of memory channels
+   * @example
+   * const totalChannels = await rig.memCount();
+   * console.log(`Total memory channels: ${totalChannels}`);
+   */
+  memCount(): Promise<number>;
+
+  // Morse Code Support
+
+  /**
+   * Send Morse code message
+   * @param message Morse code message to send (text will be converted to Morse)
+   * @param vfo Optional VFO to send from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Success status
+   * @example
+   * await rig.sendMorse('CQ CQ DE VK3ABC K'); // Send CQ call
+   * await rig.sendMorse('TEST MSG');          // Send test message
+   */
+  sendMorse(message: string, vfo?: VFO): Promise<number>;
+
+  /**
+   * Stop current Morse code transmission
+   * @param vfo Optional VFO to stop ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Success status
+   * @example
+   * await rig.stopMorse(); // Stop ongoing Morse transmission
+   */
+  stopMorse(vfo?: VFO): Promise<number>;
+
+  /**
+   * Wait for Morse code transmission to complete
+   * @param vfo Optional VFO to wait on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Success status when transmission completes
+   * @example
+   * await rig.sendMorse('TEST');
+   * await rig.waitMorse(); // Wait for transmission to complete
+   */
+  waitMorse(vfo?: VFO): Promise<number>;
+
+  // Voice Memory Support
+
+  /**
+   * Play voice memory channel
+   * @param channel Voice memory channel number to play
+   * @param vfo Optional VFO to play from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Success status
+   * @example
+   * await rig.sendVoiceMem(1); // Play voice memory channel 1
+   * await rig.sendVoiceMem(3); // Play voice memory channel 3
+   */
+  sendVoiceMem(channel: number, vfo?: VFO): Promise<number>;
+
+  /**
+   * Stop voice memory playback
+   * @param vfo Optional VFO to stop ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Success status
+   * @example
+   * await rig.stopVoiceMem(); // Stop ongoing voice memory playback
+   */
+  stopVoiceMem(vfo?: VFO): Promise<number>;
+
+  // Complex Split Frequency/Mode Operations
+
+  /**
+   * Set split frequency and mode simultaneously
+   * @param txFrequency TX frequency in Hz
+   * @param txMode TX mode ('USB', 'LSB', 'FM', etc.)
+   * @param txWidth TX bandwidth in Hz
+   * @param vfo Optional VFO for split operation ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Success status
+   * @example
+   * await rig.setSplitFreqMode(14205000, 'USB', 2400); // Set split: TX on 14.205 MHz USB 2400Hz width
+   * await rig.setSplitFreqMode(145520000, 'FM', 15000); // Set split: TX on 145.52 MHz FM 15kHz width
+   */
+  setSplitFreqMode(txFrequency: number, txMode: RadioMode, txWidth: number, vfo?: VFO): Promise<number>;
+
+  /**
+   * Get split frequency and mode information
+   * @param vfo Optional VFO to get split info from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Object containing TX frequency, mode, and width
+   * @example
+   * const splitInfo = await rig.getSplitFreqMode();
+   * console.log(`Split TX: ${splitInfo.txFrequency} Hz, Mode: ${splitInfo.txMode}, Width: ${splitInfo.txWidth} Hz`);
+   */
+  getSplitFreqMode(vfo?: VFO): Promise<{txFrequency: number, txMode: string, txWidth: number}>;
+
+  // Antenna Control
+
+  /**
+   * Set antenna selection
+   * @param antenna Antenna number to select (1-based)
+   * @param vfo Optional VFO to set antenna on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Success status
+   * @example
+   * await rig.setAntenna(1); // Select antenna 1
+   * await rig.setAntenna(2); // Select antenna 2
+   */
+  setAntenna(antenna: number, vfo?: VFO): Promise<number>;
+
+  /**
+   * Get comprehensive antenna information
+   * @param vfo Optional VFO to get antenna info from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Antenna information object containing current, TX, RX antenna settings and option
+   * @example
+   * const antennaInfo = await rig.getAntenna();
+   * console.log(`Current: ${antennaInfo.currentAntenna}`);
+   * console.log(`TX: ${antennaInfo.txAntenna}, RX: ${antennaInfo.rxAntenna}`);
+   * console.log(`Option: ${antennaInfo.option}`);
+   */
+  getAntenna(vfo?: VFO): Promise<AntennaInfo>;
+
+  // Power Conversion Functions
+
+  /**
+   * Convert power level to milliwatts
+   * @param power Power level (0.0-1.0, where 1.0 = 100% power)
+   * @param frequency Frequency in Hz
+   * @param mode Radio mode ('USB', 'LSB', 'FM', 'AM', etc.)
+   * @returns Power in milliwatts
+   * @example
+   * const milliwatts = await rig.power2mW(0.5, 14205000, 'USB');
+   * console.log(`50% power = ${milliwatts} mW`);
+   */
+  power2mW(power: number, frequency: number, mode: RadioMode): Promise<number>;
+
+  /**
+   * Convert milliwatts to power level
+   * @param milliwatts Power in milliwatts
+   * @param frequency Frequency in Hz
+   * @param mode Radio mode ('USB', 'LSB', 'FM', 'AM', etc.)
+   * @returns Power level (0.0-1.0, where 1.0 = 100% power)
+   * @example
+   * const powerLevel = await rig.mW2power(5000, 14205000, 'USB');
+   * console.log(`5000 mW = ${(powerLevel * 100).toFixed(1)}% power`);
+   */
+  mW2power(milliwatts: number, frequency: number, mode: RadioMode): Promise<number>;
+
+  // Reset Function
+
+  /**
+   * Reset radio to default state
+   * @param resetType Reset type ('NONE', 'SOFT', 'VFO', 'MCALL', 'MASTER'). Default: 'SOFT'
+   *   - NONE: No reset
+   *   - SOFT: Soft reset (preserve some settings)
+   *   - VFO: VFO reset
+   *   - MCALL: Memory clear
+   *   - MASTER: Master reset (complete factory reset)
+   * @returns Success status
+   * @example
+   * await rig.reset('SOFT');   // Soft reset
+   * await rig.reset('MASTER'); // Factory reset (CAUTION: loses all settings!)
+   * await rig.reset();         // Default soft reset
+   */
+  reset(resetType?: 'NONE' | 'SOFT' | 'VFO' | 'MCALL' | 'MASTER'): Promise<number>;
 }
 
 /**
@@ -727,7 +1043,7 @@ declare const nodeHamlib: {
 };
 
 // Export types for use elsewhere
-export { ConnectionInfo, ModeInfo, SupportedRigInfo, VFO, RadioMode, MemoryChannelData, 
+export { ConnectionInfo, ModeInfo, SupportedRigInfo, AntennaInfo, VFO, RadioMode, MemoryChannelData, 
          MemoryChannelInfo, SplitModeInfo, SplitStatusInfo, LevelType, FunctionType, 
          ScanType, VfoOperationType, SerialConfigParam, PttType, DcdType, SerialConfigOptions, HamLib };
 
