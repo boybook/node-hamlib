@@ -318,7 +318,7 @@ declare class HamLib {
    * @param channelNumber Memory channel number
    * @param channelData Channel data (frequency, mode, description, etc.)
    */
-  setMemoryChannel(channelNumber: number, channelData: MemoryChannelData): void;
+  setMemoryChannel(channelNumber: number, channelData: MemoryChannelData): Promise<number>;
 
   /**
    * Get memory channel data
@@ -326,13 +326,13 @@ declare class HamLib {
    * @param readOnly Whether to read in read-only mode (default: true)
    * @returns Channel data
    */
-  getMemoryChannel(channelNumber: number, readOnly?: boolean): MemoryChannelInfo;
+  getMemoryChannel(channelNumber: number, readOnly?: boolean): Promise<MemoryChannelInfo>;
 
   /**
    * Select memory channel for operation
    * @param channelNumber Memory channel number to select
    */
-  selectMemoryChannel(channelNumber: number): void;
+  selectMemoryChannel(channelNumber: number): Promise<number>;
 
   // RIT/XIT Control
 
@@ -340,45 +340,53 @@ declare class HamLib {
    * Set RIT (Receiver Incremental Tuning) offset
    * @param offsetHz RIT offset in Hz
    */
-  setRit(offsetHz: number): void;
+  setRit(offsetHz: number): Promise<number>;
 
   /**
    * Get current RIT offset
    * @returns RIT offset in Hz
    */
-  getRit(): number;
+  getRit(): Promise<number>;
 
   /**
    * Set XIT (Transmitter Incremental Tuning) offset
    * @param offsetHz XIT offset in Hz
    */
-  setXit(offsetHz: number): void;
+  setXit(offsetHz: number): Promise<number>;
 
   /**
    * Get current XIT offset
    * @returns XIT offset in Hz
    */
-  getXit(): number;
+  getXit(): Promise<number>;
 
   /**
    * Clear both RIT and XIT offsets
    * @returns Success status
    */
-  clearRitXit(): boolean;
+  clearRitXit(): Promise<number>;
 
   // Scanning Operations
 
   /**
    * Start scanning operation
    * @param scanType Scan type ('VFO', 'MEM', 'PROG', 'DELTA', 'PRIO')
-   * @param channel Optional channel number for some scan types
+   * @param callback Callback function
    */
-  startScan(scanType: ScanType, channel?: number): void;
+  startScan(scanType: ScanType): Promise<number>;
+
+  /**
+   * Start scanning operation with channel
+   * @param scanType Scan type ('VFO', 'MEM', 'PROG', 'DELTA', 'PRIO')
+   * @param channel Channel number for some scan types
+   * @param callback Callback function
+   */
+  startScan(scanType: ScanType, channel: number): Promise<number>;
 
   /**
    * Stop scanning operation
    */
-  stopScan(): void;
+  stopScan(): Promise<number>;
 
   // Level Controls
 
@@ -387,14 +395,14 @@ declare class HamLib {
    * @param levelType Level type ('AF', 'RF', 'SQL', 'RFPOWER', etc.)
    * @param value Level value (0.0-1.0 typically)
    */
-  setLevel(levelType: LevelType, value: number): void;
+  setLevel(levelType: LevelType, value: number): Promise<number>;
 
   /**
    * Get radio level
    * @param levelType Level type ('AF', 'RF', 'SQL', 'STRENGTH', etc.)
    * @returns Level value
    */
-  getLevel(levelType: LevelType): number;
+  getLevel(levelType: LevelType): Promise<number>;
 
   /**
    * Get list of supported level types
@@ -409,14 +417,14 @@ declare class HamLib {
    * @param functionType Function type ('NB', 'COMP', 'VOX', 'TONE', etc.)
    * @param enable true to enable, false to disable
    */
-  setFunction(functionType: FunctionType, enable: boolean): void;
+  setFunction(functionType: FunctionType, enable: boolean): Promise<number>;
 
   /**
    * Get radio function status
    * @param functionType Function type ('NB', 'COMP', 'VOX', 'TONE', etc.)
    * @returns Function enabled status
    */
-  getFunction(functionType: FunctionType): boolean;
+  getFunction(functionType: FunctionType): Promise<boolean>;
 
   /**
    * Get list of supported function types
@@ -429,40 +437,60 @@ declare class HamLib {
   /**
    * Set split mode TX frequency
    * @param txFrequency TX frequency in Hz
+   * @param vfo Optional VFO to set TX frequency on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
    */
-  setSplitFreq(txFrequency: number): void;
+  setSplitFreq(txFrequency: number, vfo?: VFO): Promise<number>;
 
   /**
    * Get split mode TX frequency
+   * @param vfo Optional VFO to get TX frequency from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
    * @returns TX frequency in Hz
    */
-  getSplitFreq(): number;
+  getSplitFreq(vfo?: VFO): Promise<number>;
 
   /**
    * Set split mode TX mode
    * @param txMode TX mode ('USB', 'LSB', 'FM', etc.)
-   * @param txWidth Optional TX bandwidth
+   * @param vfo Optional VFO to set TX mode on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
    */
-  setSplitMode(txMode: RadioMode, txWidth?: number): void;
+  setSplitMode(txMode: RadioMode, vfo?: VFO): Promise<number>;
+
+  /**
+   * Set split mode TX mode with width
+   * @param txMode TX mode ('USB', 'LSB', 'FM', etc.)
+   * @param txWidth TX bandwidth
+   * @param vfo Optional VFO to set TX mode on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   */
+  setSplitMode(txMode: RadioMode, txWidth: number, vfo?: VFO): Promise<number>;
 
   /**
    * Get split mode TX mode
+   * @param vfo Optional VFO to get TX mode from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
    * @returns TX mode and width
    */
-  getSplitMode(): SplitModeInfo;
+  getSplitMode(vfo?: VFO): Promise<SplitModeInfo>;
 
   /**
    * Enable/disable split operation
    * @param enable true to enable split, false to disable
-   * @param txVfo TX VFO ('VFO-A' or 'VFO-B')
+   * @param rxVfo Optional RX VFO to operate on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
    */
-  setSplit(enable: boolean, txVfo?: VFO): void;
+  setSplit(enable: boolean, rxVfo?: VFO): Promise<number>;
+
+  /**
+   * Enable/disable split operation with explicit TX and RX VFOs
+   * @param enable true to enable split, false to disable
+   * @param txVfo TX VFO ('VFO-A' or 'VFO-B')
+   * @param rxVfo RX VFO to operate on ('VFO-A' or 'VFO-B')
+   */
+  setSplit(enable: boolean, txVfo: VFO, rxVfo: VFO): Promise<number>;
 
   /**
    * Get split operation status
+   * @param vfo Optional VFO to get status from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
    * @returns Split status and TX VFO
    */
-  getSplit(): SplitStatusInfo;
+  getSplit(vfo?: VFO): Promise<SplitStatusInfo>;
 
   // VFO Operations
 
@@ -470,7 +498,7 @@ declare class HamLib {
    * Perform VFO operation
    * @param operation VFO operation ('CPY', 'XCHG', 'FROM_VFO', 'TO_VFO', etc.)
    */
-  vfoOperation(operation: VfoOperationType): void;
+  vfoOperation(operation: VfoOperationType): Promise<number>;
 
   // Antenna Selection
 
@@ -478,13 +506,13 @@ declare class HamLib {
    * Set antenna
    * @param antenna Antenna number (1, 2, 3, etc.)
    */
-  setAntenna(antenna: number): void;
+  setAntenna(antenna: number): Promise<number>;
 
   /**
    * Get current antenna
    * @returns Current antenna number
    */
-  getAntenna(): number;
+  getAntenna(): Promise<number>;
 
   // Serial Port Configuration
 
@@ -494,15 +522,15 @@ declare class HamLib {
    * @param paramValue Parameter value
    * @example
    * // Set data bits to 8
-   * hamlib.setSerialConfig('data_bits', '8');
+   * await hamlib.setSerialConfig('data_bits', '8');
    * 
    * // Set parity to even
-   * hamlib.setSerialConfig('serial_parity', 'Even');
+   * await hamlib.setSerialConfig('serial_parity', 'Even');
    * 
    * // Set handshake to hardware
-   * hamlib.setSerialConfig('serial_handshake', 'Hardware');
+   * await hamlib.setSerialConfig('serial_handshake', 'Hardware');
    */
-  setSerialConfig(paramName: SerialConfigParam, paramValue: string): void;
+  setSerialConfig(paramName: SerialConfigParam, paramValue: string): Promise<number>;
 
   /**
    * Get serial port configuration parameter
@@ -510,54 +538,54 @@ declare class HamLib {
    * @returns Parameter value
    * @example
    * // Get current data bits setting
-   * const dataBits = hamlib.getSerialConfig('data_bits');
+   * const dataBits = await hamlib.getSerialConfig('data_bits');
    * 
    * // Get current parity setting
-   * const parity = hamlib.getSerialConfig('serial_parity');
+   * const parity = await hamlib.getSerialConfig('serial_parity');
    */
-  getSerialConfig(paramName: SerialConfigParam): string;
+  getSerialConfig(paramName: SerialConfigParam): Promise<string>;
 
   /**
    * Set PTT (Push-to-Talk) type
    * @param pttType PTT type ('RIG', 'DTR', 'RTS', 'PARALLEL', 'CM108', 'GPIO', 'GPION', 'NONE')
    * @example
    * // Use DTR line for PTT
-   * hamlib.setPttType('DTR');
+   * await hamlib.setPttType('DTR');
    * 
    * // Use RTS line for PTT
-   * hamlib.setPttType('RTS');
+   * await hamlib.setPttType('RTS');
    * 
    * // Use CAT command for PTT
-   * hamlib.setPttType('RIG');
+   * await hamlib.setPttType('RIG');
    */
-  setPttType(pttType: PttType): void;
+  setPttType(pttType: PttType): Promise<number>;
 
   /**
    * Get current PTT type
    * @returns Current PTT type
    */
-  getPttType(): string;
+  getPttType(): Promise<string>;
 
   /**
    * Set DCD (Data Carrier Detect) type
    * @param dcdType DCD type ('RIG', 'DSR', 'CTS', 'CD', 'PARALLEL', 'CM108', 'GPIO', 'GPION', 'NONE')
    * @example
    * // Use DSR line for DCD
-   * hamlib.setDcdType('DSR');
+   * await hamlib.setDcdType('DSR');
    * 
    * // Use CTS line for DCD
-   * hamlib.setDcdType('CTS');
+   * await hamlib.setDcdType('CTS');
    * 
    * // Use CAT command for DCD
-   * hamlib.setDcdType('RIG');
+   * await hamlib.setDcdType('RIG');
    */
-  setDcdType(dcdType: DcdType): void;
+  setDcdType(dcdType: DcdType): Promise<number>;
 
   /**
    * Get current DCD type
    * @returns Current DCD type
    */
-  getDcdType(): string;
+  getDcdType(): Promise<string>;
 
   /**
    * Get supported serial configuration options
@@ -568,6 +596,127 @@ declare class HamLib {
    * console.log('Supported PTT types:', configs.ptt_type);
    */
   getSupportedSerialConfigs(): SerialConfigOptions;
+
+  // Power Control
+
+  /**
+   * Set radio power status
+   * @param status Power status (0=OFF, 1=ON, 2=STANDBY, 4=OPERATE, 8=UNKNOWN)
+   * @returns Success status
+   * @example
+   * await rig.setPowerstat(1); // Power on
+   * await rig.setPowerstat(0); // Power off
+   * await rig.setPowerstat(2); // Standby mode
+   */
+  setPowerstat(status: number): Promise<number>;
+
+  /**
+   * Get current radio power status
+   * @returns Power status (0=OFF, 1=ON, 2=STANDBY, 4=OPERATE, 8=UNKNOWN)
+   * @example
+   * const powerStatus = await rig.getPowerstat();
+   * if (powerStatus === 1) {
+   *   console.log('Radio is powered on');
+   * }
+   */
+  getPowerstat(): Promise<number>;
+
+  // PTT Status Detection
+
+  /**
+   * Get current PTT status
+   * @param vfo Optional VFO to get PTT status from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns PTT status (true if transmitting, false if receiving)
+   * @example
+   * const isTransmitting = await rig.getPtt();
+   * if (isTransmitting) {
+   *   console.log('Radio is transmitting');
+   * }
+   */
+  getPtt(vfo?: VFO): Promise<boolean>;
+
+  // Data Carrier Detect
+
+  /**
+   * Get current DCD (Data Carrier Detect) status
+   * @param vfo Optional VFO to get DCD status from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns DCD status (true if carrier detected, false if no carrier)
+   * @example
+   * const carrierDetected = await rig.getDcd();
+   * if (carrierDetected) {
+   *   console.log('Carrier detected');
+   * }
+   */
+  getDcd(vfo?: VFO): Promise<boolean>;
+
+  // Tuning Step Control
+
+  /**
+   * Set tuning step
+   * @param step Tuning step in Hz
+   * @param vfo Optional VFO to set tuning step on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Success status
+   * @example
+   * await rig.setTuningStep(25000); // 25 kHz steps
+   * await rig.setTuningStep(12500); // 12.5 kHz steps
+   * await rig.setTuningStep(100);   // 100 Hz steps for HF
+   */
+  setTuningStep(step: number, vfo?: VFO): Promise<number>;
+
+  /**
+   * Get current tuning step
+   * @param vfo Optional VFO to get tuning step from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Current tuning step in Hz
+   * @example
+   * const step = await rig.getTuningStep();
+   * console.log(`Current tuning step: ${step} Hz`);
+   */
+  getTuningStep(vfo?: VFO): Promise<number>;
+
+  // Repeater Control
+
+  /**
+   * Set repeater shift direction
+   * @param shift Repeater shift direction ('NONE', 'MINUS', 'PLUS', '-', '+')
+   * @param vfo Optional VFO to set repeater shift on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Success status
+   * @example
+   * await rig.setRepeaterShift('PLUS');  // Positive shift (+)
+   * await rig.setRepeaterShift('MINUS'); // Negative shift (-)
+   * await rig.setRepeaterShift('NONE');  // No shift (simplex)
+   */
+  setRepeaterShift(shift: 'NONE' | 'MINUS' | 'PLUS' | '-' | '+' | 'none' | 'minus' | 'plus', vfo?: VFO): Promise<number>;
+
+  /**
+   * Get current repeater shift direction
+   * @param vfo Optional VFO to get repeater shift from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Current repeater shift direction
+   * @example
+   * const shift = await rig.getRepeaterShift();
+   * console.log(`Repeater shift: ${shift}`); // 'None', 'Minus', or 'Plus'
+   */
+  getRepeaterShift(vfo?: VFO): Promise<string>;
+
+  /**
+   * Set repeater offset frequency
+   * @param offset Repeater offset in Hz
+   * @param vfo Optional VFO to set repeater offset on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Success status
+   * @example
+   * await rig.setRepeaterOffset(600000);  // 600 kHz offset (2m band)
+   * await rig.setRepeaterOffset(5000000); // 5 MHz offset (70cm band)
+   */
+  setRepeaterOffset(offset: number, vfo?: VFO): Promise<number>;
+
+  /**
+   * Get current repeater offset frequency
+   * @param vfo Optional VFO to get repeater offset from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @returns Current repeater offset in Hz
+   * @example
+   * const offset = await rig.getRepeaterOffset();
+   * console.log(`Repeater offset: ${offset} Hz`);
+   */
+  getRepeaterOffset(vfo?: VFO): Promise<number>;
 }
 
 /**
@@ -583,5 +732,6 @@ export { ConnectionInfo, ModeInfo, SupportedRigInfo, VFO, RadioMode, MemoryChann
          ScanType, VfoOperationType, SerialConfigParam, PttType, DcdType, SerialConfigOptions, HamLib };
 
 // Support both CommonJS and ES module exports
+// @ts-ignore
 export = nodeHamlib;
 export default nodeHamlib; 

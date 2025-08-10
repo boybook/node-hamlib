@@ -11,16 +11,20 @@
 // Forward declaration
 class NodeHamLib;
 
-// Base AsyncWorker class for hamlib operations
+// Base AsyncWorker class for hamlib operations with Promise support
 class HamLibAsyncWorker : public Napi::AsyncWorker {
 public:
-    HamLibAsyncWorker(Napi::Function& callback, NodeHamLib* hamlib_instance);
+    HamLibAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance);
     virtual ~HamLibAsyncWorker() = default;
+
+    // Get the promise that will be resolved/rejected
+    Napi::Promise GetPromise() { return deferred_.Promise(); }
 
 protected:
     NodeHamLib* hamlib_instance_;
     int result_code_;
     std::string error_message_;
+    Napi::Promise::Deferred deferred_;
 };
 
 
@@ -90,6 +94,26 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
   Napi::Value SetDcdType(const Napi::CallbackInfo&);
   Napi::Value GetDcdType(const Napi::CallbackInfo&);
   Napi::Value GetSupportedSerialConfigs(const Napi::CallbackInfo&);
+  
+  // Power Control
+  Napi::Value SetPowerstat(const Napi::CallbackInfo&);
+  Napi::Value GetPowerstat(const Napi::CallbackInfo&);
+  
+  // PTT Status Detection
+  Napi::Value GetPtt(const Napi::CallbackInfo&);
+  
+  // Data Carrier Detect
+  Napi::Value GetDcd(const Napi::CallbackInfo&);
+  
+  // Tuning Step Control
+  Napi::Value SetTuningStep(const Napi::CallbackInfo&);
+  Napi::Value GetTuningStep(const Napi::CallbackInfo&);
+  
+  // Repeater Control
+  Napi::Value SetRepeaterShift(const Napi::CallbackInfo&);
+  Napi::Value GetRepeaterShift(const Napi::CallbackInfo&);
+  Napi::Value SetRepeaterOffset(const Napi::CallbackInfo&);
+  Napi::Value GetRepeaterOffset(const Napi::CallbackInfo&);
   
   // Static method to get supported rig models
   static Napi::Value GetSupportedRigs(const Napi::CallbackInfo&);
