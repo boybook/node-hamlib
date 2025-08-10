@@ -15,6 +15,16 @@
 #endif
 #endif
 
+// 安全宏 - 检查RIG指针有效性，防止空指针解引用和已销毁对象访问
+#define CHECK_RIG_VALID() \
+  do { \
+    if (!hamlib_instance_ || !hamlib_instance_->my_rig) { \
+      result_code_ = -RIG_EINVAL; \
+      error_message_ = "RIG is not initialized or has been destroyed"; \
+      return; \
+    } \
+  } while(0)
+
 // Structure to hold rig information for the callback
 struct RigListData {
   std::vector<Napi::Object> rigList;
@@ -37,6 +47,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_open(hamlib_instance_->my_rig);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -73,6 +85,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), freq_(freq), vfo_(vfo) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_set_freq(hamlib_instance_->my_rig, vfo_, freq_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -104,6 +118,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), freq_(0) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_get_freq(hamlib_instance_->my_rig, vfo_, &freq_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -135,6 +151,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), mode_(mode), width_(width), vfo_(vfo) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_set_mode(hamlib_instance_->my_rig, vfo_, mode_, width_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -167,6 +185,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), mode_(0), width_(0) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_get_mode(hamlib_instance_->my_rig, RIG_VFO_CURR, &mode_, &width_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -203,6 +223,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), ptt_(ptt) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_set_ptt(hamlib_instance_->my_rig, RIG_VFO_CURR, ptt_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -233,6 +255,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), strength_(0) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_get_strength(hamlib_instance_->my_rig, vfo_, &strength_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -264,6 +288,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), level_type_(level_type), value_(value) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_set_level(hamlib_instance_->my_rig, RIG_VFO_CURR, level_type_, value_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -297,6 +323,8 @@ public:
     }
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_get_level(hamlib_instance_->my_rig, RIG_VFO_CURR, level_type_, &value_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -328,6 +356,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), func_type_(func_type), enable_(enable) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_set_func(hamlib_instance_->my_rig, RIG_VFO_CURR, func_type_, enable_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -359,6 +389,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), func_type_(func_type), state_(0) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_get_func(hamlib_instance_->my_rig, RIG_VFO_CURR, func_type_, &state_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -390,6 +422,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), chan_(chan) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_set_channel(hamlib_instance_->my_rig, RIG_VFO_MEM, &chan_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -422,6 +456,8 @@ public:
     }
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         chan_.channel_num = channel_num_;
         chan_.vfo = RIG_VFO_MEM;
         result_code_ = rig_get_channel(hamlib_instance_->my_rig, RIG_VFO_MEM, &chan_, read_only_);
@@ -476,6 +512,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), channel_num_(channel_num) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_set_mem(hamlib_instance_->my_rig, RIG_VFO_CURR, channel_num_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -506,6 +544,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), rit_offset_(rit_offset) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_set_rit(hamlib_instance_->my_rig, RIG_VFO_CURR, rit_offset_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -536,6 +576,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), rit_offset_(0) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_get_rit(hamlib_instance_->my_rig, RIG_VFO_CURR, &rit_offset_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -566,6 +608,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), xit_offset_(xit_offset) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_set_xit(hamlib_instance_->my_rig, RIG_VFO_CURR, xit_offset_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -596,6 +640,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), xit_offset_(0) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_get_xit(hamlib_instance_->my_rig, RIG_VFO_CURR, &xit_offset_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -626,6 +672,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         int ritCode = rig_set_rit(hamlib_instance_->my_rig, RIG_VFO_CURR, 0);
         int xitCode = rig_set_xit(hamlib_instance_->my_rig, RIG_VFO_CURR, 0);
         
@@ -661,6 +709,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), tx_freq_(tx_freq), vfo_(vfo) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_set_split_freq(hamlib_instance_->my_rig, vfo_, tx_freq_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -692,6 +742,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), tx_freq_(0), vfo_(vfo) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_get_split_freq(hamlib_instance_->my_rig, vfo_, &tx_freq_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -723,6 +775,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), rx_vfo_(rx_vfo), split_(split), tx_vfo_(tx_vfo) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_set_split_vfo(hamlib_instance_->my_rig, rx_vfo_, split_, tx_vfo_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -755,6 +809,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), split_(RIG_SPLIT_OFF), tx_vfo_(RIG_VFO_B), vfo_(vfo) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_get_split_vfo(hamlib_instance_->my_rig, vfo_, &split_, &tx_vfo_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -796,6 +852,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_set_vfo(hamlib_instance_->my_rig, vfo_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -826,6 +884,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(0) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_get_vfo(hamlib_instance_->my_rig, &vfo_);
         if (result_code_ != RIG_OK) {
             // 提供更清晰的错误信息
@@ -887,6 +947,14 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
+        // 检查rig是否已经关闭
+        if (!hamlib_instance_->rig_is_open) {
+            result_code_ = RIG_OK;  // 已经关闭，返回成功
+            return;
+        }
+        
         result_code_ = rig_close(hamlib_instance_->my_rig);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -916,14 +984,15 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance) {}
     
     void Execute() override {
-        if (hamlib_instance_->rig_is_open) {
-            rig_close(hamlib_instance_->my_rig);
-        }
+        CHECK_RIG_VALID();
+        
+        // rig_cleanup会自动调用rig_close，所以我们不需要重复调用
         result_code_ = rig_cleanup(hamlib_instance_->my_rig);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
         } else {
             hamlib_instance_->rig_is_open = false;
+            hamlib_instance_->my_rig = nullptr;  // 重要：清空指针防止重复释放
         }
     }
     
@@ -949,6 +1018,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), scan_type_(scan_type), channel_(channel) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_scan(hamlib_instance_->my_rig, RIG_VFO_CURR, scan_type_, channel_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -981,6 +1052,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_scan(hamlib_instance_->my_rig, RIG_VFO_CURR, RIG_SCAN_STOP, 0);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -1009,6 +1082,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_op_(vfo_op) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_vfo_op(hamlib_instance_->my_rig, RIG_VFO_CURR, vfo_op_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -1040,6 +1115,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), antenna_(antenna), vfo_(vfo), option_(option) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_set_ant(hamlib_instance_->my_rig, vfo_, antenna_, option_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -1073,6 +1150,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), antenna_(antenna), antenna_curr_(0), antenna_tx_(0), antenna_rx_(0) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         option_ = {0};
         
         result_code_ = rig_get_ant(hamlib_instance_->my_rig, vfo_, antenna_, &option_, &antenna_curr_, &antenna_tx_, &antenna_rx_);
@@ -1118,6 +1197,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), power_(power), freq_(freq), mode_(mode), mwpower_(0) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_power2mW(hamlib_instance_->my_rig, &mwpower_, power_, freq_, mode_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -1152,6 +1233,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), mwpower_(mwpower), freq_(freq), mode_(mode), power_(0.0) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_mW2power(hamlib_instance_->my_rig, &power_, mwpower_, freq_, mode_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -1186,6 +1269,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), tx_mode_(tx_mode), tx_width_(tx_width), vfo_(vfo) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_set_split_mode(hamlib_instance_->my_rig, vfo_, tx_mode_, tx_width_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -1219,6 +1304,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), tx_mode_(0), tx_width_(0), vfo_(vfo) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_get_split_mode(hamlib_instance_->my_rig, vfo_, &tx_mode_, &tx_width_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -1257,6 +1344,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), param_name_(param_name), param_value_(param_value) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         // Apply serial configuration parameter
         if (param_name_ == "data_bits") {
             int data_bits = std::stoi(param_value_);
@@ -1414,6 +1503,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), param_name_(param_name) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         // Get serial configuration parameter
         if (param_name_ == "data_bits") {
             param_value_ = std::to_string(hamlib_instance_->my_rig->state.rigport.parm.serial.data_bits);
@@ -1529,6 +1620,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), ptt_type_(ptt_type) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         ptt_type_t ptt_type;
         if (ptt_type_ == "RIG") {
             ptt_type = RIG_PTT_RIG;
@@ -1581,6 +1674,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         ptt_type_t ptt_type = hamlib_instance_->my_rig->state.pttport.type.ptt;
         
         switch (ptt_type) {
@@ -1640,6 +1735,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), dcd_type_(dcd_type) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         dcd_type_t dcd_type;
         if (dcd_type_ == "RIG") {
             dcd_type = RIG_DCD_RIG;
@@ -1694,6 +1791,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         dcd_type_t dcd_type = hamlib_instance_->my_rig->state.dcdport.type.dcd;
         
         switch (dcd_type) {
@@ -1756,6 +1855,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), status_(status) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_set_powerstat(hamlib_instance_->my_rig, status_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -1786,6 +1887,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), status_(RIG_POWER_UNKNOWN) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_get_powerstat(hamlib_instance_->my_rig, &status_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -1817,6 +1920,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), ptt_(RIG_PTT_OFF) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_get_ptt(hamlib_instance_->my_rig, vfo_, &ptt_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -1849,6 +1954,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), dcd_(RIG_DCD_OFF) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_get_dcd(hamlib_instance_->my_rig, vfo_, &dcd_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -1881,6 +1988,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), ts_(ts) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_set_ts(hamlib_instance_->my_rig, vfo_, ts_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -1912,6 +2021,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), ts_(0) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_get_ts(hamlib_instance_->my_rig, vfo_, &ts_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -1944,6 +2055,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), shift_(shift) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_set_rptr_shift(hamlib_instance_->my_rig, vfo_, shift_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -1975,6 +2088,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), shift_(RIG_RPT_SHIFT_NONE) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_get_rptr_shift(hamlib_instance_->my_rig, vfo_, &shift_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -2003,6 +2118,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), offset_(offset) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_set_rptr_offs(hamlib_instance_->my_rig, vfo_, offset_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -2034,6 +2151,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), offset_(0) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_get_rptr_offs(hamlib_instance_->my_rig, vfo_, &offset_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -2155,6 +2274,21 @@ NodeHamLib::NodeHamLib(const Napi::CallbackInfo & info): ObjectWrap(info) {
   //   } 
 
   rig_is_open = false;
+}
+
+// 析构函数 - 确保资源正确清理
+NodeHamLib::~NodeHamLib() {
+  // 如果rig指针存在，执行清理
+  if (my_rig) {
+    // 如果rig是打开状态，先关闭
+    if (rig_is_open) {
+      rig_close(my_rig);
+      rig_is_open = false;
+    }
+    // 清理rig资源
+    rig_cleanup(my_rig);
+    my_rig = nullptr;
+  }
 }
 
 int NodeHamLib::freq_change_cb(RIG *rig, vfo_t vfo, freq_t freq, void* arg) {
@@ -3976,6 +4110,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tone_(tone) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_set_ctcss_tone(hamlib_instance_->my_rig, vfo_, tone_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -4007,6 +4143,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tone_(0) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_get_ctcss_tone(hamlib_instance_->my_rig, vfo_, &tone_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -4038,6 +4176,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), code_(code) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_set_dcs_code(hamlib_instance_->my_rig, vfo_, code_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -4069,6 +4209,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), code_(0) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_get_dcs_code(hamlib_instance_->my_rig, vfo_, &code_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -4100,6 +4242,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tone_(tone) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_set_ctcss_sql(hamlib_instance_->my_rig, vfo_, tone_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -4131,6 +4275,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tone_(0) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_get_ctcss_sql(hamlib_instance_->my_rig, vfo_, &tone_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -4162,6 +4308,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), code_(code) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_set_dcs_sql(hamlib_instance_->my_rig, vfo_, code_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -4193,6 +4341,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), code_(0) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_get_dcs_sql(hamlib_instance_->my_rig, vfo_, &code_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -4225,6 +4375,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), parm_(parm), value_(value) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_set_parm(hamlib_instance_->my_rig, parm_, value_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -4258,6 +4410,8 @@ public:
     }
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_get_parm(hamlib_instance_->my_rig, parm_, &value_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -4290,6 +4444,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), digits_(digits) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_send_dtmf(hamlib_instance_->my_rig, vfo_, digits_.c_str());
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -4323,6 +4479,8 @@ public:
     }
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         length_ = max_length_;
         result_code_ = rig_recv_dtmf(hamlib_instance_->my_rig, vfo_, digits_.data(), &length_);
         if (result_code_ != RIG_OK) {
@@ -4361,6 +4519,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), ch_(0) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_get_mem(hamlib_instance_->my_rig, vfo_, &ch_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -4392,6 +4552,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), bank_(bank) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_set_bank(hamlib_instance_->my_rig, vfo_, bank_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -4423,6 +4585,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), count_(0) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         count_ = rig_mem_count(hamlib_instance_->my_rig);
         if (count_ < 0) {
             result_code_ = count_;
@@ -4457,6 +4621,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), msg_(msg) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_send_morse(hamlib_instance_->my_rig, vfo_, msg_.c_str());
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -4488,6 +4654,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_stop_morse(hamlib_instance_->my_rig, vfo_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -4518,6 +4686,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_wait_morse(hamlib_instance_->my_rig, vfo_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -4549,6 +4719,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), ch_(ch) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_send_voice_mem(hamlib_instance_->my_rig, vfo_, ch_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
@@ -4580,6 +4752,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         #if HAVE_RIG_STOP_VOICE_MEM
         result_code_ = rig_stop_voice_mem(hamlib_instance_->my_rig, vfo_);
         if (result_code_ != RIG_OK) {
@@ -4620,6 +4794,8 @@ public:
           tx_mode_(tx_mode), tx_width_(tx_width) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         #if HAVE_RIG_SPLIT_FREQ_MODE
         result_code_ = rig_set_split_freq_mode(hamlib_instance_->my_rig, vfo_, tx_freq_, tx_mode_, tx_width_);
         if (result_code_ != RIG_OK) {
@@ -4660,6 +4836,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tx_freq_(0), tx_mode_(RIG_MODE_NONE), tx_width_(0) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         #if HAVE_RIG_SPLIT_FREQ_MODE
         result_code_ = rig_get_split_freq_mode(hamlib_instance_->my_rig, vfo_, &tx_freq_, &tx_mode_, &tx_width_);
         if (result_code_ != RIG_OK) {
@@ -4705,6 +4883,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), reset_(reset) {}
     
     void Execute() override {
+        CHECK_RIG_VALID();
+        
         result_code_ = rig_reset(hamlib_instance_->my_rig, reset_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);

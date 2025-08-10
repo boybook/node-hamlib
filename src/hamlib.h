@@ -31,6 +31,7 @@ protected:
 class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
  public:
   NodeHamLib(const Napi::CallbackInfo&);
+  ~NodeHamLib();  // Add destructor declaration
   Napi::Value Open(const Napi::CallbackInfo&);
   Napi::Value SetVFO(const Napi::CallbackInfo&);
   Napi::Value SetFrequency(const Napi::CallbackInfo&);
