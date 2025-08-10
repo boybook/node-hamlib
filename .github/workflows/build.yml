@@ -163,7 +163,25 @@ jobs:
         echo "Installation: Extract to your project's prebuilds/ directory" >> prebuilds/BUILD_INFO.txt
         
         # 验证构建产物
-        node .github/scripts/verify-build.js
+        echo "🔍 Verifying build artifacts..."
+        EXPECTED_PLATFORMS=("linux-x64" "linux-arm64" "darwin-arm64")
+        FOUND_PLATFORMS=0
+        
+        for platform in "${EXPECTED_PLATFORMS[@]}"; do
+          if [ -f "prebuilds/$platform/hamlib.node" ]; then
+            echo "✅ Found binary for $platform"
+            FOUND_PLATFORMS=$((FOUND_PLATFORMS + 1))
+          else
+            echo "❌ Missing binary for $platform"
+          fi
+        done
+        
+        if [ $FOUND_PLATFORMS -eq ${#EXPECTED_PLATFORMS[@]} ]; then
+          echo "🎉 All $FOUND_PLATFORMS platform binaries verified successfully"
+        else
+          echo "❌ Build verification failed: $FOUND_PLATFORMS/${#EXPECTED_PLATFORMS[@]} platforms found"
+          exit 1
+        fi
         
         # 创建统一的zip包
         cd prebuilds
@@ -208,7 +226,7 @@ jobs:
           
           This release includes precompiled binaries for multiple platforms:
           
-          **Platforms included:** ${{ steps.package_info.outputs.platform_count }} platforms  
+          **Platforms included:** 3 platforms (Linux x64/ARM64, macOS ARM64)  
           **Package size:** ${{ steps.package_info.outputs.package_size }} bytes  
           **Build date:** ${{ steps.package_info.outputs.build_date }}
           
