@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <algorithm>
 
 // Cross-platform compatibility for hamlib token types
 // Linux versions use token_t, some others use hamlib_token_t
@@ -1185,6 +1186,75 @@ public:
             }
             hamlib_instance_->my_rig->state.rigport.parm.serial.dtr_state = state;
             result_code_ = RIG_OK;
+        } else if (param_name_ == "rate") {
+            int rate = std::stoi(param_value_);
+            // Validate supported baud rates based on common values in Hamlib
+            std::vector<int> valid_rates = {150, 300, 600, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 
+                                          230400, 460800, 500000, 576000, 921600, 1000000, 1152000, 1500000, 
+                                          2000000, 2500000, 3000000, 3500000, 4000000};
+            if (std::find(valid_rates.begin(), valid_rates.end(), rate) != valid_rates.end()) {
+                hamlib_instance_->my_rig->state.rigport.parm.serial.rate = rate;
+                result_code_ = RIG_OK;
+            } else {
+                result_code_ = -RIG_EINVAL;
+                error_message_ = "Invalid baud rate value";
+            }
+        } else if (param_name_ == "timeout") {
+            int timeout_val = std::stoi(param_value_);
+            if (timeout_val >= 0) {
+                hamlib_instance_->my_rig->state.rigport.timeout = timeout_val;
+                result_code_ = RIG_OK;
+            } else {
+                result_code_ = -RIG_EINVAL;
+                error_message_ = "Timeout must be non-negative";
+            }
+        } else if (param_name_ == "retry") {
+            int retry_val = std::stoi(param_value_);
+            if (retry_val >= 0) {
+                hamlib_instance_->my_rig->state.rigport.retry = (short)retry_val;
+                result_code_ = RIG_OK;
+            } else {
+                result_code_ = -RIG_EINVAL;
+                error_message_ = "Retry count must be non-negative";
+            }
+        } else if (param_name_ == "write_delay") {
+            int delay = std::stoi(param_value_);
+            if (delay >= 0) {
+                hamlib_instance_->my_rig->state.rigport.write_delay = delay;
+                result_code_ = RIG_OK;
+            } else {
+                result_code_ = -RIG_EINVAL;
+                error_message_ = "Write delay must be non-negative";
+            }
+        } else if (param_name_ == "post_write_delay") {
+            int delay = std::stoi(param_value_);
+            if (delay >= 0) {
+                hamlib_instance_->my_rig->state.rigport.post_write_delay = delay;
+                result_code_ = RIG_OK;
+            } else {
+                result_code_ = -RIG_EINVAL;
+                error_message_ = "Post write delay must be non-negative";
+            }
+        } else if (param_name_ == "flushx") {
+            if (param_value_ == "true" || param_value_ == "1") {
+                hamlib_instance_->my_rig->state.rigport.flushx = 1;
+                result_code_ = RIG_OK;
+            } else if (param_value_ == "false" || param_value_ == "0") {
+                hamlib_instance_->my_rig->state.rigport.flushx = 0;
+                result_code_ = RIG_OK;
+            } else {
+                result_code_ = -RIG_EINVAL;
+                error_message_ = "Flushx must be true/false or 1/0";
+            }
+        } else if (param_name_ == "timeout_retry") {
+            int timeout_retry_val = std::stoi(param_value_);
+            if (timeout_retry_val >= 0) {
+                hamlib_instance_->my_rig->state.rigport.timeout_retry = (short)timeout_retry_val;
+                result_code_ = RIG_OK;
+            } else {
+                result_code_ = -RIG_EINVAL;
+                error_message_ = "Timeout retry count must be non-negative";
+            }
         } else {
             result_code_ = -RIG_EINVAL;
             error_message_ = "Unknown serial configuration parameter";
@@ -1277,6 +1347,27 @@ public:
                     param_value_ = "Unknown";
                     break;
             }
+            result_code_ = RIG_OK;
+        } else if (param_name_ == "rate") {
+            param_value_ = std::to_string(hamlib_instance_->my_rig->state.rigport.parm.serial.rate);
+            result_code_ = RIG_OK;
+        } else if (param_name_ == "timeout") {
+            param_value_ = std::to_string(hamlib_instance_->my_rig->state.rigport.timeout);
+            result_code_ = RIG_OK;
+        } else if (param_name_ == "retry") {
+            param_value_ = std::to_string(hamlib_instance_->my_rig->state.rigport.retry);
+            result_code_ = RIG_OK;
+        } else if (param_name_ == "write_delay") {
+            param_value_ = std::to_string(hamlib_instance_->my_rig->state.rigport.write_delay);
+            result_code_ = RIG_OK;
+        } else if (param_name_ == "post_write_delay") {
+            param_value_ = std::to_string(hamlib_instance_->my_rig->state.rigport.post_write_delay);
+            result_code_ = RIG_OK;
+        } else if (param_name_ == "flushx") {
+            param_value_ = hamlib_instance_->my_rig->state.rigport.flushx ? "true" : "false";
+            result_code_ = RIG_OK;
+        } else if (param_name_ == "timeout_retry") {
+            param_value_ = std::to_string(hamlib_instance_->my_rig->state.rigport.timeout_retry);
             result_code_ = RIG_OK;
         } else {
             result_code_ = -RIG_EINVAL;

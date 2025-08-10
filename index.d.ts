@@ -157,10 +157,42 @@ type VfoOperationType = 'CPY' | 'XCHG' | 'FROM_VFO' | 'TO_VFO' | 'MCL' | 'UP' |
                         'TUNE' | 'TOGGLE';
 
 /**
+ * Supported baud rates for serial communication
+ */
+type SerialBaudRate = '150' | '300' | '600' | '1200' | '2400' | '4800' | '9600' | '19200' | 
+                      '38400' | '57600' | '115200' | '230400' | '460800' | '500000' | 
+                      '576000' | '921600' | '1000000' | '1152000' | '1500000' | '2000000' | 
+                      '2500000' | '3000000' | '3500000' | '4000000';
+
+/**
+ * Serial parity values
+ */
+type SerialParity = 'None' | 'Even' | 'Odd' | 'Mark' | 'Space';
+
+/**
+ * Serial handshake values
+ */
+type SerialHandshake = 'None' | 'Hardware' | 'Software';
+
+/**
+ * Serial control signal states
+ */
+type SerialControlState = 'ON' | 'OFF' | 'UNSET';
+
+/**
  * Serial configuration parameter names
  */
-type SerialConfigParam = 'data_bits' | 'stop_bits' | 'serial_parity' | 'serial_handshake' | 
-                        'rts_state' | 'dtr_state';
+type SerialConfigParam = 
+  // Basic serial settings
+  'data_bits' | 'stop_bits' | 'serial_parity' | 'serial_handshake' |
+  // Control signals
+  'rts_state' | 'dtr_state' |
+  // Communication settings
+  'rate' | 'timeout' | 'retry' |
+  // Timing control
+  'write_delay' | 'post_write_delay' |
+  // Advanced features
+  'flushx' | 'timeout_retry';
 
 /**
  * PTT (Push-to-Talk) types
@@ -523,30 +555,56 @@ declare class HamLib {
 
   /**
    * Set serial port configuration parameter
-   * @param paramName Parameter name ('data_bits', 'stop_bits', 'serial_parity', 'serial_handshake', 'rts_state', 'dtr_state')
-   * @param paramValue Parameter value
+   * @param paramName Parameter name for serial configuration
+   * @param paramValue Parameter value as string
    * @example
-   * // Set data bits to 8
+   * // Basic serial settings
    * await hamlib.setSerialConfig('data_bits', '8');
-   * 
-   * // Set parity to even
+   * await hamlib.setSerialConfig('stop_bits', '1');
    * await hamlib.setSerialConfig('serial_parity', 'Even');
-   * 
-   * // Set handshake to hardware
    * await hamlib.setSerialConfig('serial_handshake', 'Hardware');
+   * 
+   * // Control signals
+   * await hamlib.setSerialConfig('rts_state', 'ON');
+   * await hamlib.setSerialConfig('dtr_state', 'OFF');
+   * 
+   * // Communication settings
+   * await hamlib.setSerialConfig('rate', '115200');
+   * await hamlib.setSerialConfig('timeout', '1000');
+   * await hamlib.setSerialConfig('retry', '3');
+   * 
+   * // Timing control
+   * await hamlib.setSerialConfig('write_delay', '10');
+   * await hamlib.setSerialConfig('post_write_delay', '50');
+   * 
+   * // Advanced features
+   * await hamlib.setSerialConfig('flushx', 'true');
+   * await hamlib.setSerialConfig('timeout_retry', '2');
    */
   setSerialConfig(paramName: SerialConfigParam, paramValue: string): Promise<number>;
 
   /**
    * Get serial port configuration parameter
-   * @param paramName Parameter name to retrieve
-   * @returns Parameter value
+   * @param paramName Parameter name to retrieve (any SerialConfigParam)
+   * @returns Parameter value as string
    * @example
-   * // Get current data bits setting
+   * // Get basic serial settings
    * const dataBits = await hamlib.getSerialConfig('data_bits');
-   * 
-   * // Get current parity setting
    * const parity = await hamlib.getSerialConfig('serial_parity');
+   * const handshake = await hamlib.getSerialConfig('serial_handshake');
+   * 
+   * // Get communication settings
+   * const rate = await hamlib.getSerialConfig('rate');
+   * const timeout = await hamlib.getSerialConfig('timeout');
+   * const retry = await hamlib.getSerialConfig('retry');
+   * 
+   * // Get control signals
+   * const rtsState = await hamlib.getSerialConfig('rts_state');
+   * const dtrState = await hamlib.getSerialConfig('dtr_state');
+   * 
+   * // Get timing and advanced settings
+   * const writeDelay = await hamlib.getSerialConfig('write_delay');
+   * const flushx = await hamlib.getSerialConfig('flushx');
    */
   getSerialConfig(paramName: SerialConfigParam): Promise<string>;
 
@@ -1045,7 +1103,8 @@ declare const nodeHamlib: {
 // Export types for use elsewhere
 export { ConnectionInfo, ModeInfo, SupportedRigInfo, AntennaInfo, VFO, RadioMode, MemoryChannelData, 
          MemoryChannelInfo, SplitModeInfo, SplitStatusInfo, LevelType, FunctionType, 
-         ScanType, VfoOperationType, SerialConfigParam, PttType, DcdType, SerialConfigOptions, HamLib };
+         ScanType, VfoOperationType, SerialConfigParam, SerialBaudRate, SerialParity, 
+         SerialHandshake, SerialControlState, PttType, DcdType, SerialConfigOptions, HamLib };
 
 // Support both CommonJS and ES module exports
 // @ts-ignore

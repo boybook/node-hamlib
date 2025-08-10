@@ -5,7 +5,8 @@ Control amateur radio transceivers from Node.js using the [Hamlib](https://hamli
 ## Features
 
 - **300+ Supported Radios** - Yaesu, Icom, Kenwood, Elecraft, FlexRadio, and more
-- **Full Async/Promise API** - Non-blocking operations with async/await support
+- **Full Async/Promise API** - Non-blocking operations with async/await support  
+- **Comprehensive Serial Control** - 14 parameters for complete serial port configuration
 - **Multiple Connections** - Serial ports, network (rigctld), direct control
 - **TypeScript Ready** - Complete type definitions included
 - **Cross-platform** - Windows, Linux, macOS
@@ -13,7 +14,7 @@ Control amateur radio transceivers from Node.js using the [Hamlib](https://hamli
 ## Installation
 
 ```bash
-npm install node-hamlib
+npm install hamlib
 ```
 
 ## Quick Start
@@ -155,16 +156,42 @@ const offset = await rig.getRepeaterOffset();
 
 ### Serial Configuration
 
-```javascript
-// Basic serial settings
-await rig.setSerialConfig('data_bits', '8');
-await rig.setSerialConfig('stop_bits', '1');
-await rig.setSerialConfig('serial_parity', 'None');
+Node-hamlib provides **comprehensive serial port configuration** with **14 parameters** covering all aspects of serial communication from basic data format to advanced timing control and device-specific features.
 
-// PTT/DCD methods
-await rig.setPttType('RIG');         // Use CAT command
-await rig.setDcdType('RIG');         // Use software squelch
+```javascript
+// Configure serial parameters
+await rig.setSerialConfig('rate', '115200');           // Baud rate: 150 to 4000000 bps
+await rig.setSerialConfig('data_bits', '8');           // Data bits: 5, 6, 7, 8
+await rig.setSerialConfig('serial_parity', 'None');    // Parity: None, Even, Odd, Mark, Space
+await rig.setSerialConfig('timeout', '1000');          // Timeout in milliseconds
+await rig.setSerialConfig('write_delay', '10');        // Inter-byte delay (ms)
+
+// Read current settings
+const rate = await rig.getSerialConfig('rate');
+const parity = await rig.getSerialConfig('serial_parity');
+
+// PTT/DCD configuration
+await rig.setPttType('DTR');                           // PTT: RIG, DTR, RTS, NONE, etc.
+await rig.setDcdType('RIG');                           // DCD: RIG, DSR, CTS, NONE, etc.
 ```
+
+#### Complete Serial Configuration Reference
+
+| Category | Parameter | Description | Supported Values |
+|----------|-----------|-------------|------------------|
+| **Basic Serial** | `data_bits` | Number of data bits | `5`, `6`, `7`, `8` |
+| | `stop_bits` | Number of stop bits | `1`, `2` |
+| | `serial_parity` | Parity checking | `None`, `Even`, `Odd`, `Mark`, `Space` |
+| | `serial_handshake` | Flow control | `None`, `Hardware`, `Software` |
+| **Control Signals** | `rts_state` | RTS line state | `ON`, `OFF`, `UNSET` |
+| | `dtr_state` | DTR line state | `ON`, `OFF`, `UNSET` |
+| **Communication** | `rate` | Baud rate (bps) | `150` to `4000000` |
+| | `timeout` | I/O timeout (ms) | Any non-negative integer |
+| | `retry` | Max retry count | Any non-negative integer |
+| **Timing** | `write_delay` | Inter-byte delay (ms) | Any non-negative integer |
+| | `post_write_delay` | Inter-command delay (ms) | Any non-negative integer |
+| **Advanced** | `flushx` | MicroHam flush mode | `true`, `false` |
+| | `timeout_retry` | Timeout retry count | Any non-negative integer |
 
 ## Complete Example
 
