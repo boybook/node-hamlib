@@ -35,14 +35,22 @@ let totalBinaries = 0;
 let totalSize = 0;
 
 // 递归查找包含 node.napi.node 的目录
+function hasNapiBinary(dir) {
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    return entries.some(e => e.isFile() && /^node\.napi(\.[^.]+)?\.node$/.test(e.name));
+  } catch (_) {
+    return false;
+  }
+}
+
 function findBinaryDirs(dir) {
   const results = [];
   const entries = fs.readdirSync(dir, { withFileTypes: true });
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      const candidate = path.join(full, 'node.napi.node');
-      if (fs.existsSync(candidate)) {
+      if (hasNapiBinary(full)) {
         results.push(full);
       }
       results.push(...findBinaryDirs(full));

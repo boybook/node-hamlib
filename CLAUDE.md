@@ -20,8 +20,8 @@ node-hamlib是一个Node.js绑定，用于Hamlib业余无线电收发器控制�
 - `npm run test:network` - 运行网络连接测试（test/test_network.js）
 
 ### Installation
-- `npm install` - 安装依赖并自动运行安装脚本
-- 安装脚本：`scripts/install.js` 处理预编译二进制文件的安装和回退到源码构建
+- `npm install` - 安装依赖（不在安装阶段编译）
+- 预编译二进制通过 prebuildify 生成并随包分发；运行时由 node-gyp-build 自动加载
 
 ## Architecture Overview
 
@@ -34,9 +34,8 @@ node-hamlib是一个Node.js绑定，用于Hamlib业余无线电收发器控制�
 - `addon.cpp` - Node.js addon入口点
 
 **JavaScript Layer:**
-- `index.js` - CommonJS主入口，处理二进制加载
+- `index.js` - CommonJS主入口，使用 node-gyp-build 自动加载本地或预编译二进制
 - `lib/index.mjs` - ES模块入口
-- `lib/binary-loader.js` - 跨平台预编译二进制加载逻辑
 
 **TypeScript Definitions:**
 - `index.d.ts` - 完整的TypeScript类型定义，包含所有API接口和类型
@@ -51,9 +50,9 @@ node-hamlib是一个Node.js绑定，用于Hamlib业余无线电收发器控制�
 ### Binary Distribution Strategy
 
 项目支持多平台预编译二进制：
-- **支持平台**: darwin-arm64, linux-x64, linux-arm64, windows-x64
-- **回退机制**: 如果预编译二进制不可用，自动从源码构建
-- **加载逻辑**: `lib/binary-loader.js` 处理平台检测和二进制加载
+- **支持平台**: darwin-arm64, linux-x64, linux-arm64（Windows 可选）
+- **产物布局**: `prebuilds/<platform>-<arch>[+libc]/node.napi*.node`
+- **加载逻辑**: 由 `node-gyp-build` 自动查找 `build/Release` 与 `prebuilds/**`
 
 ### Cross-Platform Build Configuration (binding.gyp)
 

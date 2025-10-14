@@ -101,16 +101,25 @@ MISSING_PLATFORMS=()
 for platform in "${PLATFORMS[@]}"; do
     # 匹配可能的+libc后缀目录
     candidate=$(find prebuilds -maxdepth 1 -type d -name "${platform}*" | head -n1)
-    if [ -n "$candidate" ] && [ -f "$candidate/node.napi.node" ]; then
-        file_size=$(stat -f%z "$candidate/node.napi.node" 2>/dev/null || stat -c%s "$candidate/node.napi.node" 2>/dev/null)
-        if [ "$file_size" -gt 10000 ]; then
-            log_success "$(basename "$candidate"): OK (${file_size} bytes)"
+    # 支持 node.napi.node 或 node.napi.*.node
+    binary_file=""
+    if [ -n "$candidate" ]; then
+        if [ -f "$candidate/node.napi.node" ]; then
+            binary_file="$candidate/node.napi.node"
         else
-            log_warning "$(basename "$candidate"): 文件过小 (${file_size} bytes)"
+            binary_file=$(find "$candidate" -maxdepth 1 -type f -name 'node.napi.*.node' | head -n1)
+        fi
+    fi
+    if [ -n "$binary_file" ] && [ -f "$binary_file" ]; then
+        file_size=$(stat -f%z "$binary_file" 2>/dev/null || stat -c%s "$binary_file" 2>/dev/null)
+        if [ "$file_size" -gt 10000 ]; then
+            log_success "$(basename "$candidate"): OK ($(basename "$binary_file") ${file_size} bytes)"
+        else
+            log_warning "$(basename "$candidate"): 文件过小 ($(basename "$binary_file") ${file_size} bytes)"
             MISSING_PLATFORMS+=("$platform")
         fi
     else
-        log_error "$platform: 缺失 (未找到 node.napi.node)"
+        log_error "$platform: 缺失 (未找到 node.napi*.node)"
         MISSING_PLATFORMS+=("$platform")
     fi
 done
@@ -163,7 +172,7 @@ log_info "将要打包的文件："
 grep -E "(prebuilds|index\.|lib/|package\.json|COPYING|Readme\.md)" pack-output.txt || true
 
 # 检查prebuilds是否包含在包中（node.napi.node）
-if ! grep -q "prebuilds.*node\.napi\.node" pack-output.txt; then
+if ! grep -qE "prebuilds.*node\.napi(\.[^.]+)?\.node" pack-output.txt; then
     log_error "prebuilds目录未包含在包中，请检查package.json中的files字段"
     rm -f pack-output.txt
     exit 1
@@ -171,8 +180,8 @@ fi
 
 # 检查所有平台的二进制文件是否都包含（允许+libc后缀）
 for platform in "${PLATFORMS[@]}"; do
-    if ! grep -q "prebuilds/${platform}[^/]*/node\.napi\.node" pack-output.txt; then
-        log_error "${platform}*/node.napi.node 未包含在包中"
+    if ! grep -qE "prebuilds/${platform}[^/]*/node\.napi(\.[^.]+)?\.node" pack-output.txt; then
+        log_error "${platform}*/node.napi*.node 未包含在包中"
         rm -f pack-output.txt
         exit 1
     fi
