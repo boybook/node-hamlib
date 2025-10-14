@@ -10,6 +10,8 @@ on:
 jobs:
   # 多平台并行构建
   build:
+    env:
+      HAMLIB_VERSION: '4.6.5'
     strategy:
       matrix:
         include:
@@ -29,12 +31,29 @@ jobs:
             arch: x64
             target: win32-x64
             hamlib_install: |
-              echo "Setting up Windows hamlib via vcpkg"
-              git clone https://github.com/microsoft/vcpkg "$env:GITHUB_WORKSPACE\vcpkg"
-              & "$env:GITHUB_WORKSPACE\vcpkg\bootstrap-vcpkg.bat"
-              & "$env:GITHUB_WORKSPACE\vcpkg\vcpkg.exe" install hamlib:x64-windows
-              echo "HAMLIB_ROOT=$env:GITHUB_WORKSPACE\vcpkg\installed\x64-windows" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-              echo "$env:GITHUB_WORKSPACE\vcpkg\installed\x64-windows\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+              echo "Setting up Windows hamlib from official release zip"
+              $ErrorActionPreference = 'Stop'
+              $ver = $env:HAMLIB_VERSION
+              $zipUrl = "https://github.com/Hamlib/Hamlib/releases/download/$ver/hamlib-w64-$ver.zip"
+              $zipPath = Join-Path $env:RUNNER_TEMP "hamlib-w64-$ver.zip"
+              Write-Host "Downloading $zipUrl"
+              Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
+              $dest = Join-Path $env:GITHUB_WORKSPACE 'hamlib'
+              if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+              New-Item -ItemType Directory -Path $dest | Out-Null
+              Add-Type -AssemblyName System.IO.Compression.FileSystem
+              [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $dest)
+              # Detect nested folder in zip (e.g., hamlib-w64-<ver>)
+              $root = $dest
+              if (!(Test-Path (Join-Path $root 'bin'))) {
+                $child = Get-ChildItem -Path $dest -Directory | Select-Object -First 1
+                if ($null -ne $child -and (Test-Path (Join-Path $child.FullName 'bin'))) {
+                  $root = $child.FullName
+                }
+              }
+              Write-Host "HAMLIB root detected at: $root"
+              "HAMLIB_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+              (Join-Path $root 'bin') | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           - os: macos-latest
             arch: arm64
             target: darwin-arm64
