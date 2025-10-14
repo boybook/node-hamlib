@@ -88,6 +88,7 @@
                 }, {
                   # Traditional Windows build with Visual C++
                   "include_dirs": [
+                    "<(module_root_dir)/include",
                     # Try environment variable in different formats
                     "<!(node -e \"console.log((process.env.HAMLIB_ROOT || 'C:/hamlib') + '/include')\")",
                     # Fallback paths
@@ -119,7 +120,10 @@
                     "libhamlib-4.lib",
                     "hamlib-4.lib",
                     "libhamlib.lib",
-                    "hamlib.lib"
+                    "hamlib.lib",
+                    # Common Win32 system libs used by hamlib
+                    "Ws2_32.lib",
+                    "Winmm.lib"
                   ],
                   "conditions": [
                     # Add pthread paths only if PTHREAD_ROOT is set
@@ -142,7 +146,10 @@
                   "msvs_settings": {
                     "VCCLCompilerTool": {
                       "ExceptionHandling": 1,
-                      "AdditionalOptions": ["/std:c++14"]
+                      "AdditionalOptions": ["/std:c++14"],
+                      "AdditionalIncludeDirectories": [
+                        "<(module_root_dir)/include"
+                      ]
                     }
                   }
                 }]
