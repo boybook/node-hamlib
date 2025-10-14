@@ -53,8 +53,8 @@ jobs:
     - name: Install Hamlib dependencies
       run: ${{ matrix.hamlib_install }}
 
-    - name: Install Node.js dependencies
-      run: npm ci
+    - name: Install Node.js dependencies (skip scripts)
+      run: npm ci --ignore-scripts
 
     - name: Generate prebuilds via prebuildify
       run: npx prebuildify --napi --strip --tag-libc

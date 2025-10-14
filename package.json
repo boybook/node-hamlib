@@ -44,8 +44,7 @@
     "test": "node test/test_loader.js",
     "test:network": "node test/test_network.js",
     "prebuild": "prebuildify --napi --strip --tag-libc",
-    "prepare": "npm run build",
-    "prepack": "npm run build"
+    "prepare": ""
   },
   "dependencies": {
     "node-addon-api": "^4.3.0",

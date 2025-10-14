@@ -4482,7 +4482,8 @@ public:
         CHECK_RIG_VALID();
         
         length_ = max_length_;
-        result_code_ = rig_recv_dtmf(hamlib_instance_->my_rig, vfo_, digits_.data(), &length_);
+        // rig_recv_dtmf expects a mutable buffer (char*). Ensure non-const pointer.
+        result_code_ = rig_recv_dtmf(hamlib_instance_->my_rig, vfo_, &digits_[0], &length_);
         if (result_code_ != RIG_OK) {
             error_message_ = rigerror(result_code_);
         }
@@ -5346,4 +5347,3 @@ Napi::Value NodeHamLib::Reset(const Napi::CallbackInfo& info) {
   asyncWorker->Queue();
   return asyncWorker->GetPromise();
 }
-
