@@ -55,8 +55,15 @@ const binaryDirs = Array.from(new Set(findBinaryDirs(prebuildsDir)));
 
 for (const base of expectedPlatforms) {
   const matched = binaryDirs.filter(d => {
+    const rel = path.relative(prebuildsDir, d);
     const name = path.basename(d);
-    return name === base || name.startsWith(base + '+');
+    // 允许目录名等于、以 base+ 开头，或者路径中包含 base/ 或 base+
+    return (
+      name === base ||
+      name.startsWith(base + '+') ||
+      rel.includes(`${base}/`) ||
+      rel.includes(`${base}+`)
+    );
   });
 
   if (matched.length === 0) {

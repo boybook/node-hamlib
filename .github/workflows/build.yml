@@ -114,6 +114,11 @@ jobs:
           rm -rf prebuilds/prebuilds || true
         fi
 
+    - name: Debug list prebuilds
+      run: |
+        echo "Listing prebuilds content before verify:"
+        find prebuilds -maxdepth 4 -type f -print | sort || true
+
     # - name: Download win32-x64 artifact
     #   uses: actions/download-artifact@v4
     #   with:
