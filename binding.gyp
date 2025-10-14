@@ -125,17 +125,16 @@
                     # Add pthread paths only if PTHREAD_ROOT is set
                     ["\"<!(node -e \"console.log(process.env.PTHREAD_ROOT || '')\")\"!=\"\"", {
                       "include_dirs": [
+                        # Headers are placed directly under PTHREAD_ROOT to match this include path
                         "<!(node -e \"console.log((process.env.PTHREAD_ROOT || 'C:/pthread-win32'))\")"
                       ],
                       "library_dirs": [
-                        "<!(node -e \"console.log((process.env.PTHREAD_ROOT || 'C:/pthread-win32') + '/lib')\")",
-                        "<!(node -e \"console.log((process.env.PTHREAD_ROOT || 'C:/pthread-win32') + '/lib/x64')\")"
+                        "<!(node -e \"console.log((process.env.PTHREAD_ROOT || 'C:/pthread-win32') + '/lib/x64')\")",
+                        "<!(node -e \"console.log((process.env.PTHREAD_ROOT || 'C:/pthread-win32') + '/lib')\")"
                       ],
                       "libraries": [
-                        "pthreadVC2.lib",
-                        "pthreadVCE2.lib",
-                        "pthreadVSE2.lib",
-                        "pthread.lib"
+                        # Only link the MSVC import library we download from Sourceware
+                        "pthreadVC2.lib"
                       ]
                     }]
                   ],
