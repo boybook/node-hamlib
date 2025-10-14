@@ -119,8 +119,49 @@ function main() {
   if (plat === 'linux') ok = bundleLinux(dir);
   else if (plat === 'darwin') ok = bundleMac(dir, nodeBin);
   else if (plat === 'win32') {
-    warn('Windows bundling not implemented. Place hamlib-*.dll next to node.napi.node.');
-    ok = true;
+    // Try to locate hamlib runtime DLL and copy next to addon
+    function bundleWin(dir) {
+      const candidates = [];
+      const envRoot = process.env.HAMLIB_ROOT || '';
+      const vcpkgRoot = process.env.VCPKG_ROOT || process.env.VCPKG_INSTALLATION_ROOT || '';
+
+      // Preferred: HAMLIB_ROOT/bin
+      if (envRoot) candidates.push(path.join(envRoot, 'bin'));
+      // vcpkg typical: <vcpkg>/installed/x64-windows/bin
+      if (vcpkgRoot) candidates.push(path.join(vcpkgRoot, 'installed', 'x64-windows', 'bin'));
+      // Common fallbacks
+      candidates.push(
+        'C:/hamlib/bin',
+        'C:/Program Files/Hamlib/bin',
+        'C:/Program Files (x86)/Hamlib/bin'
+      );
+
+      function findDll(searchDir) {
+        try {
+          const files = fs.readdirSync(searchDir);
+          // Match typical hamlib DLL names: hamlib-4.dll, libhamlib-4.dll, hamlib.dll
+          const dll = files.find(n => /(lib)?hamlib(-\d+)?\.dll$/i.test(n));
+          return dll ? path.join(searchDir, dll) : '';
+        } catch {
+          return '';
+        }
+      }
+
+      let dllPath = '';
+      for (const d of candidates) {
+        dllPath = findDll(d);
+        if (dllPath) break;
+      }
+      if (!dllPath) {
+        warn('hamlib runtime DLL not found on Windows (set HAMLIB_ROOT or ensure vcpkg paths). Skipping bundle.');
+        return false;
+      }
+      const dest = path.join(dir, path.basename(dllPath));
+      fs.copyFileSync(dllPath, dest);
+      log(`Bundled ${path.basename(dllPath)} -> ${dest}`);
+      return true;
+    }
+    ok = bundleWin(dir);
   }
   if (!ok) {
     warn('Bundling completed with warnings.');
@@ -132,4 +173,3 @@ if (require.main === module) {
   try { main(); }
   catch (e) { console.error(e.message); process.exit(1); }
 }
-

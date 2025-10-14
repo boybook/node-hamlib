@@ -25,13 +25,16 @@ jobs:
             hamlib_install: |
               sudo apt-get update
               sudo apt-get install -y libhamlib-dev libhamlib-utils
-          # - os: windows-latest
-          #   arch: x64
-          #   target: win32-x64
-          #   hamlib_install: |
-          #     echo "Setting up Windows build environment"
-          #     # Windows 环境下通过 vcpkg 或其他方式安装 hamlib
-          #     # 暂时跳过 hamlib 安装，依赖项目内置的 hamlib 构建逻辑
+          - os: windows-latest
+            arch: x64
+            target: win32-x64
+            hamlib_install: |
+              echo "Setting up Windows hamlib via vcpkg"
+              git clone https://github.com/microsoft/vcpkg "$env:GITHUB_WORKSPACE\vcpkg"
+              & "$env:GITHUB_WORKSPACE\vcpkg\bootstrap-vcpkg.bat"
+              & "$env:GITHUB_WORKSPACE\vcpkg\vcpkg.exe" install hamlib:x64-windows
+              echo "HAMLIB_ROOT=$env:GITHUB_WORKSPACE\vcpkg\installed\x64-windows" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+              echo "$env:GITHUB_WORKSPACE\vcpkg\installed\x64-windows\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           - os: macos-latest
             arch: arm64
             target: darwin-arm64
@@ -60,9 +63,10 @@ jobs:
       run: npm run prebuild:bundle
 
     - name: List generated prebuilds
+      shell: bash
       run: |
         echo "Generated prebuilds:"
-        find prebuilds -maxdepth 2 -type f \( -name "*.node" -o -name "libhamlib.*" \) -print || true
+        find prebuilds -maxdepth 2 -type f \( -name "*.node" -o -name "libhamlib.*" -o -name "*hamlib*.dll" \) -print || true
 
     # 上传每个平台的预编译产物
     - name: Upload platform prebuilds artifact
@@ -119,11 +123,11 @@ jobs:
         echo "Listing prebuilds content before verify:"
         find prebuilds -maxdepth 4 -type f -print | sort || true
 
-    # - name: Download win32-x64 artifact
-    #   uses: actions/download-artifact@v4
-    #   with:
-    #     name: binary-win32-x64
-    #     path: prebuilds/win32-x64/
+    - name: Download win32-x64 prebuilds
+      uses: actions/download-artifact@v4
+      with:
+        name: prebuilds-win32-x64
+        path: prebuilds
 
     - name: Verify collected prebuilds
       run: node .github/scripts/verify-build.js
@@ -234,4 +238,5 @@ jobs:
           prebuilds-linux-x64
           prebuilds-linux-arm64
           prebuilds-darwin-arm64
+          prebuilds-win32-x64
         failOnError: false

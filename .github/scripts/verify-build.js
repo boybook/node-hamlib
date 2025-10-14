@@ -15,8 +15,8 @@ console.log('=================================');
 const expectedPlatforms = [
   'linux-x64',
   'linux-arm64',
-  'darwin-arm64'
-  // 'win32-x64'  // 暂不启用 Windows
+  'darwin-arm64',
+  'win32-x64'
 ];
 
 const prebuildsDir = path.join(process.cwd(), 'prebuilds');
@@ -98,7 +98,7 @@ for (const base of expectedPlatforms) {
 
   // 检查是否捆绑了 hamlib 动态库
   const files = fs.readdirSync(chosen);
-  const hasHamlib = files.some(n => /^libhamlib\.(so(\..*)?|dylib)$/.test(n));
+  const hasHamlib = files.some(n => /^libhamlib\.(so(\..*)?|dylib)$/.test(n) || /(lib)?hamlib(-\d+)?\.dll$/i.test(n));
   if (hasHamlib) {
     console.log(`  ✅ Found bundled hamlib runtime library`);
   } else {
