@@ -110,7 +110,7 @@ jobs:
     - name: Ensure node-gyp path (Windows)
       if: matrix.os == 'windows-latest'
       run: |
-        $ng = Join-Path $env:GITHUB_WORKSPACE 'node_modules\.bin\node-gyp.cmd'
+        $ng = Join-Path $env:GITHUB_WORKSPACE 'scripts\node-gyp-win.cmd'
         if (!(Test-Path $ng)) { throw "node-gyp not found in node_modules/.bin" }
         Write-Host "Using node-gyp at: $ng"
         "PREBUILD_NODE_GYP=$ng" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
