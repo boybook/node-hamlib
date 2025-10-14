@@ -88,7 +88,6 @@
                 }, {
                   # Traditional Windows build with Visual C++
                   "include_dirs": [
-                    "<(module_root_dir)/include",
                     # Try environment variable in different formats
                     "<!(node -e \"console.log((process.env.HAMLIB_ROOT || 'C:/hamlib') + '/include')\")",
                     # Fallback paths
@@ -146,10 +145,7 @@
                   "msvs_settings": {
                     "VCCLCompilerTool": {
                       "ExceptionHandling": 1,
-                      "AdditionalOptions": ["/std:c++14"],
-                      "AdditionalIncludeDirectories": [
-                        "<(module_root_dir)/include"
-                      ]
+                      "AdditionalOptions": ["/std:c++14"]
                     }
                   }
                 }]

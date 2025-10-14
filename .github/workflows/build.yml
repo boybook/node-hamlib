@@ -12,6 +12,7 @@ jobs:
   build:
     env:
       HAMLIB_VERSION: '4.6.5'
+      PTHREADS_VERSION: '3.0.0'
     strategy:
       matrix:
         include:
@@ -72,6 +73,50 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Setup NuGet (Windows)
+      if: matrix.os == 'windows-latest'
+      uses: nuget/setup-nuget@v2
+
+    - name: Install pthreads via NuGet (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $ver = $env:PTHREADS_VERSION
+        $out = Join-Path $env:RUNNER_TEMP 'nuget'
+        New-Item -ItemType Directory -Force -Path $out | Out-Null
+        nuget install pthreads -Version $ver -OutputDirectory $out | Write-Host
+        $pkg = Get-ChildItem -Path $out -Directory | Where-Object { $_.Name -like "pthreads.*" } | Select-Object -First 1
+        if ($null -eq $pkg) { throw "pthreads nuget package not found in $out" }
+        $native = Join-Path $pkg.FullName 'build/native'
+        if (!(Test-Path $native)) { $native = $pkg.FullName }
+        $incCandidates = @(
+          (Join-Path $native 'include'),
+          (Join-Path $native 'inc'),
+          (Join-Path $pkg.FullName 'include')
+        )
+        $libCandidates = @(
+          (Join-Path $native 'lib/x64'),
+          (Join-Path $native 'lib/amd64'),
+          (Join-Path $native 'lib'),
+          (Join-Path $pkg.FullName 'lib/x64'),
+          (Join-Path $pkg.FullName 'lib')
+        )
+        $inc = ($incCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1)
+        $lib = ($libCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1)
+        if ($null -eq $inc -or $null -eq $lib) {
+          Write-Host "incCandidates: $($incCandidates -join ';')"
+          Write-Host "libCandidates: $($libCandidates -join ';')"
+          throw "Failed to locate pthreads include/lib in NuGet package"
+        }
+        $root = Join-Path $env:RUNNER_TEMP 'pthreads-root'
+        if (Test-Path $root) { Remove-Item -Recurse -Force $root }
+        New-Item -ItemType Directory -Path (Join-Path $root 'include') | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $root 'lib/x64') -Force | Out-Null
+        Copy-Item -Recurse -Force (Join-Path $inc '*') (Join-Path $root 'include')
+        Copy-Item -Recurse -Force (Join-Path $lib '*') (Join-Path $root 'lib/x64')
+        "PTHREAD_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
@@ -93,10 +138,7 @@ jobs:
         "PREBUILD_NODE_GYP=$ng" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
         "PREBUILD_PLATFORM=win32" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
         "PREBUILD_ARCH=x64" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-    - name: Patch prebuildify spawn on Windows
-      if: matrix.os == 'windows-latest'
-      run: node scripts/patch-prebuildify-win.js
+        "PREBUILD_SHELL=cmd.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
     - name: Generate prebuilds and bundle hamlib
       run: npm run prebuild:bundle
