@@ -114,6 +114,12 @@ for platform in "${PLATFORMS[@]}"; do
         file_size=$(stat -f%z "$binary_file" 2>/dev/null || stat -c%s "$binary_file" 2>/dev/null)
         if [ "$file_size" -gt 10000 ]; then
             log_success "$(basename "$candidate"): OK ($(basename "$binary_file") ${file_size} bytes)"
+            # hamlib 动态库存在性检查（不强制，但提示）
+            if ls "$candidate"/libhamlib.* 1> /dev/null 2>&1; then
+                log_success "$(basename "$candidate"): bundled hamlib runtime present"
+            else
+                log_warning "$(basename "$candidate"): hamlib runtime library not bundled"
+            fi
         else
             log_warning "$(basename "$candidate"): 文件过小 ($(basename "$binary_file") ${file_size} bytes)"
             MISSING_PLATFORMS+=("$platform")
@@ -184,6 +190,12 @@ for platform in "${PLATFORMS[@]}"; do
         log_error "${platform}*/node.napi*.node 未包含在包中"
         rm -f pack-output.txt
         exit 1
+    fi
+    # 提示 hamlib 动态库是否包含
+    if grep -qE "prebuilds/${platform}[^/]*/libhamlib\.(so(\..*)?|dylib)" pack-output.txt; then
+        log_success "${platform}: bundled hamlib runtime included in package"
+    else
+        log_warning "${platform}: hamlib runtime not found in package"
     fi
 done
 

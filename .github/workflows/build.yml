@@ -56,13 +56,13 @@ jobs:
     - name: Install Node.js dependencies (skip scripts)
       run: npm ci --ignore-scripts
 
-    - name: Generate prebuilds via prebuildify
-      run: npx prebuildify --napi --strip
+    - name: Generate prebuilds and bundle hamlib
+      run: npm run prebuild:bundle
 
     - name: List generated prebuilds
       run: |
         echo "Generated prebuilds:"
-        find prebuilds -type f -name "*.node" -print || true
+        find prebuilds -maxdepth 2 -type f \( -name "*.node" -o -name "libhamlib.*" \) -print || true
 
     # 上传每个平台的预编译产物
     - name: Upload platform prebuilds artifact

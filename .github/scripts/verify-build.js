@@ -95,6 +95,15 @@ for (const base of expectedPlatforms) {
   const stats = fs.statSync(binaryPath);
   console.log(`📁 ${path.relative(prebuildsDir, chosen)}`);
   console.log(`  ✅ Binary found: ${path.basename(binaryPath)} (${stats.size} bytes)`);
+
+  // 检查是否捆绑了 hamlib 动态库
+  const files = fs.readdirSync(chosen);
+  const hasHamlib = files.some(n => /^libhamlib\.(so(\..*)?|dylib)$/.test(n));
+  if (hasHamlib) {
+    console.log(`  ✅ Found bundled hamlib runtime library`);
+  } else {
+    console.log(`  ⚠️  hamlib runtime library not bundled in ${path.relative(prebuildsDir, chosen)}`);
+  }
   totalBinaries++;
   totalSize += stats.size;
   foundPlatforms++;

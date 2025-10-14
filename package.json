@@ -43,7 +43,9 @@
     "test": "node test/test_loader.js",
     "test:network": "node test/test_network.js",
     "prebuild": "prebuildify --napi --strip",
-    "prepare": ""
+    "prepare": "",
+    "bundle": "node scripts/bundle-hamlib.js",
+    "prebuild:bundle": "npm run prebuild && npm run bundle"
   },
   "dependencies": {
     "node-addon-api": "^4.3.0",

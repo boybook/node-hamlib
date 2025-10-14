@@ -30,6 +30,9 @@
             "-L/usr/lib",
             "-L/usr/local/lib",
             "-lhamlib"
+          ],
+          "ldflags": [
+            "-Wl,-rpath,\\$ORIGIN"
           ]
         }],
         # macOS configuration
@@ -47,7 +50,10 @@
             "GCC_ENABLE_CPP_EXCEPTIONS": "YES",
             "CLANG_CXX_LIBRARY": "libc++",
             "MACOSX_DEPLOYMENT_TARGET": "10.15"
-          }
+          },
+          "ldflags": [
+            "-Wl,-rpath,@loader_path"
+          ]
         }],
         # Windows configuration
         ["OS==\"win\"", {
