@@ -11,12 +11,12 @@ const path = require('path');
 console.log('🔍 Node-HamLib Build Verification');
 console.log('=================================');
 
-// 检查预期的目录结构
+// 预期的平台基名（允许 libc 标签后缀，如 +glibc/+musl）
 const expectedPlatforms = [
   'linux-x64',
-  'linux-arm64', 
+  'linux-arm64',
   'darwin-arm64'
-  // 'win32-x64'  // 暂时注释掉 Windows 支持
+  // 'win32-x64'  // 暂不启用 Windows
 ];
 
 const prebuildsDir = path.join(process.cwd(), 'prebuilds');
@@ -34,30 +34,36 @@ let foundPlatforms = 0;
 let totalBinaries = 0;
 let totalSize = 0;
 
-for (const platform of expectedPlatforms) {
-  const platformDir = path.join(prebuildsDir, platform);
-  const binaryPath = path.join(platformDir, 'hamlib.node');
-  
-  if (fs.existsSync(platformDir)) {
-    console.log(`📁 Platform directory found: ${platform}`);
-    foundPlatforms++;
-    
+for (const base of expectedPlatforms) {
+  // 允许 libc 标签，如 linux-x64+glibc
+  const dirs = fs.readdirSync(prebuildsDir)
+    .filter(d => fs.statSync(path.join(prebuildsDir, d)).isDirectory())
+    .filter(d => d === base || d.startsWith(base + '+'));
+
+  if (dirs.length === 0) {
+    console.log(`❌ Platform directory missing: ${base} (no matches)`);
+    continue;
+  }
+
+  // 对于该平台，找到至少一个包含 node.napi.node 的目录
+  let platformHasBinary = false;
+  for (const d of dirs) {
+    const binaryPath = path.join(prebuildsDir, d, 'node.napi.node');
     if (fs.existsSync(binaryPath)) {
       const stats = fs.statSync(binaryPath);
-      console.log(`  ✅ Binary found: hamlib.node (${stats.size} bytes)`);
+      console.log(`📁 ${d}`);
+      console.log(`  ✅ Binary found: node.napi.node (${stats.size} bytes)`);
       totalBinaries++;
       totalSize += stats.size;
-      
-      // 简单的二进制文件验证
-      if (stats.size < 100) {
-        console.log(`  ⚠️  Warning: Binary size seems too small (${stats.size} bytes)`);
-      }
-      
-    } else {
-      console.log(`  ❌ Binary missing: hamlib.node`);
+      platformHasBinary = true;
+      break; // 任取其一
     }
+  }
+
+  if (platformHasBinary) {
+    foundPlatforms++;
   } else {
-    console.log(`❌ Platform directory missing: ${platform}`);
+    console.log(`  ❌ node.napi.node missing for ${base}`);
   }
 }
 

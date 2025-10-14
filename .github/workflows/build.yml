@@ -56,35 +56,20 @@ jobs:
     - name: Install Node.js dependencies
       run: npm ci
 
-    - name: Build node-hamlib
-      run: npm run build
+    - name: Generate prebuilds via prebuildify
+      run: npx prebuildify --napi --strip --tag-libc
 
-    - name: Verify build output
-      shell: bash
+    - name: List generated prebuilds
       run: |
-        if [ -f "build/Release/hamlib.node" ]; then
-          echo "✅ Build successful: hamlib.node found"
-          file build/Release/hamlib.node || true
-          ls -la build/Release/hamlib.node
-        else
-          echo "❌ Error: hamlib.node not found"
-          ls -la build/Release/ || true
-          exit 1
-        fi
+        echo "Generated prebuilds:"
+        find prebuilds -type f -name "*.node" -print || true
 
-    - name: Create platform binary
-      shell: bash
-      run: |
-        mkdir -p dist/${{ matrix.target }}
-        cp build/Release/hamlib.node dist/${{ matrix.target }}/
-        echo "Binary created for ${{ matrix.target }}"
-
-    # 上传每个平台的构建产物为独立的artifact
-    - name: Upload platform artifact
+    # 上传每个平台的预编译产物
+    - name: Upload platform prebuilds artifact
       uses: actions/upload-artifact@v4
       with:
-        name: binary-${{ matrix.target }}
-        path: dist/${{ matrix.target }}/
+        name: prebuilds-${{ matrix.target }}
+        path: prebuilds/**
         retention-days: 1  # 只保留1天，因为最终会合并
 
   # 收集所有平台构建产物并统一打包
@@ -95,29 +80,29 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Create prebuilds directory structure
+    - name: Prepare prebuilds directory
       run: |
         mkdir -p prebuilds
-        echo "Created prebuilds directory for collecting all platform binaries"
+        echo "Prepared prebuilds directory for collecting platform prebuilds"
 
     # 下载所有平台的构建产物
-    - name: Download linux-x64 artifact
+    - name: Download linux-x64 prebuilds
       uses: actions/download-artifact@v4
       with:
-        name: binary-linux-x64
-        path: prebuilds/linux-x64/
+        name: prebuilds-linux-x64
+        path: prebuilds
 
-    - name: Download linux-arm64 artifact
+    - name: Download linux-arm64 prebuilds
       uses: actions/download-artifact@v4
       with:
-        name: binary-linux-arm64
-        path: prebuilds/linux-arm64/
+        name: prebuilds-linux-arm64
+        path: prebuilds
 
-    - name: Download darwin-arm64 artifact
+    - name: Download darwin-arm64 prebuilds
       uses: actions/download-artifact@v4
       with:
-        name: binary-darwin-arm64
-        path: prebuilds/darwin-arm64/
+        name: prebuilds-darwin-arm64
+        path: prebuilds
 
     # - name: Download win32-x64 artifact
     #   uses: actions/download-artifact@v4
@@ -125,18 +110,8 @@ jobs:
     #     name: binary-win32-x64
     #     path: prebuilds/win32-x64/
 
-    - name: Verify collected binaries
-      run: |
-        echo "📋 Collected prebuilds structure:"
-        find prebuilds -type f -name "*.node" | sort
-        echo ""
-        echo "📊 Binary details:"
-        for binary in $(find prebuilds -name "*.node"); do
-          echo "🔹 $binary"
-          ls -la "$binary"
-          file "$binary" || true
-          echo ""
-        done
+    - name: Verify collected prebuilds
+      run: node .github/scripts/verify-build.js
 
     - name: Create unified prebuilds package
       run: |
@@ -161,27 +136,6 @@ jobs:
         
         echo "" >> prebuilds/BUILD_INFO.txt
         echo "Installation: Extract to your project's prebuilds/ directory" >> prebuilds/BUILD_INFO.txt
-        
-        # 验证构建产物
-        echo "🔍 Verifying build artifacts..."
-        EXPECTED_PLATFORMS=("linux-x64" "linux-arm64" "darwin-arm64")
-        FOUND_PLATFORMS=0
-        
-        for platform in "${EXPECTED_PLATFORMS[@]}"; do
-          if [ -f "prebuilds/$platform/hamlib.node" ]; then
-            echo "✅ Found binary for $platform"
-            FOUND_PLATFORMS=$((FOUND_PLATFORMS + 1))
-          else
-            echo "❌ Missing binary for $platform"
-          fi
-        done
-        
-        if [ $FOUND_PLATFORMS -eq ${#EXPECTED_PLATFORMS[@]} ]; then
-          echo "🎉 All $FOUND_PLATFORMS platform binaries verified successfully"
-        else
-          echo "❌ Build verification failed: $FOUND_PLATFORMS/${#EXPECTED_PLATFORMS[@]} platforms found"
-          exit 1
-        fi
         
         # 创建统一的zip包
         cd prebuilds
@@ -262,9 +216,7 @@ jobs:
       uses: geekyeggo/delete-artifact@v5
       with:
         name: |
-          binary-linux-x64
-          binary-linux-arm64
-          binary-darwin-arm64
+          prebuilds-linux-x64
+          prebuilds-linux-arm64
+          prebuilds-darwin-arm64
         failOnError: false
-
-

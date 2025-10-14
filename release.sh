@@ -93,23 +93,24 @@ if [ -z "$(ls -A prebuilds)" ]; then
     exit 1
 fi
 
-# 验证预构建文件
+# 验证预构建文件（prebuildify 命名：node.napi.node，可带+libc后缀目录）
 log_info "验证预构建文件完整性..."
 PLATFORMS=("linux-x64" "linux-arm64" "darwin-arm64")
 MISSING_PLATFORMS=()
 
 for platform in "${PLATFORMS[@]}"; do
-    if [ -f "prebuilds/$platform/hamlib.node" ]; then
-        # 检查文件大小（应该大于10KB）
-        file_size=$(stat -f%z "prebuilds/$platform/hamlib.node" 2>/dev/null || stat -c%s "prebuilds/$platform/hamlib.node" 2>/dev/null)
+    # 匹配可能的+libc后缀目录
+    candidate=$(find prebuilds -maxdepth 1 -type d -name "${platform}*" | head -n1)
+    if [ -n "$candidate" ] && [ -f "$candidate/node.napi.node" ]; then
+        file_size=$(stat -f%z "$candidate/node.napi.node" 2>/dev/null || stat -c%s "$candidate/node.napi.node" 2>/dev/null)
         if [ "$file_size" -gt 10000 ]; then
-            log_success "$platform: OK (${file_size} bytes)"
+            log_success "$(basename "$candidate"): OK (${file_size} bytes)"
         else
-            log_warning "$platform: 文件过小 (${file_size} bytes)"
+            log_warning "$(basename "$candidate"): 文件过小 (${file_size} bytes)"
             MISSING_PLATFORMS+=("$platform")
         fi
     else
-        log_error "$platform: 缺失"
+        log_error "$platform: 缺失 (未找到 node.napi.node)"
         MISSING_PLATFORMS+=("$platform")
     fi
 done
@@ -161,17 +162,17 @@ npm pack --dry-run > pack-output.txt 2>&1
 log_info "将要打包的文件："
 grep -E "(prebuilds|index\.|lib/|package\.json|COPYING|Readme\.md)" pack-output.txt || true
 
-# 检查prebuilds是否包含在包中 - 修复：检查实际的文件路径
-if ! grep -q "prebuilds.*hamlib\.node" pack-output.txt; then
+# 检查prebuilds是否包含在包中（node.napi.node）
+if ! grep -q "prebuilds.*node\.napi\.node" pack-output.txt; then
     log_error "prebuilds目录未包含在包中，请检查package.json中的files字段"
     rm -f pack-output.txt
     exit 1
 fi
 
-# 检查所有平台的二进制文件是否都包含
+# 检查所有平台的二进制文件是否都包含（允许+libc后缀）
 for platform in "${PLATFORMS[@]}"; do
-    if ! grep -q "prebuilds/$platform/hamlib\.node" pack-output.txt; then
-        log_error "$platform/hamlib.node 未包含在包中"
+    if ! grep -q "prebuilds/${platform}[^/]*/node\.napi\.node" pack-output.txt; then
+        log_error "${platform}*/node.napi.node 未包含在包中"
         rm -f pack-output.txt
         exit 1
     fi

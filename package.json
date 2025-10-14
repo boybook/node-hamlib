@@ -43,16 +43,17 @@
     "clean": "node-gyp clean",
     "test": "node test/test_loader.js",
     "test:network": "node test/test_network.js",
-    "install": "node scripts/install.js",
-    "postinstall": "node scripts/install.js",
+    "prebuild": "prebuildify --napi --strip --tag-libc",
     "prepare": "npm run build",
     "prepack": "npm run build"
   },
   "dependencies": {
-    "node-addon-api": "^4.3.0"
+    "node-addon-api": "^4.3.0",
+    "node-gyp-build": "^4.8.0"
   },
   "devDependencies": {
-    "node-gyp": "^9.4.0"
+    "node-gyp": "^9.4.0",
+    "prebuildify": "^5.0.0"
   },
   "engines": {
     "node": ">=12.0.0"
