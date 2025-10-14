@@ -19,7 +19,7 @@ jobs:
             hamlib_install: |
               sudo apt-get update
               sudo apt-get install -y libhamlib-dev libhamlib-utils
-          - os: ubuntu-latest  # 使用Ubuntu模拟ARM64构建（实际项目可能需要真实的ARM runner）
+          - os: ubuntu-24.04-arm64
             arch: arm64
             target: linux-arm64
             hamlib_install: |
@@ -103,6 +103,16 @@ jobs:
       with:
         name: prebuilds-darwin-arm64
         path: prebuilds
+
+    - name: Flatten prebuilds directory
+      shell: bash
+      run: |
+        if [ -d prebuilds/prebuilds ]; then
+          echo "Flattening nested prebuilds directory..."
+          shopt -s dotglob nullglob || true
+          mv prebuilds/prebuilds/* prebuilds/ || true
+          rm -rf prebuilds/prebuilds || true
+        fi
 
     # - name: Download win32-x64 artifact
     #   uses: actions/download-artifact@v4

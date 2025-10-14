@@ -34,37 +34,44 @@ let foundPlatforms = 0;
 let totalBinaries = 0;
 let totalSize = 0;
 
-for (const base of expectedPlatforms) {
-  // 允许 libc 标签，如 linux-x64+glibc
-  const dirs = fs.readdirSync(prebuildsDir)
-    .filter(d => fs.statSync(path.join(prebuildsDir, d)).isDirectory())
-    .filter(d => d === base || d.startsWith(base + '+'));
+// 递归查找包含 node.napi.node 的目录
+function findBinaryDirs(dir) {
+  const results = [];
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      const candidate = path.join(full, 'node.napi.node');
+      if (fs.existsSync(candidate)) {
+        results.push(full);
+      }
+      results.push(...findBinaryDirs(full));
+    }
+  }
+  return results;
+}
 
-  if (dirs.length === 0) {
+const binaryDirs = Array.from(new Set(findBinaryDirs(prebuildsDir)));
+
+for (const base of expectedPlatforms) {
+  const matched = binaryDirs.filter(d => {
+    const name = path.basename(d);
+    return name === base || name.startsWith(base + '+');
+  });
+
+  if (matched.length === 0) {
     console.log(`❌ Platform directory missing: ${base} (no matches)`);
     continue;
   }
 
-  // 对于该平台，找到至少一个包含 node.napi.node 的目录
-  let platformHasBinary = false;
-  for (const d of dirs) {
-    const binaryPath = path.join(prebuildsDir, d, 'node.napi.node');
-    if (fs.existsSync(binaryPath)) {
-      const stats = fs.statSync(binaryPath);
-      console.log(`📁 ${d}`);
-      console.log(`  ✅ Binary found: node.napi.node (${stats.size} bytes)`);
-      totalBinaries++;
-      totalSize += stats.size;
-      platformHasBinary = true;
-      break; // 任取其一
-    }
-  }
-
-  if (platformHasBinary) {
-    foundPlatforms++;
-  } else {
-    console.log(`  ❌ node.napi.node missing for ${base}`);
-  }
+  const chosen = matched[0];
+  const binaryPath = path.join(chosen, 'node.napi.node');
+  const stats = fs.statSync(binaryPath);
+  console.log(`📁 ${path.relative(prebuildsDir, chosen)}`);
+  console.log(`  ✅ Binary found: node.napi.node (${stats.size} bytes)`);
+  totalBinaries++;
+  totalSize += stats.size;
+  foundPlatforms++;
 }
 
 // 检查BUILD_INFO.txt
