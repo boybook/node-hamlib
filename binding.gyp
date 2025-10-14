@@ -115,11 +115,8 @@
                     "C:/Program Files (x86)/Hamlib/lib"
                   ],
                   "libraries": [
-                    # Prefer MSVC import libraries
+                    # Link against the import library present in hamlib-w64 zip
                     "libhamlib-4.lib",
-                    "hamlib-4.lib",
-                    "libhamlib.lib",
-                    "hamlib.lib",
                     # Common Win32 system libs used by hamlib
                     "Ws2_32.lib",
                     "Winmm.lib"
