@@ -35,7 +35,7 @@ jobs:
               $ErrorActionPreference = 'Stop'
               $ver = $env:HAMLIB_VERSION
               $localFolder = Join-Path $env:GITHUB_WORKSPACE "hamlib-w64-$ver"
-              if (Test-Path $localFolder -PathType Container -and (Test-Path (Join-Path $localFolder 'bin'))) {
+              if ((Test-Path $localFolder -PathType Container) -and (Test-Path (Join-Path $localFolder 'bin'))) {
                 Write-Host "Found local hamlib folder: $localFolder"
                 $root = $localFolder
               } else {
