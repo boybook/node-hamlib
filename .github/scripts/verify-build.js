@@ -80,10 +80,21 @@ for (const base of expectedPlatforms) {
   }
 
   const chosen = matched[0];
-  const binaryPath = path.join(chosen, 'node.napi.node');
+  // 选择实际存在的 node.napi*.node 文件
+  let binaryPath = path.join(chosen, 'node.napi.node');
+  if (!fs.existsSync(binaryPath)) {
+    const candidates = fs.readdirSync(chosen)
+      .filter(n => /^node\.napi(\.[^.]+)?\.node$/.test(n))
+      .map(n => path.join(chosen, n));
+    if (candidates.length === 0) {
+      console.log(`  ❌ node.napi*.node missing in ${path.relative(prebuildsDir, chosen)}`);
+      continue;
+    }
+    binaryPath = candidates[0];
+  }
   const stats = fs.statSync(binaryPath);
   console.log(`📁 ${path.relative(prebuildsDir, chosen)}`);
-  console.log(`  ✅ Binary found: node.napi.node (${stats.size} bytes)`);
+  console.log(`  ✅ Binary found: ${path.basename(binaryPath)} (${stats.size} bytes)`);
   totalBinaries++;
   totalSize += stats.size;
   foundPlatforms++;
