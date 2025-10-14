@@ -42,7 +42,7 @@
     "clean": "node-gyp clean",
     "test": "node test/test_loader.js",
     "test:network": "node test/test_network.js",
-    "prebuild": "prebuildify --napi --strip --tag-libc",
+    "prebuild": "prebuildify --napi --strip",
     "prepare": ""
   },
   "dependencies": {

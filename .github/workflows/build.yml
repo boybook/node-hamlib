@@ -57,7 +57,7 @@ jobs:
       run: npm ci --ignore-scripts
 
     - name: Generate prebuilds via prebuildify
-      run: npx prebuildify --napi --strip --tag-libc
+      run: npx prebuildify --napi --strip
 
     - name: List generated prebuilds
       run: |
