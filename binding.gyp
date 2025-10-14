@@ -99,25 +99,23 @@
                     # Try environment variable paths
                     "<!(node -e \"console.log((process.env.HAMLIB_ROOT || 'C:/hamlib') + '/bin')\")",
                     "<!(node -e \"console.log((process.env.HAMLIB_ROOT || 'C:/hamlib') + '/lib')\")",
+                    "<!(node -e \"console.log((process.env.HAMLIB_ROOT || 'C:/hamlib') + '/lib/gcc')\")",
                     "<!(node -e \"console.log((process.env.HAMLIB_ROOT || 'C:/hamlib') + '/lib/x64')\")",
                     "<!(node -e \"console.log((process.env.HAMLIB_ROOT || 'C:/hamlib') + '/lib/msvc')\")",
                     # Fallback paths
                     "C:/hamlib/bin",
                     "C:/hamlib/lib",
+                    "C:/hamlib/lib/gcc",
                     "C:/hamlib/lib/x64",
                     "C:/hamlib/lib/Release",
                     "C:/Program Files/Hamlib/bin",
                     "C:/Program Files/Hamlib/lib",
+                    "C:/Program Files/Hamlib/lib/gcc",
                     "C:/Program Files (x86)/Hamlib/bin",
                     "C:/Program Files (x86)/Hamlib/lib"
                   ],
                   "libraries": [
-                    # Try to link against the DLL import library
-                    "libhamlib-4.dll.a",
-                    "hamlib-4.dll.a", 
-                    "libhamlib.dll.a",
-                    "hamlib.dll.a",
-                    # Fallback to static libraries if available
+                    # Prefer MSVC import libraries
                     "libhamlib-4.lib",
                     "hamlib-4.lib",
                     "libhamlib.lib",

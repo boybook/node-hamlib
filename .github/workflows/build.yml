@@ -31,24 +31,30 @@ jobs:
             arch: x64
             target: win32-x64
             hamlib_install: |
-              echo "Setting up Windows hamlib from official release zip"
+              echo "Setting up Windows hamlib from repository folder or official zip"
               $ErrorActionPreference = 'Stop'
               $ver = $env:HAMLIB_VERSION
-              $zipUrl = "https://github.com/Hamlib/Hamlib/releases/download/$ver/hamlib-w64-$ver.zip"
-              $zipPath = Join-Path $env:RUNNER_TEMP "hamlib-w64-$ver.zip"
-              Write-Host "Downloading $zipUrl"
-              Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
-              $dest = Join-Path $env:GITHUB_WORKSPACE 'hamlib'
-              if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
-              New-Item -ItemType Directory -Path $dest | Out-Null
-              Add-Type -AssemblyName System.IO.Compression.FileSystem
-              [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $dest)
-              # Detect nested folder in zip (e.g., hamlib-w64-<ver>)
-              $root = $dest
-              if (!(Test-Path (Join-Path $root 'bin'))) {
-                $child = Get-ChildItem -Path $dest -Directory | Select-Object -First 1
-                if ($null -ne $child -and (Test-Path (Join-Path $child.FullName 'bin'))) {
-                  $root = $child.FullName
+              $localFolder = Join-Path $env:GITHUB_WORKSPACE "hamlib-w64-$ver"
+              if (Test-Path $localFolder -PathType Container -and (Test-Path (Join-Path $localFolder 'bin'))) {
+                Write-Host "Found local hamlib folder: $localFolder"
+                $root = $localFolder
+              } else {
+                $zipUrl = "https://github.com/Hamlib/Hamlib/releases/download/$ver/hamlib-w64-$ver.zip"
+                $zipPath = Join-Path $env:RUNNER_TEMP "hamlib-w64-$ver.zip"
+                Write-Host "Downloading $zipUrl"
+                Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
+                $dest = Join-Path $env:GITHUB_WORKSPACE 'hamlib'
+                if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+                New-Item -ItemType Directory -Path $dest | Out-Null
+                Add-Type -AssemblyName System.IO.Compression.FileSystem
+                [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $dest)
+                # Detect nested folder in zip (e.g., hamlib-w64-<ver>)
+                $root = $dest
+                if (!(Test-Path (Join-Path $root 'bin'))) {
+                  $child = Get-ChildItem -Path $dest -Directory | Select-Object -First 1
+                  if ($null -ne $child -and (Test-Path (Join-Path $child.FullName 'bin'))) {
+                    $root = $child.FullName
+                  }
                 }
               }
               Write-Host "HAMLIB root detected at: $root"

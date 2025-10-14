@@ -156,9 +156,22 @@ function main() {
         warn('hamlib runtime DLL not found on Windows (set HAMLIB_ROOT or ensure vcpkg paths). Skipping bundle.');
         return false;
       }
+      const binDir = path.dirname(dllPath);
+      // Copy hamlib DLL
       const dest = path.join(dir, path.basename(dllPath));
       fs.copyFileSync(dllPath, dest);
       log(`Bundled ${path.basename(dllPath)} -> ${dest}`);
+      // Also copy common dependent DLLs from the same bin directory (to avoid PATH issues at runtime)
+      try {
+        const files = fs.readdirSync(binDir).filter(n => /\.dll$/i.test(n));
+        for (const n of files) {
+          if (/(lib)?hamlib(-\d+)?\.dll$/i.test(n)) continue; // already copied
+          if (!/(libusb-1\.0|libwinpthread-1|libgcc_s_seh-1|libstdc\+\+-6|libiconv-2|libz-.*|zlib1)\.dll$/i.test(n)) continue;
+          const src = path.join(binDir, n);
+          const dst = path.join(dir, n);
+          try { fs.copyFileSync(src, dst, fs.constants.COPYFILE_FICLONE_FORCE || 0); log(`Bundled dependency ${n}`); } catch {}
+        }
+      } catch {}
       return true;
     }
     ok = bundleWin(dir);
