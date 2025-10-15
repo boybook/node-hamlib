@@ -34,9 +34,10 @@
     "index.d.ts",
     "binding.gyp",
     "COPYING",
-    "Readme.md"
+    "README.md"
   ],
   "scripts": {
+    "install": "node-gyp-build",
     "build": "node-gyp configure && node-gyp build",
     "rebuild": "node-gyp rebuild",
     "clean": "node-gyp clean",
@@ -55,6 +56,7 @@
     "node-gyp": "^9.4.0",
     "prebuildify": "^5.0.0"
   },
+  "preferUnplugged": true,
   "engines": {
     "node": ">=12.0.0"
   },

@@ -95,7 +95,7 @@ fi
 
 # 验证预构建文件（prebuildify 命名：node.napi.node，可带+libc后缀目录）
 log_info "验证预构建文件完整性..."
-PLATFORMS=("linux-x64" "linux-arm64" "darwin-arm64")
+PLATFORMS=("linux-x64" "linux-arm64" "darwin-arm64" "darwin-x64")
 MISSING_PLATFORMS=()
 
 for platform in "${PLATFORMS[@]}"; do
@@ -175,7 +175,7 @@ log_info "检查包结构..."
 npm pack --dry-run > pack-output.txt 2>&1
 
 log_info "将要打包的文件："
-grep -E "(prebuilds|index\.|lib/|package\.json|COPYING|Readme\.md)" pack-output.txt || true
+grep -E "(prebuilds|index\.|lib/|package\.json|COPYING|README\.md)" pack-output.txt || true
 
 # 检查prebuilds是否包含在包中（node.napi.node）
 if ! grep -qE "prebuilds.*node\.napi(\.[^.]+)?\.node" pack-output.txt; then

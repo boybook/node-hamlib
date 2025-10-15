@@ -25,7 +25,7 @@ The package will automatically use precompiled binaries if available for your pl
 For faster installation or offline environments, you can manually install precompiled binaries:
 
 1. **Download Prebuilds**: Go to [Releases](../../releases) and download `node-hamlib-prebuilds.zip`
-2. **Extract**: Unzip to your project's `node_modules/node-hamlib/prebuilds/` directory
+2. **Extract**: Unzip to your project's `node_modules/hamlib/prebuilds/` directory
 3. **Install**: Run `npm install node-hamlib --ignore-scripts`
 
 **Supported Prebuilt Platforms:**
