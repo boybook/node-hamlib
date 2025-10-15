@@ -121,7 +121,7 @@ function verifyRunpath(binaryPath, expectedRpath) {
 }
 
 /**
- * Find all .node files in prebuilds directory that need fixing
+ * Find all .node and .so files in prebuilds directory that need fixing
  */
 function findLinuxPrebuilds(prebuildsDir) {
   const results = [];
@@ -145,7 +145,8 @@ function findLinuxPrebuilds(prebuildsDir) {
       const files = fs.readdirSync(dirPath);
 
       for (const file of files) {
-        if (file.endsWith('.node')) {
+        // Include both .node files and .so files (and versioned .so.X files)
+        if (file.endsWith('.node') || file.endsWith('.so') || /\.so\.\d+$/.test(file)) {
           const filePath = path.join(dirPath, file);
           results.push({
             path: filePath,
@@ -191,7 +192,7 @@ function main() {
     return 0;
   }
 
-  log(`Found ${linuxPrebuilds.length} Linux prebuild(s) to fix`);
+  log(`Found ${linuxPrebuilds.length} Linux binary(ies) to fix (.node and .so files)`);
 
   let successCount = 0;
   let failCount = 0;

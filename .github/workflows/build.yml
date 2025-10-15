@@ -22,12 +22,16 @@ jobs:
             hamlib_install: |
               sudo apt-get update
               sudo apt-get install -y libhamlib-dev libhamlib-utils patchelf
+              # Install runtime dependencies for bundling
+              sudo apt-get install -y libusb-1.0-0 libindi1 || true
           - os: ubuntu-24.04-arm
             arch: arm64
             target: linux-arm64
             hamlib_install: |
               sudo apt-get update
               sudo apt-get install -y libhamlib-dev libhamlib-utils patchelf
+              # Install runtime dependencies for bundling
+              sudo apt-get install -y libusb-1.0-0 libindi1 || true
           - os: windows-latest
             arch: x64
             target: win32-x64
@@ -132,9 +136,12 @@ jobs:
       shell: bash
       run: |
         echo "Generated prebuilds:"
-        find prebuilds -maxdepth 2 -type f \( -name "*.node" -o -name "libhamlib.*" -o -name "*hamlib*.dll" \) -print || true
+        find prebuilds -maxdepth 2 -type f \( -name "*.node" -o -name "*.so*" -o -name "*.dylib" -o -name "*.dll" \) -print || true
 
-    - name: Verify Linux RUNPATH (Linux only)
+    - name: Verify dependencies (All platforms)
+      run: node scripts/verify-dependencies.js
+
+    - name: Verify Linux RUNPATH (Linux only - detailed check)
       if: startsWith(matrix.os, 'ubuntu')
       run: node scripts/verify-linux-rpath.js
 

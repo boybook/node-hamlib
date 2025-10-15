@@ -31,8 +31,87 @@ function getTargetDir() {
   return { dir, nodeBin, plat: platKey };
 }
 
+/**
+ * Get dependencies of a shared library using ldd
+ * @param {string} libPath - Path to the .so file
+ * @param {boolean} excludeSystemLibs - Whether to exclude system libraries
+ * @returns {Array<{name: string, path: string}>} Array of dependency objects
+ */
+function getDependencies(libPath, excludeSystemLibs = true) {
+  // System libraries that should NOT be bundled (always available on Linux)
+  const systemLibs = [
+    'linux-vdso.so',
+    'libc.so',
+    'libm.so',
+    'libpthread.so',
+    'libdl.so',
+    'librt.so',
+    'libgcc_s.so',
+    'libstdc++.so',
+    'ld-linux',
+    '/lib64/ld-linux',
+    '/lib/ld-linux'
+  ];
+
+  try {
+    const out = execSync(`ldd ${JSON.stringify(libPath)}`, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    }).toString();
+
+    const deps = [];
+    for (const line of out.split('\n')) {
+      // Parse lines like: "libusb-1.0.so.0 => /usr/lib/x86_64-linux-gnu/libusb-1.0.so.0 (0x00007f...)"
+      const match = line.match(/^\s*(\S+)\s+=>\s+(\S+)/);
+      if (!match) continue;
+
+      const [, libName, resolvedPath] = match;
+
+      // Skip "not found" entries
+      if (resolvedPath === 'not' || !resolvedPath || resolvedPath.startsWith('(')) {
+        continue;
+      }
+
+      // Skip system libraries if requested
+      if (excludeSystemLibs && systemLibs.some(sys => libName.includes(sys))) {
+        continue;
+      }
+
+      // Skip if path points to standard system directories (extra safety)
+      if (excludeSystemLibs && (
+        resolvedPath.startsWith('/lib/x86_64-linux-gnu/libc') ||
+        resolvedPath.startsWith('/lib/x86_64-linux-gnu/libm') ||
+        resolvedPath.startsWith('/lib/x86_64-linux-gnu/libpthread') ||
+        resolvedPath.startsWith('/lib/x86_64-linux-gnu/libdl') ||
+        resolvedPath.startsWith('/lib/x86_64-linux-gnu/librt') ||
+        resolvedPath.startsWith('/lib/x86_64-linux-gnu/libgcc_s') ||
+        resolvedPath.startsWith('/lib/x86_64-linux-gnu/libstdc++') ||
+        resolvedPath.startsWith('/lib64/libc') ||
+        resolvedPath.startsWith('/lib64/libm') ||
+        resolvedPath.startsWith('/lib64/libpthread')
+      )) {
+        continue;
+      }
+
+      deps.push({ name: libName, path: resolvedPath });
+    }
+
+    return deps;
+  } catch (e) {
+    warn(`Failed to get dependencies for ${libPath}: ${e.message}`);
+    return [];
+  }
+}
+
+/**
+ * Bundle libhamlib and all its transitive dependencies for Linux
+ * @param {string} dir - Target prebuilds directory
+ * @returns {boolean} Success status
+ */
 function bundleLinux(dir) {
-  // Try ldconfig first
+  log('[Linux] Starting dependency bundling...');
+
+  // Step 1: Find libhamlib.so
   let libPath = '';
   try {
     const out = execSync('ldconfig -p', { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
@@ -48,22 +127,147 @@ function bundleLinux(dir) {
     libPath = candidates.find(exists) || '';
   }
   if (!libPath) {
-    warn('hamlib runtime (libhamlib.so*) not found. Skipping bundle.');
+    warn('[Linux] hamlib runtime (libhamlib.so*) not found. Skipping bundle.');
     return false;
   }
+
+  // Step 2: Copy libhamlib.so
   const dest = path.join(dir, path.basename(libPath));
   fs.copyFileSync(libPath, dest);
-  log(`Bundled ${path.basename(libPath)} -> ${dest}`);
+  log(`[Linux] ✓ Bundled ${path.basename(libPath)} -> ${dest}`);
+
+  // Step 3: Find and bundle all transitive dependencies
+  log('[Linux] Analyzing transitive dependencies...');
+  const deps = getDependencies(libPath, true);
+
+  if (deps.length === 0) {
+    log('[Linux] No additional dependencies found (or all are system libraries)');
+  } else {
+    log(`[Linux] Found ${deps.length} transitive dependency(ies) to bundle:`);
+
+    for (const dep of deps) {
+      log(`[Linux]   - ${dep.name} (from ${dep.path})`);
+      const depDest = path.join(dir, dep.name);
+
+      try {
+        fs.copyFileSync(dep.path, depDest);
+        log(`[Linux]     ✓ Bundled to ${depDest}`);
+      } catch (e) {
+        warn(`[Linux]     ✗ Failed to bundle ${dep.name}: ${e.message}`);
+      }
+    }
+  }
+
+  // Step 4: Fix RUNPATH for all bundled .so files using patchelf
+  log('[Linux] Setting RUNPATH=$ORIGIN for all bundled libraries...');
+
+  try {
+    // Check if patchelf is available
+    execSync('which patchelf', { stdio: 'ignore' });
+  } catch (e) {
+    warn('[Linux] patchelf not found, skipping RUNPATH fix');
+    warn('[Linux] Install patchelf: sudo apt-get install patchelf');
+    return true; // Continue anyway, fix-linux-rpath.js will handle it
+  }
+
+  const soFiles = fs.readdirSync(dir).filter(f =>
+    f.endsWith('.so') || /\.so\.\d+$/.test(f)
+  );
+
+  for (const soFile of soFiles) {
+    const soPath = path.join(dir, soFile);
+    try {
+      execSync(`patchelf --set-rpath '$ORIGIN' ${JSON.stringify(soPath)}`, {
+        stdio: 'ignore'
+      });
+      log(`[Linux]   ✓ Set RUNPATH=$ORIGIN for ${soFile}`);
+    } catch (e) {
+      warn(`[Linux]   ✗ Failed to set RUNPATH for ${soFile}: ${e.message}`);
+    }
+  }
+
+  log('[Linux] ✓ Bundling completed successfully');
   return true;
 }
 
+/**
+ * Get dependencies of a dylib using otool -L
+ * @param {string} dylibPath - Path to the .dylib file
+ * @param {boolean} excludeSystemLibs - Whether to exclude system libraries
+ * @returns {Array<{name: string, path: string}>} Array of dependency objects
+ */
+function getDependenciesMac(dylibPath, excludeSystemLibs = true) {
+  // System libraries that should NOT be bundled (always available on macOS)
+  const systemLibsPrefixes = [
+    '/usr/lib/',                  // System libraries
+    '/System/Library/',           // System frameworks
+    '@rpath/',                    // Already using rpath (might be system)
+    'libSystem',                  // System core library
+    '/Library/Developer/CommandLineTools/',  // Developer tools
+  ];
+
+  try {
+    const out = execSync(`otool -L ${JSON.stringify(dylibPath)}`, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    }).toString();
+
+    const deps = [];
+    const lines = out.split('\n');
+
+    for (const line of lines) {
+      // Parse lines like: "  /opt/homebrew/lib/libusb-1.0.0.dylib (compatibility version 3.0.0, current version 3.0.0)"
+      // Skip the first line which is the library itself
+      const match = line.match(/^\s+(\S+\.dylib)\s+\(/);
+      if (!match) continue;
+
+      const dylibFullPath = match[1];
+
+      // Skip if it's the library itself
+      if (dylibFullPath === dylibPath || path.basename(dylibFullPath) === path.basename(dylibPath)) {
+        continue;
+      }
+
+      // Skip system libraries if requested
+      if (excludeSystemLibs && systemLibsPrefixes.some(prefix => dylibFullPath.startsWith(prefix))) {
+        continue;
+      }
+
+      // Skip @rpath, @executable_path, @loader_path references (we'll handle these separately)
+      if (dylibFullPath.startsWith('@')) {
+        continue;
+      }
+
+      const libName = path.basename(dylibFullPath);
+      deps.push({ name: libName, path: dylibFullPath });
+    }
+
+    return deps;
+  } catch (e) {
+    warn(`[macOS] Failed to get dependencies for ${dylibPath}: ${e.message}`);
+    return [];
+  }
+}
+
+/**
+ * Bundle libhamlib and all its transitive dependencies for macOS
+ * @param {string} dir - Target prebuilds directory
+ * @param {string} nodeBin - Path to node.napi.node binary
+ * @returns {boolean} Success status
+ */
 function bundleMac(dir, nodeBin) {
-  // Locate dylib via Homebrew
+  log('[macOS] Starting dependency bundling...');
+
+  // Step 1: Locate libhamlib.dylib via Homebrew
   let prefix = '';
-  try { prefix = execSync('brew --prefix hamlib', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch {}
+  try {
+    prefix = execSync('brew --prefix hamlib', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+  } catch {}
+
   const searchDirs = [];
   if (prefix) searchDirs.push(path.join(prefix, 'lib'));
   searchDirs.push('/opt/homebrew/lib', '/usr/local/lib');
+
   let dylibs = [];
   for (const d of searchDirs) {
     try {
@@ -72,43 +276,275 @@ function bundleMac(dir, nodeBin) {
       if (dylibs.length) break;
     } catch {}
   }
+
   if (!dylibs.length) {
-    warn('hamlib runtime (libhamlib*.dylib) not found. Skipping bundle.');
+    warn('[macOS] hamlib runtime (libhamlib*.dylib) not found. Skipping bundle.');
     return false;
   }
+
   // Prefer versioned dylib first
   dylibs.sort((a, b) => b.length - a.length);
-  let bundled = false;
-  for (const p of dylibs) {
-    const dest = path.join(dir, path.basename(p));
-    try { fs.copyFileSync(p, dest); bundled = true; log(`Bundled ${path.basename(p)} -> ${dest}`); } catch {}
-  }
-  if (!bundled) return false;
+  const libPath = dylibs[0];
 
-  // Rewrite install_name to @loader_path/<libname>
+  // Step 2: Copy libhamlib.dylib
+  const dest = path.join(dir, path.basename(libPath));
+  fs.copyFileSync(libPath, dest);
+  log(`[macOS] ✓ Bundled ${path.basename(libPath)} -> ${dest}`);
+
+  // Step 3: Find and bundle all transitive dependencies
+  log('[macOS] Analyzing transitive dependencies...');
+  const deps = getDependenciesMac(libPath, true);
+
+  if (deps.length === 0) {
+    log('[macOS] No additional dependencies found (or all are system libraries)');
+  } else {
+    log(`[macOS] Found ${deps.length} transitive dependency(ies) to bundle:`);
+
+    for (const dep of deps) {
+      log(`[macOS]   - ${dep.name} (from ${dep.path})`);
+      const depDest = path.join(dir, dep.name);
+
+      try {
+        if (exists(dep.path)) {
+          fs.copyFileSync(dep.path, depDest);
+          log(`[macOS]     ✓ Bundled to ${depDest}`);
+        } else {
+          warn(`[macOS]     ✗ Source not found: ${dep.path}`);
+        }
+      } catch (e) {
+        warn(`[macOS]     ✗ Failed to bundle ${dep.name}: ${e.message}`);
+      }
+    }
+  }
+
+  // Step 4: Rewrite install_name for node.napi.node to use @loader_path
+  log('[macOS] Rewriting install_name references to @loader_path...');
+
   let oldRef = '';
   try {
     const out = execSync(`otool -L ${JSON.stringify(nodeBin)}`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
     const line = out.split('\n').find(l => /libhamlib.*\.dylib/.test(l));
-    if (line) oldRef = line.trim().split(' ')[0];
+    if (line) {
+      const match = line.match(/^\s+(\S+\.dylib)/);
+      if (match) oldRef = match[1];
+    }
   } catch {}
+
   if (!oldRef) {
-    warn('No libhamlib reference found in addon binary; skip install_name_tool');
-    return true;
+    warn('[macOS] No libhamlib reference found in addon binary; skip install_name_tool');
+  } else {
+    const libName = path.basename(oldRef);
+    const localLib = path.join(dir, libName);
+
+    if (!exists(localLib)) {
+      warn(`[macOS] Expected bundled ${libName} not found at ${localLib}`);
+    } else {
+      try {
+        execSync(`install_name_tool -change ${JSON.stringify(oldRef)} ${JSON.stringify('@loader_path/' + libName)} ${JSON.stringify(nodeBin)}`);
+        log(`[macOS]   ✓ Rewrote ${libName} reference in node.napi.node`);
+      } catch (e) {
+        warn(`[macOS]   ✗ install_name_tool failed: ${e.message}`);
+      }
+    }
   }
-  const libName = path.basename(oldRef);
-  const localLib = path.join(dir, libName);
-  if (!exists(localLib)) {
-    warn(`Expected bundled ${libName} not found at ${localLib}`);
-    return true;
+
+  // Step 5: Fix install_name for all bundled dylibs to use @loader_path
+  log('[macOS] Fixing install_name for bundled dylibs...');
+
+  const dylibFiles = fs.readdirSync(dir).filter(f => f.endsWith('.dylib'));
+
+  for (const dylibFile of dylibFiles) {
+    const dylibPath = path.join(dir, dylibFile);
+
+    try {
+      // Get dependencies of this dylib
+      const out = execSync(`otool -L ${JSON.stringify(dylibPath)}`, {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore']
+      }).toString();
+
+      const lines = out.split('\n');
+      for (const line of lines) {
+        const match = line.match(/^\s+(\S+\.dylib)\s+\(/);
+        if (!match) continue;
+
+        const depPath = match[1];
+        const depName = path.basename(depPath);
+
+        // Skip if it's the library itself
+        if (depName === dylibFile) continue;
+
+        // Skip if it's already using @loader_path
+        if (depPath.startsWith('@loader_path')) continue;
+
+        // Check if this dependency was bundled
+        if (exists(path.join(dir, depName))) {
+          try {
+            execSync(`install_name_tool -change ${JSON.stringify(depPath)} ${JSON.stringify('@loader_path/' + depName)} ${JSON.stringify(dylibPath)}`, {
+              stdio: 'ignore'
+            });
+            log(`[macOS]   ✓ Fixed ${depName} reference in ${dylibFile}`);
+          } catch (e) {
+            warn(`[macOS]   ✗ Failed to fix ${depName} in ${dylibFile}: ${e.message}`);
+          }
+        }
+      }
+    } catch (e) {
+      warn(`[macOS]   ✗ Failed to process ${dylibFile}: ${e.message}`);
+    }
   }
+
+  log('[macOS] ✓ Bundling completed successfully');
+  return true;
+}
+
+/**
+ * Get dependencies of a DLL (Windows)
+ * Uses directory scanning with intelligent filtering as dumpbin may not be available
+ * @param {string} binDir - Directory containing DLLs
+ * @param {boolean} excludeSystemDlls - Whether to exclude system DLLs
+ * @returns {Array<{name: string, path: string}>} Array of dependency objects
+ */
+function getDependenciesWin(binDir, excludeSystemDlls = true) {
+  // Windows system DLLs that should NOT be bundled (always available on Windows)
+  const systemDllPatterns = [
+    /^kernel32\.dll$/i,
+    /^user32\.dll$/i,
+    /^advapi32\.dll$/i,
+    /^ws2_32\.dll$/i,
+    /^winmm\.dll$/i,
+    /^msvcrt\.dll$/i,
+    /^msvcp\d+\.dll$/i,    // MSVC C++ runtime
+    /^vcruntime\d+\.dll$/i, // Visual C++ runtime
+    /^ucrtbase\.dll$/i,     // Universal CRT
+    /^api-ms-win-.*\.dll$/i, // API sets
+    /^ole32\.dll$/i,
+    /^oleaut32\.dll$/i,
+    /^shell32\.dll$/i,
+    /^gdi32\.dll$/i,
+    /^ntdll\.dll$/i,
+  ];
+
+  // Third-party DLL patterns we want to bundle
+  const bundlePatterns = [
+    /^libusb-1\.0.*\.dll$/i,
+    /^libwinpthread-.*\.dll$/i,
+    /^libgcc_s_.*\.dll$/i,
+    /^libstdc\+\+-.*\.dll$/i,
+    /^libiconv-.*\.dll$/i,
+    /^libz.*\.dll$/i,
+    /^zlib.*\.dll$/i,
+    /^libindi.*\.dll$/i,
+  ];
+
   try {
-    execSync(`install_name_tool -change ${JSON.stringify(oldRef)} ${JSON.stringify('@loader_path/' + libName)} ${JSON.stringify(nodeBin)}`);
-    const verify = execSync(`otool -L ${JSON.stringify(nodeBin)}`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
-    log('Rewrote hamlib reference to @loader_path. Current deps:\n' + verify);
+    if (!exists(binDir)) {
+      return [];
+    }
+
+    const files = fs.readdirSync(binDir).filter(n => /\.dll$/i.test(n));
+    const deps = [];
+
+    for (const file of files) {
+      // Skip if it's a system DLL
+      if (excludeSystemDlls && systemDllPatterns.some(pattern => pattern.test(file))) {
+        continue;
+      }
+
+      // Include if it matches bundle patterns
+      if (bundlePatterns.some(pattern => pattern.test(file))) {
+        const fullPath = path.join(binDir, file);
+        if (exists(fullPath)) {
+          deps.push({ name: file, path: fullPath });
+        }
+      }
+    }
+
+    return deps;
   } catch (e) {
-    warn('install_name_tool failed: ' + e.message);
+    warn(`[Windows] Failed to scan dependencies in ${binDir}: ${e.message}`);
+    return [];
   }
+}
+
+/**
+ * Bundle libhamlib and all its dependencies for Windows
+ * @param {string} dir - Target prebuilds directory
+ * @returns {boolean} Success status
+ */
+function bundleWin(dir) {
+  log('[Windows] Starting dependency bundling...');
+
+  // Step 1: Locate hamlib DLL
+  const candidates = [];
+  const envRoot = process.env.HAMLIB_ROOT || '';
+  const vcpkgRoot = process.env.VCPKG_ROOT || process.env.VCPKG_INSTALLATION_ROOT || '';
+
+  // Preferred: HAMLIB_ROOT/bin
+  if (envRoot) candidates.push(path.join(envRoot, 'bin'));
+  // vcpkg typical: <vcpkg>/installed/x64-windows/bin
+  if (vcpkgRoot) candidates.push(path.join(vcpkgRoot, 'installed', 'x64-windows', 'bin'));
+  // Common fallbacks
+  candidates.push(
+    'C:/hamlib/bin',
+    'C:/Program Files/Hamlib/bin',
+    'C:/Program Files (x86)/Hamlib/bin'
+  );
+
+  function findDll(searchDir) {
+    try {
+      const files = fs.readdirSync(searchDir);
+      // Match typical hamlib DLL names: hamlib-4.dll, libhamlib-4.dll, hamlib.dll
+      const dll = files.find(n => /(lib)?hamlib(-\d+)?\.dll$/i.test(n));
+      return dll ? path.join(searchDir, dll) : '';
+    } catch {
+      return '';
+    }
+  }
+
+  let dllPath = '';
+  let binDir = '';
+  for (const d of candidates) {
+    dllPath = findDll(d);
+    if (dllPath) {
+      binDir = d;
+      break;
+    }
+  }
+
+  if (!dllPath) {
+    warn('[Windows] hamlib runtime DLL not found (set HAMLIB_ROOT or ensure vcpkg paths). Skipping bundle.');
+    return false;
+  }
+
+  // Step 2: Copy hamlib DLL
+  const dest = path.join(dir, path.basename(dllPath));
+  fs.copyFileSync(dllPath, dest);
+  log(`[Windows] ✓ Bundled ${path.basename(dllPath)} -> ${dest}`);
+
+  // Step 3: Find and bundle all transitive dependencies
+  log('[Windows] Analyzing transitive dependencies...');
+  const deps = getDependenciesWin(binDir, true);
+
+  if (deps.length === 0) {
+    log('[Windows] No additional dependencies found (or all are system DLLs)');
+  } else {
+    log(`[Windows] Found ${deps.length} transitive dependency(ies) to bundle:`);
+
+    for (const dep of deps) {
+      log(`[Windows]   - ${dep.name} (from ${dep.path})`);
+      const depDest = path.join(dir, dep.name);
+
+      try {
+        fs.copyFileSync(dep.path, depDest, fs.constants.COPYFILE_FICLONE_FORCE || 0);
+        log(`[Windows]     ✓ Bundled to ${depDest}`);
+      } catch (e) {
+        warn(`[Windows]     ✗ Failed to bundle ${dep.name}: ${e.message}`);
+      }
+    }
+  }
+
+  log('[Windows] ✓ Bundling completed successfully');
   return true;
 }
 
@@ -119,61 +555,6 @@ function main() {
   if (plat === 'linux') ok = bundleLinux(dir);
   else if (plat === 'darwin') ok = bundleMac(dir, nodeBin);
   else if (plat === 'win32') {
-    // Try to locate hamlib runtime DLL and copy next to addon
-    function bundleWin(dir) {
-      const candidates = [];
-      const envRoot = process.env.HAMLIB_ROOT || '';
-      const vcpkgRoot = process.env.VCPKG_ROOT || process.env.VCPKG_INSTALLATION_ROOT || '';
-
-      // Preferred: HAMLIB_ROOT/bin
-      if (envRoot) candidates.push(path.join(envRoot, 'bin'));
-      // vcpkg typical: <vcpkg>/installed/x64-windows/bin
-      if (vcpkgRoot) candidates.push(path.join(vcpkgRoot, 'installed', 'x64-windows', 'bin'));
-      // Common fallbacks
-      candidates.push(
-        'C:/hamlib/bin',
-        'C:/Program Files/Hamlib/bin',
-        'C:/Program Files (x86)/Hamlib/bin'
-      );
-
-      function findDll(searchDir) {
-        try {
-          const files = fs.readdirSync(searchDir);
-          // Match typical hamlib DLL names: hamlib-4.dll, libhamlib-4.dll, hamlib.dll
-          const dll = files.find(n => /(lib)?hamlib(-\d+)?\.dll$/i.test(n));
-          return dll ? path.join(searchDir, dll) : '';
-        } catch {
-          return '';
-        }
-      }
-
-      let dllPath = '';
-      for (const d of candidates) {
-        dllPath = findDll(d);
-        if (dllPath) break;
-      }
-      if (!dllPath) {
-        warn('hamlib runtime DLL not found on Windows (set HAMLIB_ROOT or ensure vcpkg paths). Skipping bundle.');
-        return false;
-      }
-      const binDir = path.dirname(dllPath);
-      // Copy hamlib DLL
-      const dest = path.join(dir, path.basename(dllPath));
-      fs.copyFileSync(dllPath, dest);
-      log(`Bundled ${path.basename(dllPath)} -> ${dest}`);
-      // Also copy common dependent DLLs from the same bin directory (to avoid PATH issues at runtime)
-      try {
-        const files = fs.readdirSync(binDir).filter(n => /\.dll$/i.test(n));
-        for (const n of files) {
-          if (/(lib)?hamlib(-\d+)?\.dll$/i.test(n)) continue; // already copied
-          if (!/(libusb-1\.0|libwinpthread-1|libgcc_s_seh-1|libstdc\+\+-6|libiconv-2|libz-.*|zlib1)\.dll$/i.test(n)) continue;
-          const src = path.join(binDir, n);
-          const dst = path.join(dir, n);
-          try { fs.copyFileSync(src, dst, fs.constants.COPYFILE_FICLONE_FORCE || 0); log(`Bundled dependency ${n}`); } catch {}
-        }
-      } catch {}
-      return true;
-    }
     ok = bundleWin(dir);
   }
   if (!ok) {
