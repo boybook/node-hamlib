@@ -115,7 +115,9 @@ for platform in "${PLATFORMS[@]}"; do
         if [ "$file_size" -gt 10000 ]; then
             log_success "$(basename "$candidate"): OK ($(basename "$binary_file") ${file_size} bytes)"
             # hamlib 动态库存在性检查（不强制，但提示）
-            if ls "$candidate"/libhamlib.* 1> /dev/null 2>&1; then
+            if find "$candidate" -maxdepth 1 -type f \
+                 \( -iname 'libhamlib*.so' -o -iname 'libhamlib*.so.*' -o -iname 'libhamlib*.dylib' -o -iname '*hamlib*.dll' \) \
+                 -print -quit | grep -q .; then
                 log_success "$(basename "$candidate"): bundled hamlib runtime present"
             else
                 log_warning "$(basename "$candidate"): hamlib runtime library not bundled"
@@ -192,7 +194,7 @@ for platform in "${PLATFORMS[@]}"; do
         exit 1
     fi
     # 提示 hamlib 动态库是否包含
-    if grep -qE "prebuilds/${platform}[^/]*/(lib)?hamlib(-[0-9]+)?\.(so(\..*)?|dylib|dll)" pack-output.txt; then
+    if grep -qiE "prebuilds/${platform}[^/]*/(lib)?hamlib(-[0-9]+)?\.(so(\..*)?|dylib|dll)" pack-output.txt; then
         log_success "${platform}: bundled hamlib runtime included in package"
     else
         log_warning "${platform}: hamlib runtime not found in package"
