@@ -95,7 +95,7 @@ fi
 
 # 验证预构建文件（prebuildify 命名：node.napi.node，可带+libc后缀目录）
 log_info "验证预构建文件完整性..."
-PLATFORMS=("linux-x64" "linux-arm64" "darwin-arm64" "darwin-x64")
+PLATFORMS=("linux-x64" "linux-arm64" "darwin-arm64" "win32-x64")
 MISSING_PLATFORMS=()
 
 for platform in "${PLATFORMS[@]}"; do
@@ -192,7 +192,7 @@ for platform in "${PLATFORMS[@]}"; do
         exit 1
     fi
     # 提示 hamlib 动态库是否包含
-    if grep -qE "prebuilds/${platform}[^/]*/libhamlib\.(so(\..*)?|dylib)" pack-output.txt; then
+    if grep -qE "prebuilds/${platform}[^/]*/(lib)?hamlib(-[0-9]+)?\.(so(\..*)?|dylib|dll)" pack-output.txt; then
         log_success "${platform}: bundled hamlib runtime included in package"
     else
         log_warning "${platform}: hamlib runtime not found in package"
