@@ -399,13 +399,15 @@ function bundleMac(dir, nodeBin) {
 }
 
 /**
- * Get dependencies of a DLL (Windows)
- * Uses directory scanning with intelligent filtering as dumpbin may not be available
- * @param {string} binDir - Directory containing DLLs
+ * Get dependencies of a DLL using dumpbin (Windows)
+ * Recursively analyzes DLL dependencies similar to ldd on Linux
+ * @param {string} dllPath - Path to the DLL file
+ * @param {Array<string>} searchPaths - Directories to search for dependencies
  * @param {boolean} excludeSystemDlls - Whether to exclude system DLLs
+ * @param {Set<string>} visited - Set of already processed DLLs (for recursion control)
  * @returns {Array<{name: string, path: string}>} Array of dependency objects
  */
-function getDependenciesWin(binDir, excludeSystemDlls = true) {
+function getDependenciesWinRecursive(dllPath, searchPaths = [], excludeSystemDlls = true, visited = new Set()) {
   // Windows system DLLs that should NOT be bundled (always available on Windows)
   const systemDllPatterns = [
     /^kernel32\.dll$/i,
@@ -418,6 +420,169 @@ function getDependenciesWin(binDir, excludeSystemDlls = true) {
     /^vcruntime\d+\.dll$/i, // Visual C++ runtime
     /^ucrtbase\.dll$/i,     // Universal CRT
     /^api-ms-win-.*\.dll$/i, // API sets
+    /^ole32\.dll$/i,
+    /^oleaut32\.dll$/i,
+    /^shell32\.dll$/i,
+    /^gdi32\.dll$/i,
+    /^ntdll\.dll$/i,
+    /^setupapi\.dll$/i,
+    /^cfgmgr32\.dll$/i,
+    /^bcrypt\.dll$/i,
+    /^sechost\.dll$/i,
+    /^rpcrt4\.dll$/i,
+  ];
+
+  const dllName = path.basename(dllPath).toLowerCase();
+
+  // Avoid infinite recursion
+  if (visited.has(dllName)) {
+    return [];
+  }
+  visited.add(dllName);
+
+  // Check if this is a system DLL
+  if (excludeSystemDlls && systemDllPatterns.some(pattern => pattern.test(dllName))) {
+    return [];
+  }
+
+  const deps = [];
+
+  try {
+    // Try to use dumpbin first (most reliable)
+    let dumpbinAvailable = false;
+    try {
+      execSync('where dumpbin', { stdio: 'ignore' });
+      dumpbinAvailable = true;
+    } catch (e) {
+      // dumpbin not in PATH, try to find it via vswhere
+      try {
+        const vsWherePath = path.join(
+          process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)',
+          'Microsoft Visual Studio', 'Installer', 'vswhere.exe'
+        );
+
+        if (exists(vsWherePath)) {
+          const vsPath = execSync(`"${vsWherePath}" -latest -property installationPath`, {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'ignore']
+          }).toString().trim();
+
+          if (vsPath) {
+            const dumpbinPath = path.join(vsPath, 'VC', 'Tools', 'MSVC');
+            if (exists(dumpbinPath)) {
+              // Find the latest MSVC version
+              const versions = fs.readdirSync(dumpbinPath);
+              if (versions.length > 0) {
+                versions.sort().reverse();
+                const dumpbin = path.join(dumpbinPath, versions[0], 'bin', 'Hostx64', 'x64', 'dumpbin.exe');
+                if (exists(dumpbin)) {
+                  process.env.PATH = `${path.dirname(dumpbin)};${process.env.PATH}`;
+                  dumpbinAvailable = true;
+                }
+              }
+            }
+          }
+        }
+      } catch (e2) {
+        // vswhere not available or failed
+      }
+    }
+
+    if (dumpbinAvailable) {
+      // Use dumpbin to get actual dependencies
+      const result = execSync(`dumpbin /dependents "${dllPath}"`, {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore']
+      }).toString();
+
+      // Parse dumpbin output
+      // Output format:
+      //   Image has the following dependencies:
+      //     libusb-1.0.dll
+      //     KERNEL32.dll
+      //     ...
+
+      const lines = result.split('\n');
+      let inDepsSection = false;
+
+      for (const line of lines) {
+        if (line.includes('has the following dependencies')) {
+          inDepsSection = true;
+          continue;
+        }
+
+        if (!inDepsSection) continue;
+
+        // Stop at summary line
+        if (line.includes('Summary') || line.trim() === '') {
+          break;
+        }
+
+        // Extract DLL name
+        const match = line.match(/^\s+(\S+\.dll)\s*$/i);
+        if (!match) continue;
+
+        const depName = match[1].toLowerCase();
+
+        // Skip if already visited
+        if (visited.has(depName)) {
+          continue;
+        }
+
+        // Skip system DLLs
+        if (excludeSystemDlls && systemDllPatterns.some(pattern => pattern.test(depName))) {
+          continue;
+        }
+
+        // Try to find the DLL in search paths
+        let depPath = '';
+        for (const searchPath of searchPaths) {
+          const candidate = path.join(searchPath, depName);
+          if (exists(candidate)) {
+            depPath = candidate;
+            break;
+          }
+        }
+
+        if (depPath) {
+          deps.push({ name: depName, path: depPath });
+
+          // Recursively get dependencies of this DLL
+          const subDeps = getDependenciesWinRecursive(depPath, searchPaths, excludeSystemDlls, visited);
+          deps.push(...subDeps);
+        }
+      }
+    } else {
+      // Fallback: directory scanning with pattern matching (old behavior)
+      warn('[Windows] dumpbin not available, falling back to pattern matching');
+      warn('[Windows] This may miss some dependencies. Install Visual Studio Build Tools for better results.');
+    }
+  } catch (e) {
+    warn(`[Windows] Failed to analyze dependencies for ${dllName}: ${e.message}`);
+  }
+
+  return deps;
+}
+
+/**
+ * Legacy fallback: Get dependencies by directory scanning (less reliable)
+ * @param {string} binDir - Directory containing DLLs
+ * @param {boolean} excludeSystemDlls - Whether to exclude system DLLs
+ * @returns {Array<{name: string, path: string}>} Array of dependency objects
+ */
+function getDependenciesWinFallback(binDir, excludeSystemDlls = true) {
+  // Windows system DLLs that should NOT be bundled
+  const systemDllPatterns = [
+    /^kernel32\.dll$/i,
+    /^user32\.dll$/i,
+    /^advapi32\.dll$/i,
+    /^ws2_32\.dll$/i,
+    /^winmm\.dll$/i,
+    /^msvcrt\.dll$/i,
+    /^msvcp\d+\.dll$/i,
+    /^vcruntime\d+\.dll$/i,
+    /^ucrtbase\.dll$/i,
+    /^api-ms-win-.*\.dll$/i,
     /^ole32\.dll$/i,
     /^oleaut32\.dll$/i,
     /^shell32\.dll$/i,
@@ -522,21 +687,70 @@ function bundleWin(dir) {
   fs.copyFileSync(dllPath, dest);
   log(`[Windows] ✓ Bundled ${path.basename(dllPath)} -> ${dest}`);
 
-  // Step 3: Find and bundle all transitive dependencies
-  log('[Windows] Analyzing transitive dependencies...');
-  const deps = getDependenciesWin(binDir, true);
+  // Step 3: Find and bundle all transitive dependencies using recursive analysis
+  log('[Windows] Analyzing transitive dependencies recursively...');
+
+  // Build search paths for dependencies
+  const searchPaths = [binDir];
+
+  // Add system paths
+  if (process.env.PATH) {
+    const systemPaths = process.env.PATH.split(';').filter(p => p.trim());
+    searchPaths.push(...systemPaths);
+  }
+
+  // Try recursive dependency analysis with dumpbin
+  const deps = getDependenciesWinRecursive(dllPath, searchPaths, true, new Set());
 
   if (deps.length === 0) {
     log('[Windows] No additional dependencies found (or all are system DLLs)');
+
+    // If dumpbin failed, try fallback method
+    log('[Windows] Trying fallback pattern-based scan...');
+    const fallbackDeps = getDependenciesWinFallback(binDir, true);
+
+    if (fallbackDeps.length > 0) {
+      log(`[Windows] Found ${fallbackDeps.length} dependency(ies) via fallback method:`);
+
+      for (const dep of fallbackDeps) {
+        log(`[Windows]   - ${dep.name} (from ${dep.path})`);
+        const depDest = path.join(dir, dep.name);
+
+        try {
+          fs.copyFileSync(dep.path, depDest);
+          log(`[Windows]     ✓ Bundled to ${depDest}`);
+        } catch (e) {
+          warn(`[Windows]     ✗ Failed to bundle ${dep.name}: ${e.message}`);
+        }
+      }
+    }
   } else {
-    log(`[Windows] Found ${deps.length} transitive dependency(ies) to bundle:`);
+    // Remove duplicates (deps may have duplicate entries from recursion)
+    const uniqueDeps = [];
+    const seen = new Set();
 
     for (const dep of deps) {
+      const key = dep.name.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueDeps.push(dep);
+      }
+    }
+
+    log(`[Windows] Found ${uniqueDeps.length} transitive dependency(ies) to bundle:`);
+
+    for (const dep of uniqueDeps) {
       log(`[Windows]   - ${dep.name} (from ${dep.path})`);
       const depDest = path.join(dir, dep.name);
 
       try {
-        fs.copyFileSync(dep.path, depDest, fs.constants.COPYFILE_FICLONE_FORCE || 0);
+        // Skip if already bundled (e.g., the main hamlib DLL)
+        if (exists(depDest) && path.basename(dllPath).toLowerCase() === dep.name.toLowerCase()) {
+          log(`[Windows]     ⊙ Already bundled (main DLL)`);
+          continue;
+        }
+
+        fs.copyFileSync(dep.path, depDest);
         log(`[Windows]     ✓ Bundled to ${depDest}`);
       } catch (e) {
         warn(`[Windows]     ✗ Failed to bundle ${dep.name}: ${e.message}`);
