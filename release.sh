@@ -194,7 +194,8 @@ for platform in "${PLATFORMS[@]}"; do
         exit 1
     fi
     # 提示 hamlib 动态库是否包含
-    if grep -qiE "prebuilds/${platform}[^/]*/(lib)?hamlib(-[0-9]+)?\.(so(\..*)?|dylib|dll)" pack-output.txt; then
+    # 修复：支持 libhamlib.4.dylib, libhamlib-4.dll, libhamlib.so.4 等格式
+    if grep -qiE "prebuilds/${platform}[^/]*/libhamlib[^/]*\.(so(\.[0-9]+)?|dylib|dll)" pack-output.txt; then
         log_success "${platform}: bundled hamlib runtime included in package"
     else
         log_warning "${platform}: hamlib runtime not found in package"
