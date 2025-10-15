@@ -21,13 +21,13 @@ jobs:
             target: linux-x64
             hamlib_install: |
               sudo apt-get update
-              sudo apt-get install -y libhamlib-dev libhamlib-utils
+              sudo apt-get install -y libhamlib-dev libhamlib-utils patchelf
           - os: ubuntu-24.04-arm
             arch: arm64
             target: linux-arm64
             hamlib_install: |
               sudo apt-get update
-              sudo apt-get install -y libhamlib-dev libhamlib-utils
+              sudo apt-get install -y libhamlib-dev libhamlib-utils patchelf
           - os: windows-latest
             arch: x64
             target: win32-x64
@@ -133,6 +133,10 @@ jobs:
       run: |
         echo "Generated prebuilds:"
         find prebuilds -maxdepth 2 -type f \( -name "*.node" -o -name "libhamlib.*" -o -name "*hamlib*.dll" \) -print || true
+
+    - name: Verify Linux RUNPATH (Linux only)
+      if: startsWith(matrix.os, 'ubuntu')
+      run: node scripts/verify-linux-rpath.js
 
     # 上传每个平台的预编译产物
     - name: Upload platform prebuilds artifact

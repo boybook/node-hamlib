@@ -32,7 +32,7 @@
             "-lhamlib"
           ],
           "ldflags": [
-            "-Wl,-rpath,$$ORIGIN"
+            "-Wl,-rpath,\\$ORIGIN"
           ]
         }],
         # macOS configuration

@@ -46,7 +46,8 @@
     "prebuild": "prebuildify --napi --strip",
     "prepare": "",
     "bundle": "node scripts/bundle-hamlib.js",
-    "prebuild:bundle": "npm run prebuild && npm run bundle"
+    "fix-rpath": "node scripts/fix-linux-rpath.js",
+    "prebuild:bundle": "npm run prebuild && npm run bundle && npm run fix-rpath"
   },
   "dependencies": {
     "node-addon-api": "^4.3.0",
