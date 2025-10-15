@@ -128,6 +128,69 @@ jobs:
       with:
         arch: x64
 
+    - name: Fix hamlib import library (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $hamlibRoot = $env:HAMLIB_ROOT
+        Write-Host "Fixing hamlib import library at: $hamlibRoot"
+
+        # Find the DLL
+        $dllPath = Get-ChildItem -Path (Join-Path $hamlibRoot 'bin') -Filter 'libhamlib-*.dll' | Select-Object -First 1
+        if (-not $dllPath) {
+          Write-Error "libhamlib DLL not found in $hamlibRoot/bin"
+          exit 1
+        }
+
+        Write-Host "Found DLL: $($dllPath.FullName)"
+
+        # Generate .def file from DLL
+        $defPath = Join-Path $env:RUNNER_TEMP 'libhamlib-4.def'
+        $libPath = Join-Path $hamlibRoot 'lib/libhamlib-4.lib'
+
+        Write-Host "Generating .def file..."
+        $exports = dumpbin /exports $dllPath.FullName
+
+        # Parse exports and create .def file
+        $defHeader = "LIBRARY libhamlib-4.dll`nEXPORTS`n"
+        $defContent = $defHeader
+
+        $inExports = $false
+        foreach ($line in $exports -split "`n") {
+          if ($line -match '^\s+ordinal\s+hint\s+RVA\s+name') {
+            $inExports = $true
+            continue
+          }
+          if ($inExports -and $line -match '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]+\s+(\S+)') {
+            $funcName = $matches[1]
+            $defContent += "  $funcName`n"
+          }
+        }
+
+        Set-Content -Path $defPath -Value $defContent -Encoding ASCII
+        $exportCount = ($defContent -split "`n").Count - 3
+        Write-Host "Generated .def file with $exportCount exports"
+
+        # Create lib directory if it doesn't exist
+        $libDir = Join-Path $hamlibRoot 'lib'
+        if (-not (Test-Path $libDir)) {
+          New-Item -ItemType Directory -Path $libDir -Force | Out-Null
+        }
+
+        # Generate import library using lib.exe
+        Write-Host "Generating import library..."
+        lib /def:$defPath /out:$libPath /machine:x64
+
+        if (Test-Path $libPath) {
+          $libSize = (Get-Item $libPath).Length
+          Write-Host "Successfully created import library: $libPath"
+          Write-Host "Library size: $libSize bytes"
+        } else {
+          Write-Error "Failed to create import library"
+          exit 1
+        }
+
     - name: Generate prebuilds and bundle hamlib (Windows)
       if: matrix.os == 'windows-latest'
       run: |
