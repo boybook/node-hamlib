@@ -505,6 +505,9 @@ function getDependenciesWinRecursive(dllPath, searchPaths = [], excludeSystemDll
       const lines = result.split('\n');
       let inDepsSection = false;
       let depCount = 0;
+      const foundDeps = [];
+      const skippedDeps = [];
+      const missingDeps = [];
 
       for (const line of lines) {
         if (line.includes('has the following dependencies')) {
@@ -528,11 +531,13 @@ function getDependenciesWinRecursive(dllPath, searchPaths = [], excludeSystemDll
 
         // Skip if already visited
         if (visited.has(depName)) {
+          skippedDeps.push(`${depName} (already visited)`);
           continue;
         }
 
         // Skip system DLLs
         if (excludeSystemDlls && systemDllPatterns.some(pattern => pattern.test(depName))) {
+          skippedDeps.push(`${depName} (system DLL)`);
           continue;
         }
 
@@ -547,16 +552,28 @@ function getDependenciesWinRecursive(dllPath, searchPaths = [], excludeSystemDll
         }
 
         if (depPath) {
+          foundDeps.push(depName);
           deps.push({ name: depName, path: depPath });
 
           // Recursively get dependencies of this DLL
           const subDeps = getDependenciesWinRecursive(depPath, searchPaths, excludeSystemDlls, visited);
           deps.push(...subDeps);
         } else {
-          // Log missing dependencies for debugging
-          if (depCount <= 5) {  // Only log first few to avoid spam
-            warn(`[Windows] Could not find ${depName} in search paths`);
-          }
+          missingDeps.push(depName);
+        }
+      }
+
+      // Log analysis results for this DLL
+      if (depCount > 0) {
+        log(`[Windows] ${dllName} has ${depCount} dependencies:`);
+        if (foundDeps.length > 0) {
+          log(`[Windows]   - Found: ${foundDeps.join(', ')}`);
+        }
+        if (skippedDeps.length > 0) {
+          log(`[Windows]   - Skipped: ${skippedDeps.slice(0, 3).join(', ')}${skippedDeps.length > 3 ? ` and ${skippedDeps.length - 3} more` : ''}`);
+        }
+        if (missingDeps.length > 0) {
+          warn(`[Windows]   - Missing in search paths: ${missingDeps.join(', ')}`);
         }
       }
     } else {
@@ -638,7 +655,16 @@ function bundleWin(dir) {
     searchPaths.push(...systemPaths);
   }
 
-  log(`[Windows] Search paths: ${searchPaths.slice(0, 3).join('; ')}... (${searchPaths.length} total)`);
+  log(`[Windows] Primary search path (binDir): ${binDir}`);
+  log(`[Windows] Total search paths: ${searchPaths.length}`);
+
+  // List all DLLs in binDir for debugging
+  try {
+    const dllsInBinDir = fs.readdirSync(binDir).filter(f => f.toLowerCase().endsWith('.dll'));
+    log(`[Windows] Available DLLs in ${binDir}: ${dllsInBinDir.join(', ')}`);
+  } catch (e) {
+    warn(`[Windows] Could not list DLLs in binDir: ${e.message}`);
+  }
 
   // Try recursive dependency analysis with dumpbin
   const deps = getDependenciesWinRecursive(dllPath, searchPaths, true, new Set());

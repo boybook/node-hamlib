@@ -212,6 +212,15 @@ jobs:
           exit 1
         }
 
+        Write-Host "`n=== Analyzing libhamlib-4.dll dependencies ===`n"
+        $hamlibDll = Join-Path $env:HAMLIB_ROOT 'bin\libhamlib-4.dll'
+        if (Test-Path $hamlibDll) {
+          Write-Host "Analyzing $hamlibDll`n"
+          dumpbin /dependents $hamlibDll
+        } else {
+          Write-Warning "libhamlib-4.dll not found in HAMLIB_ROOT/bin"
+        }
+
     - name: Generate prebuilds and bundle hamlib (Non-Windows)
       if: matrix.os != 'windows-latest'
       run: npm run prebuild:bundle
