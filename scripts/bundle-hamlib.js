@@ -508,23 +508,34 @@ function getDependenciesWinRecursive(dllPath, searchPaths = [], excludeSystemDll
       const foundDeps = [];
       const skippedDeps = [];
       const missingDeps = [];
+      let parsedLines = 0;
 
       for (const line of lines) {
         if (line.includes('has the following dependencies')) {
           inDepsSection = true;
+          log(`[Windows] Found dependencies section for ${dllName}`);
           continue;
         }
 
         if (!inDepsSection) continue;
 
+        parsedLines++;
+
         // Stop at summary line
         if (line.includes('Summary') || line.trim() === '') {
+          log(`[Windows] Reached end of dependencies section (parsed ${parsedLines} lines)`);
           break;
         }
 
-        // Extract DLL name
+        // Extract DLL name (note: Windows line endings may have \r)
         const match = line.match(/^\s+(\S+\.dll)\s*$/i);
-        if (!match) continue;
+        if (!match) {
+          // Log why this line didn't match
+          if (parsedLines <= 3 && line.trim() !== '') {
+            log(`[Windows] Line didn't match DLL pattern: "${line}" (length: ${line.length})`);
+          }
+          continue;
+        }
 
         depCount++;
         const depName = match[1].toLowerCase();
