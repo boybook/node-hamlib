@@ -409,27 +409,191 @@ function bundleMac(dir, nodeBin) {
  */
 function getDependenciesWinRecursive(dllPath, searchPaths = [], excludeSystemDlls = true, visited = new Set()) {
   // Windows system DLLs that should NOT be bundled (always available on Windows)
+  // Strategy: Only bundle DLLs from the hamlib distribution directory, exclude everything from C:\Windows
   const systemDllPatterns = [
+    // Core Windows DLLs
     /^kernel32\.dll$/i,
+    /^kernelbase\.dll$/i,
     /^user32\.dll$/i,
     /^advapi32\.dll$/i,
     /^ws2_32\.dll$/i,
     /^winmm\.dll$/i,
     /^msvcrt\.dll$/i,
-    /^msvcp\d+\.dll$/i,    // MSVC C++ runtime
-    /^vcruntime\d+\.dll$/i, // Visual C++ runtime
-    /^ucrtbase\.dll$/i,     // Universal CRT
+    /^msvcp\d+.*\.dll$/i,    // MSVC C++ runtime (any version)
+    /^vcruntime\d+\.dll$/i,  // Visual C++ runtime
+    /^ucrtbase\.dll$/i,      // Universal CRT
     /^api-ms-win-.*\.dll$/i, // API sets
+    /^ext-ms-.*\.dll$/i,     // Extension API sets
+
+    // COM/OLE
     /^ole32\.dll$/i,
     /^oleaut32\.dll$/i,
+    /^combase\.dll$/i,
+
+    // Graphics/UI
     /^shell32\.dll$/i,
     /^gdi32\.dll$/i,
+    /^user32\.dll$/i,
+    /^win32u\.dll$/i,
+    /^dxgi\.dll$/i,
+    /^d2d1\.dll$/i,
+    /^d3d\d+.*\.dll$/i,      // DirectX (d3d11, d3d12, etc)
+    /^dcomp\.dll$/i,
+
+    // System services
     /^ntdll\.dll$/i,
     /^setupapi\.dll$/i,
     /^cfgmgr32\.dll$/i,
     /^bcrypt\.dll$/i,
+    /^bcryptprimitives\.dll$/i,
     /^sechost\.dll$/i,
     /^rpcrt4\.dll$/i,
+    /^sspicli\.dll$/i,
+
+    // Networking
+    /^iphlpapi\.dll$/i,
+    /^nsi\.dll$/i,
+    /^winnsi\.dll$/i,
+    /^dhcpcsvc.*\.dll$/i,
+    /^dnsapi\.dll$/i,
+    /^winhttp\.dll$/i,
+    /^wininet\.dll$/i,
+    /^webio\.dll$/i,
+    /^websocket\.dll$/i,
+    /^httpapi\.dll$/i,
+    /^firewallapi\.dll$/i,
+    /^fwbase\.dll$/i,
+    /^fwpolicyiomgr\.dll$/i,
+
+    // Security/Crypto
+    /^crypt32\.dll$/i,
+    /^cryptbase\.dll$/i,
+    /^cryptsp\.dll$/i,
+    /^cryptnet\.dll$/i,
+    /^cryptxml\.dll$/i,
+    /^cryptdll\.dll$/i,
+    /^cryptngc\.dll$/i,
+    /^crypttpmeksvc\.dll$/i,
+    /^ncrypt\.dll$/i,
+    /^ntasn1\.dll$/i,
+    /^msasn1\.dll$/i,
+    /^dpapi\.dll$/i,
+    /^wintrust\.dll$/i,
+    /^authz\.dll$/i,
+    /^schannel\.dll$/i,
+    /^tokenbinding\.dll$/i,
+
+    // Windows components
+    /^cabinet\.dll$/i,
+    /^profapi\.dll$/i,
+    /^userenv\.dll$/i,
+    /^netapi32\.dll$/i,
+    /^netutils\.dll$/i,
+    /^samlib\.dll$/i,
+    /^samsrv\.dll$/i,
+    /^samcli\.dll$/i,
+    /^lsasrv\.dll$/i,
+    /^lsaadt\.dll$/i,
+    /^netlogon\.dll$/i,
+    /^logoncli\.dll$/i,
+    /^wldap32\.dll$/i,
+    /^dsrole\.dll$/i,
+    /^dsparse\.dll$/i,
+    /^dsclient\.dll$/i,
+    /^dsreg\.dll$/i,
+    /^ntdsapi\.dll$/i,
+    /^w32topl\.dll$/i,
+
+    // Windows UI/Shell
+    /^shcore\.dll$/i,
+    /^mpr\.dll$/i,
+    /^propsys\.dll$/i,
+    /^icu\.dll$/i,
+    /^urlmon\.dll$/i,
+    /^iertutil\.dll$/i,
+
+    // Debugging/Error reporting
+    /^dbghelp\.dll$/i,
+    /^dbgeng\.dll$/i,
+    /^dbgmodel\.dll$/i,
+    /^imagehlp\.dll$/i,
+    /^wer\.dll$/i,
+    /^faultrep\.dll$/i,
+
+    // Device/Driver management
+    /^cldapi\.dll$/i,
+    /^fltlib\.dll$/i,
+    /^devobj\.dll$/i,
+    /^devrtl\.dll$/i,
+    /^setupcl\.dll$/i,
+    /^drvstore\.dll$/i,
+
+    // Windows features
+    /^twinapi\..*\.dll$/i,
+    /^coremessaging\.dll$/i,
+    /^coreuicomponents\.dll$/i,
+    /^webservices\.dll$/i,
+    /^esent\.dll$/i,
+    /^wevtapi\.dll$/i,
+    /^vaultcli\.dll$/i,
+    /^credui\.dll$/i,
+    /^webauthn\.dll$/i,
+    /^noise\.dll$/i,
+    /^hid\.dll$/i,
+
+    // Windows management/policy
+    /^wldp\.dll$/i,
+    /^policymanager.*\.dll$/i,
+    /^mdmregistration\.dll$/i,
+    /^dmcmnutils\.dll$/i,
+    /^dmenrollengine\.dll$/i,
+    /^omadmapi\.dll$/i,
+    /^edp.*\.dll$/i,
+    /^efs.*\.dll$/i,
+    /^fve.*\.dll$/i,
+    /^tpm.*\.dll$/i,
+    /^ngc.*\.dll$/i,
+    /^popkeycli\.dll$/i,
+    /^bcd\.dll$/i,
+    /^tbs\.dll$/i,
+    /^vbsapi\.dll$/i,
+    /^virtdisk\.dll$/i,
+    /^pcrpf\.dll$/i,
+    /^srpapi\.dll$/i,
+    /^nrtapi\.dll$/i,
+
+    // Windows enterprise/domain
+    /^kerb\d+\.dll$/i,
+    /^gmsaclient\.dll$/i,
+    /^wkscli\.dll$/i,
+    /^srvcli\.dll$/i,
+
+    // Windows performance/diagnostics
+    /^windowsperformancerecordercontrol\.dll$/i,
+    /^diagnosticdatasettings\.dll$/i,
+    /^umpdc\.dll$/i,
+    /^rmclient\.dll$/i,
+
+    // Windows misc
+    /^aepic\.dll$/i,
+    /^bcp47langs\.dll$/i,
+    /^msvcp110_win\.dll$/i,
+    /^iri\.dll$/i,
+    /^dmpushproxy\.dll$/i,
+    /^declaredconfiguration\.dll$/i,
+    /^dmxmlhelputils\.dll$/i,
+    /^unenrollhook\.dll$/i,
+    /^enterpriseresourcemanager\.dll$/i,
+    /^xmllite\.dll$/i,
+    /^.*typehelperutil\.dll$/i,
+    /^contactactivation\.dll$/i,
+    /^certca\.dll$/i,
+    /^certenroll\.dll$/i,
+    /^winbrand\.dll$/i,
+    /^winipcfile\.dll$/i,
+    /^winmsipc\.dll$/i,
+    /^wuceffects\.dll$/i,
+    /^microsoft\.internal\..*\.dll$/i,
   ];
 
   const dllName = path.basename(dllPath).toLowerCase();
