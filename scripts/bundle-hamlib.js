@@ -504,6 +504,7 @@ function getDependenciesWinRecursive(dllPath, searchPaths = [], excludeSystemDll
 
       const lines = result.split('\n');
       let inDepsSection = false;
+      let depCount = 0;
 
       for (const line of lines) {
         if (line.includes('has the following dependencies')) {
@@ -522,6 +523,7 @@ function getDependenciesWinRecursive(dllPath, searchPaths = [], excludeSystemDll
         const match = line.match(/^\s+(\S+\.dll)\s*$/i);
         if (!match) continue;
 
+        depCount++;
         const depName = match[1].toLowerCase();
 
         // Skip if already visited
@@ -550,6 +552,11 @@ function getDependenciesWinRecursive(dllPath, searchPaths = [], excludeSystemDll
           // Recursively get dependencies of this DLL
           const subDeps = getDependenciesWinRecursive(depPath, searchPaths, excludeSystemDlls, visited);
           deps.push(...subDeps);
+        } else {
+          // Log missing dependencies for debugging
+          if (depCount <= 5) {  // Only log first few to avoid spam
+            warn(`[Windows] Could not find ${depName} in search paths`);
+          }
         }
       }
     } else {
@@ -562,74 +569,6 @@ function getDependenciesWinRecursive(dllPath, searchPaths = [], excludeSystemDll
   }
 
   return deps;
-}
-
-/**
- * Legacy fallback: Get dependencies by directory scanning (less reliable)
- * @param {string} binDir - Directory containing DLLs
- * @param {boolean} excludeSystemDlls - Whether to exclude system DLLs
- * @returns {Array<{name: string, path: string}>} Array of dependency objects
- */
-function getDependenciesWinFallback(binDir, excludeSystemDlls = true) {
-  // Windows system DLLs that should NOT be bundled
-  const systemDllPatterns = [
-    /^kernel32\.dll$/i,
-    /^user32\.dll$/i,
-    /^advapi32\.dll$/i,
-    /^ws2_32\.dll$/i,
-    /^winmm\.dll$/i,
-    /^msvcrt\.dll$/i,
-    /^msvcp\d+\.dll$/i,
-    /^vcruntime\d+\.dll$/i,
-    /^ucrtbase\.dll$/i,
-    /^api-ms-win-.*\.dll$/i,
-    /^ole32\.dll$/i,
-    /^oleaut32\.dll$/i,
-    /^shell32\.dll$/i,
-    /^gdi32\.dll$/i,
-    /^ntdll\.dll$/i,
-  ];
-
-  // Third-party DLL patterns we want to bundle
-  const bundlePatterns = [
-    /^libusb-1\.0.*\.dll$/i,
-    /^libwinpthread-.*\.dll$/i,
-    /^libgcc_s_.*\.dll$/i,
-    /^libstdc\+\+-.*\.dll$/i,
-    /^libiconv-.*\.dll$/i,
-    /^libz.*\.dll$/i,
-    /^zlib.*\.dll$/i,
-    /^libindi.*\.dll$/i,
-  ];
-
-  try {
-    if (!exists(binDir)) {
-      return [];
-    }
-
-    const files = fs.readdirSync(binDir).filter(n => /\.dll$/i.test(n));
-    const deps = [];
-
-    for (const file of files) {
-      // Skip if it's a system DLL
-      if (excludeSystemDlls && systemDllPatterns.some(pattern => pattern.test(file))) {
-        continue;
-      }
-
-      // Include if it matches bundle patterns
-      if (bundlePatterns.some(pattern => pattern.test(file))) {
-        const fullPath = path.join(binDir, file);
-        if (exists(fullPath)) {
-          deps.push({ name: file, path: fullPath });
-        }
-      }
-    }
-
-    return deps;
-  } catch (e) {
-    warn(`[Windows] Failed to scan dependencies in ${binDir}: ${e.message}`);
-    return [];
-  }
 }
 
 /**
@@ -699,31 +638,15 @@ function bundleWin(dir) {
     searchPaths.push(...systemPaths);
   }
 
+  log(`[Windows] Search paths: ${searchPaths.slice(0, 3).join('; ')}... (${searchPaths.length} total)`);
+
   // Try recursive dependency analysis with dumpbin
   const deps = getDependenciesWinRecursive(dllPath, searchPaths, true, new Set());
 
+  log(`[Windows] Recursive analysis found ${deps.length} dependencies`);
+
   if (deps.length === 0) {
     log('[Windows] No additional dependencies found (or all are system DLLs)');
-
-    // If dumpbin failed, try fallback method
-    log('[Windows] Trying fallback pattern-based scan...');
-    const fallbackDeps = getDependenciesWinFallback(binDir, true);
-
-    if (fallbackDeps.length > 0) {
-      log(`[Windows] Found ${fallbackDeps.length} dependency(ies) via fallback method:`);
-
-      for (const dep of fallbackDeps) {
-        log(`[Windows]   - ${dep.name} (from ${dep.path})`);
-        const depDest = path.join(dir, dep.name);
-
-        try {
-          fs.copyFileSync(dep.path, depDest);
-          log(`[Windows]     ✓ Bundled to ${depDest}`);
-        } catch (e) {
-          warn(`[Windows]     ✗ Failed to bundle ${dep.name}: ${e.message}`);
-        }
-      }
-    }
   } else {
     // Remove duplicates (deps may have duplicate entries from recursion)
     const uniqueDeps = [];

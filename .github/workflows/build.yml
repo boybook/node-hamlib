@@ -197,6 +197,21 @@ jobs:
         node scripts/run-prebuildify.js
         node scripts/bundle-hamlib.js
 
+    - name: Verify node.napi.node dependencies (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        Write-Host "`n=== Verifying node.napi.node dependencies ===`n"
+        $nodeBinary = "D:\a\node-hamlib\node-hamlib\prebuilds\win32-x64\node.napi.node"
+
+        if (Test-Path $nodeBinary) {
+          Write-Host "Analyzing $nodeBinary`n"
+          dumpbin /dependents $nodeBinary
+        } else {
+          Write-Error "node.napi.node not found!"
+          exit 1
+        }
+
     - name: Generate prebuilds and bundle hamlib (Non-Windows)
       if: matrix.os != 'windows-latest'
       run: npm run prebuild:bundle
