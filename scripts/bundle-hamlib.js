@@ -522,9 +522,14 @@ function getDependenciesWinRecursive(dllPath, searchPaths = [], excludeSystemDll
         parsedLines++;
 
         // Stop at summary line
-        if (line.includes('Summary') || line.trim() === '') {
+        if (line.includes('Summary')) {
           log(`[Windows] Reached end of dependencies section (parsed ${parsedLines} lines)`);
           break;
+        }
+
+        // Skip empty lines but continue parsing
+        if (line.trim() === '') {
+          continue;
         }
 
         // Extract DLL name (note: Windows line endings may have \r)
