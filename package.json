@@ -45,9 +45,10 @@
     "test:network": "node test/test_network.js",
     "prebuild": "prebuildify --napi --strip",
     "prepare": "",
-    "bundle": "node scripts/bundle-hamlib.js",
-    "fix-rpath": "node scripts/fix-linux-rpath.js",
-    "prebuild:bundle": "npm run prebuild && npm run bundle && npm run fix-rpath"
+    "bundle:macos": "bash scripts/bundle-macos.sh",
+    "bundle:linux": "bash scripts/bundle-linux.sh",
+    "bundle:windows": "node scripts/bundle-windows.js",
+    "verify": "node scripts/verify-dependencies.js"
   },
   "dependencies": {
     "node-addon-api": "^4.3.0",
