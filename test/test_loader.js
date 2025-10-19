@@ -90,10 +90,10 @@ try {
     .filter(name => typeof HamLib[name] === 'function');
   
   const totalMethods = instanceMethods.length + staticMethods.length;
-  
-  test(`实例方法数量正确 (79个)`, () => instanceMethods.length === 79);
+
+  test(`实例方法数量正确 (80个)`, () => instanceMethods.length === 80);
   test(`静态方法数量正确 (1个)`, () => staticMethods.length === 1);
-  test(`总方法数量正确 (80个)`, () => totalMethods === 80);
+  test(`总方法数量正确 (81个)`, () => totalMethods === 81);
   
   console.log(`   📊 实例方法: ${instanceMethods.length}个`);
   console.log(`   📊 静态方法: ${staticMethods.length}个`);

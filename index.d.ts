@@ -482,6 +482,15 @@ declare class HamLib {
    */
   getSupportedFunctions(): string[];
 
+  /**
+   * Get list of supported radio modes
+   * @returns Array of supported mode strings
+   * @example
+   * const modes = rig.getSupportedModes();
+   * console.log('Supported modes:', modes); // ['USB', 'LSB', 'CW', 'FM', 'AM', ...]
+   */
+  getSupportedModes(): string[];
+
   // Split Operations
 
   /**

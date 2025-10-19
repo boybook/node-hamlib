@@ -71,7 +71,10 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
   Napi::Value SetFunction(const Napi::CallbackInfo&);
   Napi::Value GetFunction(const Napi::CallbackInfo&);
   Napi::Value GetSupportedFunctions(const Napi::CallbackInfo&);
-  
+
+  // Mode Query
+  Napi::Value GetSupportedModes(const Napi::CallbackInfo&);
+
   // Split Operations
   Napi::Value SetSplitFreq(const Napi::CallbackInfo&);
   Napi::Value GetSplitFreq(const Napi::CallbackInfo&);

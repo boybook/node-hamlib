@@ -3246,6 +3246,32 @@ Napi::Value NodeHamLib::GetSupportedFunctions(const Napi::CallbackInfo & info) {
   return funcArray;
 }
 
+// Mode Query
+Napi::Value NodeHamLib::GetSupportedModes(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+
+  // Get mode list from rig state (populated during rig_open from rx/tx range lists)
+  rmode_t modes = my_rig->state.mode_list;
+  Napi::Array modeArray = Napi::Array::New(env);
+  uint32_t index = 0;
+
+  // Iterate through all possible mode bits (similar to rig_sprintf_mode)
+  for (unsigned int i = 0; i < HAMLIB_MAX_MODES; i++) {
+    rmode_t mode_bit = modes & (1ULL << i);
+
+    if (mode_bit) {
+      const char* mode_str = rig_strrmode(mode_bit);
+
+      // Skip empty or unknown modes
+      if (mode_str && mode_str[0] != '\0') {
+        modeArray[index++] = Napi::String::New(env, mode_str);
+      }
+    }
+  }
+
+  return modeArray;
+}
+
 // Split Operations
 Napi::Value NodeHamLib::SetSplitFreq(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
@@ -3600,7 +3626,10 @@ Napi::Function NodeHamLib::GetClass(Napi::Env env) {
       NodeHamLib::InstanceMethod("setFunction", & NodeHamLib::SetFunction),
       NodeHamLib::InstanceMethod("getFunction", & NodeHamLib::GetFunction),
       NodeHamLib::InstanceMethod("getSupportedFunctions", & NodeHamLib::GetSupportedFunctions),
-      
+
+      // Mode Query
+      NodeHamLib::InstanceMethod("getSupportedModes", & NodeHamLib::GetSupportedModes),
+
       // Split Operations
       NodeHamLib::InstanceMethod("setSplitFreq", & NodeHamLib::SetSplitFreq),
       NodeHamLib::InstanceMethod("getSplitFreq", & NodeHamLib::GetSplitFreq),
