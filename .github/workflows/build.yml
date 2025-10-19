@@ -182,7 +182,23 @@ jobs:
 
     - name: Generate prebuilds (Windows)
       if: matrix.os == 'windows-latest'
-      run: npm run prebuild
+      shell: pwsh
+      run: |
+        # Use full path to node-gyp to avoid spawn issues
+        $env:Path = "$env:Path;$pwd\node_modules\.bin"
+
+        # Call node-gyp directly for each target
+        node-gyp rebuild --target=$(node -p "process.versions.napi") --release
+
+        # Create prebuilds directory structure
+        $platform = "win32-x64"
+        $prebuildDir = "prebuilds\$platform"
+        New-Item -ItemType Directory -Force -Path $prebuildDir | Out-Null
+
+        # Copy the built .node file
+        Copy-Item "build\Release\hamlib.node" "$prebuildDir\node.napi.node"
+
+        Write-Host "Successfully created prebuild for $platform"
 
     - name: Bundle dependencies (Windows)
       if: matrix.os == 'windows-latest'
