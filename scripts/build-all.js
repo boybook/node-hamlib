@@ -77,15 +77,17 @@ function checkBuildTools() {
     'node-gyp': 'node-gyp (npm install -g node-gyp)'
   };
 
-  const platformTools = {
-    'win32': [],
-    'darwin': ['autoconf', 'automake', 'libtool'],
-    'linux': ['autoconf', 'automake', 'libtool', 'make']
-  };
+  // Platform-specific tools - use correct libtool command names
+  let platformSpecific = [];
+  if (process.platform === 'darwin') {
+    // macOS uses glibtoolize
+    platformSpecific = ['autoconf', 'automake', 'glibtoolize'];
+  } else if (process.platform === 'linux') {
+    // Linux uses libtoolize
+    platformSpecific = ['autoconf', 'automake', 'libtoolize', 'make'];
+  }
 
   const tools = { ...requiredTools };
-  const platformSpecific = platformTools[process.platform] || [];
-
   platformSpecific.forEach(tool => {
     tools[tool] = tool;
   });
