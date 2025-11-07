@@ -266,6 +266,17 @@ declare class HamLib {
   static getSupportedRigs(): SupportedRigInfo[];
 
   /**
+   * Get Hamlib library version information
+   * @returns Hamlib version string including version number, build date, and architecture
+   * @static
+   * @example
+   * const version = HamLib.getHamlibVersion();
+   * console.log(`Hamlib version: ${version}`);
+   * // Output: "Hamlib 4.5.5 2024-01-15 12:00:00 64-bit"
+   */
+  static getHamlibVersion(): string;
+
+  /**
    * Open connection to device
    * Must be called before other operations
    * @throws Throws error when connection fails

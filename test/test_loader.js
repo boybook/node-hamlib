@@ -7,6 +7,15 @@ const { HamLib } = require('../index.js');
 
 console.log('🧪 测试node-hamlib模块加载和基础功能...\n');
 
+// 输出Hamlib版本信息
+try {
+  const hamlibVersion = HamLib.getHamlibVersion();
+  console.log('📌 Hamlib版本信息:');
+  console.log(`   ${hamlibVersion}\n`);
+} catch (e) {
+  console.log('⚠️  无法获取Hamlib版本信息:', e.message, '\n');
+}
+
 let testsPassed = 0;
 let testsFailed = 0;
 
@@ -34,8 +43,9 @@ try {
   
   // 2. 静态方法测试
   console.log('\n📊 静态方法测试:');
+  test('getHamlibVersion静态方法存在', () => typeof HamLib.getHamlibVersion === 'function');
   test('getSupportedRigs静态方法存在', () => typeof HamLib.getSupportedRigs === 'function');
-  
+
   try {
     const supportedRigs = HamLib.getSupportedRigs();
     test('getSupportedRigs返回数组', () => Array.isArray(supportedRigs));
@@ -46,6 +56,27 @@ try {
       return first.rigModel && first.modelName && first.mfgName;
     });
     console.log(`   📈 找到 ${supportedRigs.length} 个支持的电台型号`);
+
+    // 打印所有支持的设备型号
+    console.log('\n📻 所有支持的设备型号:');
+    console.log('   ────────────────────────────────────────────────────────────────');
+    console.log('   型号ID  | 制造商              | 型号名称                    | 状态');
+    console.log('   ────────────────────────────────────────────────────────────────');
+    supportedRigs.forEach((rig, index) => {
+      const model = String(rig.rigModel).padEnd(7);
+      const mfg = (rig.mfgName || '').substring(0, 20).padEnd(20);
+      const name = (rig.modelName || '').substring(0, 28).padEnd(28);
+      const status = rig.status || '';
+      console.log(`   ${model} | ${mfg} | ${name} | ${status}`);
+
+      // 每50行输出一个分隔符，便于阅读
+      if ((index + 1) % 50 === 0 && index + 1 < supportedRigs.length) {
+        console.log('   ────────────────────────────────────────────────────────────────');
+      }
+    });
+    console.log('   ────────────────────────────────────────────────────────────────');
+    console.log(`   共计: ${supportedRigs.length} 个型号\n`);
+
   } catch (e) {
     console.log(`❌ getSupportedRigs调用失败: ${e.message}`);
     testsFailed++;
@@ -92,9 +123,9 @@ try {
   const totalMethods = instanceMethods.length + staticMethods.length;
 
   test(`实例方法数量正确 (80个)`, () => instanceMethods.length === 80);
-  test(`静态方法数量正确 (1个)`, () => staticMethods.length === 1);
-  test(`总方法数量正确 (81个)`, () => totalMethods === 81);
-  
+  test(`静态方法数量正确 (2个)`, () => staticMethods.length === 2);
+  test(`总方法数量正确 (82个)`, () => totalMethods === 82);
+
   console.log(`   📊 实例方法: ${instanceMethods.length}个`);
   console.log(`   📊 静态方法: ${staticMethods.length}个`);
   console.log(`   📊 总计: ${totalMethods}个方法`);

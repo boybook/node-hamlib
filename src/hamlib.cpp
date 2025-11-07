@@ -3720,9 +3720,10 @@ Napi::Function NodeHamLib::GetClass(Napi::Env env) {
       NodeHamLib::InstanceMethod("close", & NodeHamLib::Close),
       NodeHamLib::InstanceMethod("destroy", & NodeHamLib::Destroy),
       NodeHamLib::InstanceMethod("getConnectionInfo", & NodeHamLib::GetConnectionInfo),
-      
-      // Static method to get supported rig models
+
+      // Static methods
       NodeHamLib::StaticMethod("getSupportedRigs", & NodeHamLib::GetSupportedRigs),
+      NodeHamLib::StaticMethod("getHamlibVersion", & NodeHamLib::GetHamlibVersion),
     });
       constructor = Napi::Persistent(ret);
       constructor.SuppressDestruct();
@@ -3830,6 +3831,16 @@ Napi::Value NodeHamLib::GetSupportedRigs(const Napi::CallbackInfo& info) {
   }
   
   return rigArray;
+}
+
+// Get Hamlib version information
+Napi::Value NodeHamLib::GetHamlibVersion(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+
+  // Reference to external hamlib_version2 variable
+  extern const char* hamlib_version2;
+
+  return Napi::String::New(env, hamlib_version2);
 }
 
 // Serial Port Configuration Methods

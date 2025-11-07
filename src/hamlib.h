@@ -164,7 +164,10 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
   
   // Static method to get supported rig models
   static Napi::Value GetSupportedRigs(const Napi::CallbackInfo&);
-  
+
+  // Static method to get Hamlib version
+  static Napi::Value GetHamlibVersion(const Napi::CallbackInfo&);
+
   static Napi::Function GetClass(Napi::Env);
 
   static int freq_change_cb(RIG*, vfo_t, freq_t, void*);
