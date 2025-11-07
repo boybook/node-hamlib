@@ -161,12 +161,38 @@ async function setupHamlib() {
     logger.startSpinner('Building Hamlib from source...');
 
     try {
-      const buildCmd = `node ${path.join(__dirname, 'build-hamlib.js')}`;
+      const cwd = process.cwd();
+      const hamlibPrefix = path.join(cwd, 'hamlib-build');
+
+      const buildCmd = `node ${path.join(__dirname, 'build-hamlib.js')} --prefix=${hamlibPrefix}`;
       const buildArgs = args.minimal ? ' --minimal' : '';
 
       exec(buildCmd + buildArgs);
 
       logger.succeedSpinner('Hamlib built successfully');
+
+      // Set environment variables for subsequent steps
+      process.env.HAMLIB_PREFIX = hamlibPrefix;
+
+      if (process.platform === 'linux') {
+        const libPath = path.join(hamlibPrefix, 'lib');
+        process.env.LD_LIBRARY_PATH = process.env.LD_LIBRARY_PATH
+          ? `${libPath}:${process.env.LD_LIBRARY_PATH}`
+          : libPath;
+        process.env.PKG_CONFIG_PATH = process.env.PKG_CONFIG_PATH
+          ? `${libPath}/pkgconfig:${process.env.PKG_CONFIG_PATH}`
+          : `${libPath}/pkgconfig`;
+      } else if (process.platform === 'darwin') {
+        const libPath = path.join(hamlibPrefix, 'lib');
+        process.env.DYLD_LIBRARY_PATH = process.env.DYLD_LIBRARY_PATH
+          ? `${libPath}:${process.env.DYLD_LIBRARY_PATH}`
+          : libPath;
+        process.env.PKG_CONFIG_PATH = process.env.PKG_CONFIG_PATH
+          ? `${libPath}/pkgconfig:${process.env.PKG_CONFIG_PATH}`
+          : `${libPath}/pkgconfig`;
+      }
+
+      logger.debug(`Set HAMLIB_PREFIX=${hamlibPrefix}`);
     } catch (e) {
       logger.failSpinner('Hamlib build failed');
       throw e;
