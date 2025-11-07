@@ -146,7 +146,9 @@ function isCI() {
 function checkBuildTools(platform) {
   logStep('1/6', '检查构建工具');
 
-  const requiredTools = ['git', 'autoconf', 'automake', 'libtoolize', 'make'];
+  // macOS 使用 glibtoolize，Linux 使用 libtoolize
+  const libtoolCmd = platform === 'macos' ? 'glibtoolize' : 'libtoolize';
+  const requiredTools = ['git', 'autoconf', 'automake', libtoolCmd, 'make'];
   const missingTools = [];
 
   for (const tool of requiredTools) {
