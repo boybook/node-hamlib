@@ -146,48 +146,25 @@ function isCI() {
 function checkBuildTools(platform) {
   logStep('1/6', '检查构建工具');
 
-  const requiredTools = ['git', 'autoconf', 'automake', 'libtool', 'make'];
+  const requiredTools = ['git', 'autoconf', 'automake', 'libtoolize', 'make'];
   const missingTools = [];
 
   for (const tool of requiredTools) {
-    let found = false;
-    let toolPath = '';
-
     try {
-      // 尝试直接运行工具的 --version 来验证（最可靠的方法）
-      const versionCheck = exec(`${tool} --version 2>&1`, { silent: true, ignoreError: false });
-      if (versionCheck) {
-        found = true;
-        // 尝试获取工具路径
-        const pathCheck = exec(`command -v ${tool} 2>/dev/null || which ${tool} 2>/dev/null || echo "(installed)"`, { silent: true, ignoreError: true });
-        toolPath = pathCheck ? pathCheck.trim() : '(installed)';
-      }
+      // 简化：只检测工具是否可执行，不获取详细路径
+      exec(`${tool} --version 2>&1`, { silent: true, ignoreError: false });
+      logSuccess(`找到 ${tool}`);
     } catch (error) {
-      // 工具不存在或执行失败
-      found = false;
-    }
-
-    if (found) {
-      logSuccess(`找到 ${tool}${toolPath !== '(installed)' ? ': ' + toolPath : ''}`);
-    } else {
       missingTools.push(tool);
     }
   }
 
   if (missingTools.length > 0) {
-    logError('缺少必需的构建工具:');
-    console.log('  ' + missingTools.join(', '));
-    console.log();
-
-    if (platform === 'macos') {
-      log('在 macOS 上安装构建工具:', 'yellow');
-      log('  brew install autoconf automake libtool', 'bright');
-    } else if (platform === 'linux') {
-      log('在 Linux 上安装构建工具:', 'yellow');
-      log('  sudo apt-get install autoconf automake libtool pkg-config   # Debian/Ubuntu', 'bright');
-      log('  sudo yum install autoconf automake libtool                  # CentOS/RHEL', 'bright');
-    }
-
+    logError(`缺少必需的构建工具: ${missingTools.join(', ')}`);
+    const installCmd = platform === 'macos'
+      ? 'brew install autoconf automake libtool'
+      : 'sudo apt-get install autoconf automake libtool pkg-config';
+    log(`安装命令: ${installCmd}`, 'bright');
     process.exit(1);
   }
 
