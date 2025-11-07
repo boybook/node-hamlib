@@ -49,12 +49,24 @@ echo "[bundle-linux] Using patchelf: $(which patchelf)"
 echo "[bundle-linux] Searching for libhamlib.so..."
 HAMLIB_LIB=""
 
-# Try ldconfig first
-if command -v ldconfig &> /dev/null; then
+# Priority 1: Check HAMLIB_PREFIX environment variable
+if [ -n "$HAMLIB_PREFIX" ]; then
+  echo "[bundle-linux] Checking HAMLIB_PREFIX: $HAMLIB_PREFIX"
+  for path in "$HAMLIB_PREFIX/lib/libhamlib.so.4" "$HAMLIB_PREFIX/lib/libhamlib.so"; do
+    if [ -f "$path" ]; then
+      HAMLIB_LIB="$path"
+      echo "[bundle-linux] Found libhamlib in HAMLIB_PREFIX: $path"
+      break
+    fi
+  done
+fi
+
+# Priority 2: Try ldconfig
+if [ -z "$HAMLIB_LIB" ] && command -v ldconfig &> /dev/null; then
   HAMLIB_LIB=$(ldconfig -p | grep 'libhamlib\.so' | head -1 | awk '{print $NF}')
 fi
 
-# Fallback to common paths
+# Priority 3: Fallback to common system paths
 if [ -z "$HAMLIB_LIB" ]; then
   for path in /usr/lib64/libhamlib.so.4 /usr/lib/libhamlib.so.4 /usr/local/lib/libhamlib.so.4 \
               /usr/lib/x86_64-linux-gnu/libhamlib.so.4 /usr/lib/aarch64-linux-gnu/libhamlib.so.4 \

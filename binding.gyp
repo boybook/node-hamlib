@@ -23,10 +23,12 @@
         # Linux configuration
         ["OS==\"linux\"", {
           "include_dirs": [
+            "<!@(node -e \"if(process.env.HAMLIB_PREFIX) console.log(process.env.HAMLIB_PREFIX + '/include')\")",
             "/usr/include",
             "/usr/local/include"
           ],
           "libraries": [
+            "<!@(node -e \"if(process.env.HAMLIB_PREFIX) console.log('-L' + process.env.HAMLIB_PREFIX + '/lib')\")",
             "-L/usr/lib",
             "-L/usr/local/lib",
             "-lhamlib"
@@ -38,10 +40,12 @@
         # macOS configuration
         ["OS==\"mac\"", {
           "include_dirs": [
+            "<!@(node -e \"if(process.env.HAMLIB_PREFIX) console.log(process.env.HAMLIB_PREFIX + '/include')\")",
             "/usr/local/include",
             "/opt/homebrew/include"
           ],
           "libraries": [
+            "<!@(node -e \"if(process.env.HAMLIB_PREFIX) console.log('-L' + process.env.HAMLIB_PREFIX + '/lib')\")",
             "-L/usr/local/lib",
             "-L/opt/homebrew/lib",
             "-lhamlib"

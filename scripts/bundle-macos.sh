@@ -48,8 +48,17 @@ fi
 
 echo "[bundle-macos] Using dylibbundler: $(which dylibbundler)"
 
-# Search paths for dependencies (Homebrew locations)
-SEARCH_PATHS=(
+# Search paths for dependencies
+# Priority 1: HAMLIB_PREFIX if set (for custom builds)
+# Priority 2: Homebrew locations
+SEARCH_PATHS=()
+
+if [ -n "$HAMLIB_PREFIX" ]; then
+  echo "[bundle-macos] Using HAMLIB_PREFIX: $HAMLIB_PREFIX"
+  SEARCH_PATHS+=("$HAMLIB_PREFIX/lib")
+fi
+
+SEARCH_PATHS+=(
   "$HOMEBREW_PREFIX/opt/hamlib/lib"
   "$HOMEBREW_PREFIX/opt/fftw/lib"
   "$HOMEBREW_PREFIX/opt/gcc/lib/gcc/current"
