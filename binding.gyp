@@ -42,12 +42,20 @@
           "include_dirs": [
             "<!@(node -e \"if(process.env.HAMLIB_PREFIX) console.log(process.env.HAMLIB_PREFIX + '/include')\")",
             "/usr/local/include",
-            "/opt/homebrew/include"
+            "/usr/local/opt/hamlib/include",
+            "/usr/local/opt/libusb/include",
+            "/opt/homebrew/include",
+            "/opt/homebrew/opt/hamlib/include",
+            "/opt/homebrew/opt/libusb/include"
           ],
           "libraries": [
             "<!@(node -e \"if(process.env.HAMLIB_PREFIX) console.log('-L' + process.env.HAMLIB_PREFIX + '/lib')\")",
             "-L/usr/local/lib",
+            "-L/usr/local/opt/hamlib/lib",
+            "-L/usr/local/opt/libusb/lib",
             "-L/opt/homebrew/lib",
+            "-L/opt/homebrew/opt/hamlib/lib",
+            "-L/opt/homebrew/opt/libusb/lib",
             "-lhamlib"
           ],
           "xcode_settings": {

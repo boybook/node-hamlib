@@ -22,6 +22,8 @@ jobs:
             target: linux-arm64
           - os: macos-latest
             target: darwin-arm64
+          - os: macos-15-intel
+            target: darwin-x64
           - os: windows-latest
             target: win32-x64
 
@@ -44,7 +46,7 @@ jobs:
         sudo apt-get install -y libusb-1.0-0 libindi1 || true
 
     - name: Install system dependencies (macOS)
-      if: matrix.os == 'macos-latest'
+      if: startsWith(matrix.os, 'macos')
       run: |
         brew install autoconf automake libtool dylibbundler
         pip3 install setuptools --break-system-packages || true
@@ -221,7 +223,7 @@ jobs:
 
           Includes precompiled binaries for:
           - Linux x64/ARM64
-          - macOS ARM64 (Apple Silicon)
+          - macOS ARM64 (Apple Silicon) & x64 (Intel)
           - Windows x64
 
           ### Installation
@@ -245,5 +247,6 @@ jobs:
           prebuilds-linux-x64
           prebuilds-linux-arm64
           prebuilds-darwin-arm64
+          prebuilds-darwin-x64
           prebuilds-win32-x64
         failOnError: false

@@ -236,7 +236,7 @@ function verifyBinary(prebuild) {
  * Verify all platforms (CI mode)
  */
 function verifyAll(prebuildsDir) {
-  const expectedPlatforms = ['linux-x64', 'linux-arm64', 'darwin-arm64', 'win32-x64'];
+  const expectedPlatforms = ['linux-x64', 'linux-arm64', 'darwin-arm64', 'darwin-x64', 'win32-x64'];
 
   logger.step('Checking platform directories', 1, 2);
 
