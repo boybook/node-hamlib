@@ -168,6 +168,10 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
   // Static method to get Hamlib version
   static Napi::Value GetHamlibVersion(const Napi::CallbackInfo&);
 
+  // Static methods to control debug level
+  static Napi::Value SetDebugLevel(const Napi::CallbackInfo&);
+  static Napi::Value GetDebugLevel(const Napi::CallbackInfo&);
+
   static Napi::Function GetClass(Napi::Env);
 
   static int freq_change_cb(RIG*, vfo_t, freq_t, void*);

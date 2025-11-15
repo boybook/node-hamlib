@@ -123,8 +123,8 @@ try {
   const totalMethods = instanceMethods.length + staticMethods.length;
 
   test(`实例方法数量正确 (80个)`, () => instanceMethods.length === 80);
-  test(`静态方法数量正确 (2个)`, () => staticMethods.length === 2);
-  test(`总方法数量正确 (82个)`, () => totalMethods === 82);
+  test(`静态方法数量正确 (4个)`, () => staticMethods.length === 4);
+  test(`总方法数量正确 (84个)`, () => totalMethods === 84);
 
   console.log(`   📊 实例方法: ${instanceMethods.length}个`);
   console.log(`   📊 静态方法: ${staticMethods.length}个`);

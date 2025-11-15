@@ -67,6 +67,12 @@ type VFO = 'VFO-A' | 'VFO-B';
 type RadioMode = 'USB' | 'LSB' | 'FM' | 'PKTFM' | 'AM' | 'CW' | 'RTTY' | 'DIG' | string;
 
 /**
+ * Hamlib debug level type
+ * Controls the verbosity of Hamlib library debug output
+ */
+type RigDebugLevel = 0 | 1 | 2 | 3 | 4 | 5;
+
+/**
  * Memory channel data interface
  */
 interface MemoryChannelData {
@@ -275,6 +281,41 @@ declare class HamLib {
    * // Output: "Hamlib 4.5.5 2024-01-15 12:00:00 64-bit"
    */
   static getHamlibVersion(): string;
+
+  /**
+   * Set Hamlib debug level (affects all instances globally)
+   * Controls the verbosity of Hamlib library debug output.
+   * By default, debug level is set to 0 (NONE) to prevent unwanted output.
+   *
+   * @param level Debug level:
+   *   - 0 = NONE (no debug output) - default
+   *   - 1 = BUG (serious bug messages only)
+   *   - 2 = ERR (error messages)
+   *   - 3 = WARN (warning messages)
+   *   - 4 = VERBOSE (verbose messages)
+   *   - 5 = TRACE (trace messages - very detailed)
+   * @static
+   * @example
+   * // Disable all debug output (default)
+   * HamLib.setDebugLevel(0);
+   *
+   * // Enable verbose debugging for troubleshooting
+   * HamLib.setDebugLevel(4);
+   *
+   * // Enable full trace debugging for development
+   * HamLib.setDebugLevel(5);
+   */
+  static setDebugLevel(level: RigDebugLevel): void;
+
+  /**
+   * Get current Hamlib debug level
+   * Note: This method is not supported by Hamlib API and will throw an error.
+   * Applications should track the debug level they set using setDebugLevel().
+   *
+   * @static
+   * @throws Always throws error as Hamlib doesn't provide API to query debug level
+   */
+  static getDebugLevel(): never;
 
   /**
    * Open connection to device

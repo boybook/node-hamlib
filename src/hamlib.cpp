@@ -2214,12 +2214,9 @@ NodeHamLib::NodeHamLib(const Napi::CallbackInfo & info): ObjectWrap(info) {
       std::string portStr = info[1].As<Napi::String>().Utf8Value();
       strncpy(port_path, portStr.c_str(), HAMLIB_FILPATHLEN - 1);
       port_path[HAMLIB_FILPATHLEN - 1] = '\0';
-    } else {
-      // If second argument exists but is not a string, treat it as debug level (backward compatibility)
-      rig_set_debug_level(RIG_DEBUG_NONE);
     }
-  } else {
-    rig_set_debug_level(RIG_DEBUG_NONE);
+    // Note: Debug level is now controlled globally via HamLib.setDebugLevel()
+    // and set to RIG_DEBUG_NONE by default in addon initialization
   }
   //rig_model_t myrig_model;
   //   hamlib_port_t myport;
@@ -2241,19 +2238,21 @@ NodeHamLib::NodeHamLib(const Napi::CallbackInfo & info): ObjectWrap(info) {
 
   // Check if port_path is a network address (contains colon)
   is_network_rig = isNetworkAddress(port_path);
-  
+
   if (is_network_rig) {
     // Use NETRIGCTL model for network connections
     myrig_model = 2; // RIG_MODEL_NETRIGCTL
-    printf("Using network connection to %s\n", port_path);
+    // Network connection will be established on open()
   }
 
   my_rig = rig_init(myrig_model);
   //int retcode = 0;
   if (!my_rig) {
-    fprintf(stderr, "Unknown rig num: %d\n", myrig_model);
-    fprintf(stderr, "Please check riglist.h\n");
-    Napi::TypeError::New(env, "Unable to Init Rig").ThrowAsJavaScriptException();
+    // Create detailed error message
+    std::string errorMsg = "Unable to initialize rig (model: " +
+                           std::to_string(myrig_model) +
+                           "). Please check if the model number is valid.";
+    Napi::TypeError::New(env, errorMsg).ThrowAsJavaScriptException();
   }
   
   // Set port path and type based on connection type
@@ -3724,6 +3723,8 @@ Napi::Function NodeHamLib::GetClass(Napi::Env env) {
       // Static methods
       NodeHamLib::StaticMethod("getSupportedRigs", & NodeHamLib::GetSupportedRigs),
       NodeHamLib::StaticMethod("getHamlibVersion", & NodeHamLib::GetHamlibVersion),
+      NodeHamLib::StaticMethod("setDebugLevel", & NodeHamLib::SetDebugLevel),
+      NodeHamLib::StaticMethod("getDebugLevel", & NodeHamLib::GetDebugLevel),
     });
       constructor = Napi::Persistent(ret);
       constructor.SuppressDestruct();
@@ -3841,6 +3842,47 @@ Napi::Value NodeHamLib::GetHamlibVersion(const Napi::CallbackInfo& info) {
   extern const char* hamlib_version2;
 
   return Napi::String::New(env, hamlib_version2);
+}
+
+// Set Hamlib debug level
+// Debug levels: 0=NONE, 1=BUG, 2=ERR, 3=WARN, 4=VERBOSE, 5=TRACE
+Napi::Value NodeHamLib::SetDebugLevel(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+
+  if (info.Length() < 1 || !info[0].IsNumber()) {
+    Napi::TypeError::New(env, "Debug level (number) required").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+
+  int level = info[0].As<Napi::Number>().Int32Value();
+
+  // Validate debug level (0-5)
+  if (level < 0 || level > 5) {
+    Napi::RangeError::New(env, "Debug level must be between 0 (NONE) and 5 (TRACE)").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+
+  rig_set_debug((enum rig_debug_level_e)level);
+
+  return env.Undefined();
+}
+
+// Get current Hamlib debug level
+Napi::Value NodeHamLib::GetDebugLevel(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+
+  // hamlib_get_debug() is not available in all versions, so we use a workaround
+  // by calling rig_debug_level which is a global variable in hamlib
+  // However, this is internal implementation, so we use rig_debug with RIG_DEBUG_NONE
+  // to get the current level. For now, we'll just return a note that this is not
+  // directly accessible. In practice, applications should track the level they set.
+
+  // Since there's no public API to query debug level in Hamlib,
+  // we'll document that users should track it themselves
+  Napi::Error::New(env,
+    "Getting debug level is not supported by Hamlib API. "
+    "Please track the debug level you set using setDebugLevel().").ThrowAsJavaScriptException();
+  return env.Undefined();
 }
 
 // Serial Port Configuration Methods
