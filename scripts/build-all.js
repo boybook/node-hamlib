@@ -189,11 +189,26 @@ async function setupHamlib() {
       return;
     }
 
+    // Auto-detect MSYS2 MinGW hamlib package
+    const msys2Prefixes = [
+      process.env.MINGW_PREFIX,
+      'C:/msys64/mingw64', 'D:/msys64/mingw64',
+      'C:/msys64/ucrt64', 'D:/msys64/ucrt64',
+    ].filter(Boolean);
+
+    for (const prefix of msys2Prefixes) {
+      if (exists(path.join(prefix, 'include', 'hamlib', 'rig.h'))) {
+        process.env.HAMLIB_ROOT = prefix;
+        logger.succeedSpinner(`Using MSYS2 Hamlib: ${prefix}`);
+        return;
+      }
+    }
+
     logger.failSpinner('Hamlib not found');
-    logger.warning('Please set HAMLIB_ROOT environment variable');
-    logger.info('Download from: https://github.com/Hamlib/Hamlib/releases/download/4.6.5/hamlib-w64-4.6.5.zip');
-    logger.info('Extract and set: HAMLIB_ROOT=C:\\path\\to\\hamlib-w64-4.6.5');
-    throw new Error('HAMLIB_ROOT not set');
+    logger.warning('Please set HAMLIB_ROOT environment variable or install hamlib via MSYS2 pacman');
+    logger.info('Option 1: Download from https://github.com/Hamlib/Hamlib/releases and set HAMLIB_ROOT');
+    logger.info('Option 2: pacman -S mingw-w64-x86_64-hamlib (in MSYS2 MinGW64 shell)');
+    throw new Error('HAMLIB_ROOT not set and MSYS2 hamlib not found');
   } else {
     // Linux/macOS: Build from source
     logger.startSpinner('Building Hamlib from source...');

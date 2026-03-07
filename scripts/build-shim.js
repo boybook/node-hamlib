@@ -52,6 +52,28 @@ function ensureDir(dir) {
   }
 }
 
+/**
+ * Detect MSYS2 MinGW64 prefix by checking common installation paths.
+ * Returns the prefix path (e.g., 'C:/msys64/mingw64') or null.
+ */
+function findMsys2Prefix() {
+  const candidates = [
+    process.env.MINGW_PREFIX,  // Set inside MSYS2 MinGW shell
+    'C:/msys64/mingw64',
+    'D:/msys64/mingw64',
+    'C:/msys64/ucrt64',
+    'D:/msys64/ucrt64',
+  ].filter(Boolean);
+
+  for (const prefix of candidates) {
+    const normalized = prefix.replace(/\\/g, '/');
+    if (fs.existsSync(path.join(normalized, 'include', 'hamlib', 'rig.h'))) {
+      return normalized;
+    }
+  }
+  return null;
+}
+
 function findHamlibInclude() {
   if (isWindows) {
     const hamlibRoot = process.env.HAMLIB_ROOT;
@@ -63,7 +85,10 @@ function findHamlibInclude() {
     for (const p of paths) {
       if (fs.existsSync(p)) return p;
     }
-    throw new Error('Cannot find Hamlib include directory. Set HAMLIB_ROOT.');
+    // Try MSYS2 MinGW as fallback
+    const msys2 = findMsys2Prefix();
+    if (msys2) return path.join(msys2, 'include');
+    throw new Error('Cannot find Hamlib include directory. Set HAMLIB_ROOT or install via MSYS2 pacman.');
   }
 
   const prefix = process.env.HAMLIB_PREFIX;
@@ -94,7 +119,10 @@ function findHamlibLib() {
         return path.join(hamlibRoot, 'lib');
       }
     }
-    throw new Error('Cannot find Hamlib library directory. Set HAMLIB_ROOT.');
+    // Try MSYS2 MinGW as fallback
+    const msys2 = findMsys2Prefix();
+    if (msys2) return path.join(msys2, 'lib');
+    throw new Error('Cannot find Hamlib library directory. Set HAMLIB_ROOT or install via MSYS2 pacman.');
   }
 
   const prefix = process.env.HAMLIB_PREFIX;
@@ -184,6 +212,34 @@ function buildWindows() {
   // Detect available Hamlib features
   const featureFlags = detectHamlibFeatures(includeDir);
 
+  // Determine link strategy: DLL (hamlib-w64 package) vs static (MSYS2 pacman)
+  const libDirFwd = libDir.replace(/\\/g, '/');
+  const hamlibDll = path.join(libDir, 'libhamlib-4.dll').replace(/\\/g, '/');
+  const hamlibStaticLib = path.join(libDir, 'libhamlib.a').replace(/\\/g, '/');
+  // Also check bin/ sibling (hamlib-w64 puts DLLs in bin/)
+  const hamlibDllInBin = path.join(libDir, '..', 'bin', 'libhamlib-4.dll').replace(/\\/g, '/');
+
+  let linkArgs;
+  if (fs.existsSync(hamlibDll)) {
+    // DLL in lib dir
+    linkArgs = [`-L${libDirFwd}`, '-lhamlib-4'];
+    log('Linking against libhamlib-4.dll (from lib/)');
+  } else if (fs.existsSync(hamlibDllInBin)) {
+    // hamlib-w64 package: DLL in bin/, import lib in lib/
+    const binDir = path.join(libDir, '..', 'bin').replace(/\\/g, '/');
+    linkArgs = [`-L${binDir}`, `-L${libDirFwd}`, '-lhamlib-4'];
+    log('Linking against libhamlib-4.dll (from bin/)');
+  } else if (fs.existsSync(hamlibStaticLib)) {
+    // MSYS2 pacman: static .a, need system libs
+    linkArgs = [hamlibStaticLib, '-lws2_32', '-lwinmm', '-liphlpapi'];
+    log('Linking statically against libhamlib.a (MSYS2)');
+  } else {
+    throw new Error(
+      `Cannot find Hamlib library in ${libDir}. ` +
+      'Expected libhamlib-4.dll or libhamlib.a.'
+    );
+  }
+
   // Compile shim DLL with MinGW
   const gccCmd = [
     gcc,
@@ -191,10 +247,9 @@ function buildWindows() {
     '-DHAMLIB_SHIM_BUILD',
     ...featureFlags,
     `-I${includeDir.replace(/\\/g, '/')}`,
-    `-L${libDir.replace(/\\/g, '/')}`,
     '-o', shimDll,
     shimSrc,
-    '-lhamlib-4',
+    ...linkArgs,
     `-Wl,--output-def,${shimDef}`
   ].join(' ');
 
