@@ -118,6 +118,66 @@ jobs:
         node test/test_loader.js
         node test/test_ci_functional.js
 
+    - name: Check prebuild dependencies (Linux)
+      if: startsWith(matrix.os, 'ubuntu')
+      run: |
+        echo "=== Prebuild contents ==="
+        ls -la prebuilds/${{ matrix.target }}/
+        echo ""
+        echo "=== node.napi.node dependencies ==="
+        ldd prebuilds/${{ matrix.target }}/node.napi.node
+        echo ""
+        echo "=== libhamlib dependencies ==="
+        for f in prebuilds/${{ matrix.target }}/libhamlib.so*; do
+          if [ -f "$f" ] && ! [ -L "$f" ]; then
+            echo "--- $(basename $f) ---"
+            ldd "$f"
+          fi
+        done
+        echo ""
+        echo "=== Checking for missing dependencies ==="
+        cd prebuilds/${{ matrix.target }}
+        LD_LIBRARY_PATH=. ldd node.napi.node 2>&1 | grep "not found" && echo "MISSING DEPS FOUND!" || echo "All deps resolved with bundled libs"
+        for f in libhamlib.so*; do
+          if [ -f "$f" ] && ! [ -L "$f" ]; then
+            LD_LIBRARY_PATH=. ldd "$f" 2>&1 | grep "not found" && echo "MISSING DEPS in $f!" || true
+          fi
+        done
+
+    - name: Check prebuild dependencies (macOS)
+      if: startsWith(matrix.os, 'macos')
+      run: |
+        echo "=== Prebuild contents ==="
+        ls -la prebuilds/${{ matrix.target }}/
+        echo ""
+        echo "=== node.napi.node dependencies ==="
+        otool -L prebuilds/${{ matrix.target }}/node.napi.node
+        echo ""
+        echo "=== dylib dependencies ==="
+        for f in prebuilds/${{ matrix.target }}/*.dylib; do
+          echo "--- $(basename $f) ---"
+          otool -L "$f"
+        done
+        echo ""
+        echo "=== Checking for non-system, non-bundled dependencies ==="
+        otool -L prebuilds/${{ matrix.target }}/node.napi.node | grep -v "@loader_path\|/usr/lib\|/System\|:" | grep -v "^$" && echo "UNBUNDLED DEPS FOUND!" || echo "All deps are system or bundled"
+
+    - name: Check prebuild dependencies (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        Write-Host "=== Prebuild contents ==="
+        Get-ChildItem prebuilds/${{ matrix.target }}/ | Format-Table Name, Length
+        Write-Host ""
+        Write-Host "=== node.napi.node dependencies ==="
+        dumpbin /dependents prebuilds/${{ matrix.target }}/node.napi.node
+        Write-Host ""
+        Write-Host "=== hamlib_shim.dll dependencies ==="
+        dumpbin /dependents prebuilds/${{ matrix.target }}/hamlib_shim.dll
+        Write-Host ""
+        Write-Host "=== libhamlib-4.dll dependencies ==="
+        dumpbin /dependents prebuilds/${{ matrix.target }}/libhamlib-4.dll
+
     - name: Upload prebuilds
       uses: actions/upload-artifact@v4
       with:
