@@ -91,19 +91,20 @@ jobs:
     - name: Install Node.js dependencies
       run: npm ci --ignore-scripts
 
-    - name: Build shim (Windows)
+    - name: Build shim DLL (Windows)
       if: matrix.os == 'windows-latest'
       shell: msys2 {0}
       run: |
         export PATH="/mingw64/bin:$PATH"
         node scripts/build-shim.js --verbose
 
-    - name: Build shim (Unix)
-      if: matrix.os != 'windows-latest'
-      run: node scripts/build-shim.js --verbose
-
-    - name: Build native addon
+    - name: Build (Windows)
+      if: matrix.os == 'windows-latest'
       run: npm run build:all -- --skip-hamlib --skip-shim --minimal
+
+    - name: Build (Unix)
+      if: matrix.os != 'windows-latest'
+      run: npm run build:all -- --minimal
 
     - name: Run tests
       run: |

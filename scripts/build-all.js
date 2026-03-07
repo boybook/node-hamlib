@@ -383,7 +383,8 @@ async function main() {
       await verifyBuild();
     } else {
       // Full build process
-      const totalSteps = args.skipVerify ? 6 : 7;
+      let totalSteps = args.skipVerify ? 5 : 6;
+      if (!args.skipShim) totalSteps++;
       let currentStep = 1;
 
       logger.step('Checking build tools', currentStep++, totalSteps);
