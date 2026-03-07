@@ -504,6 +504,24 @@ SHIM_API int shim_rig_sprintf_mode(uint64_t modes, char* buf, int buflen);
 /* Rig type to string conversion */
 SHIM_API const char* shim_rig_type_str(int rig_type);
 
+/* ===== Lock Mode (Hamlib >= 4.7.0) ===== */
+
+SHIM_API int shim_rig_set_lock_mode(hamlib_shim_handle_t h, int lock);
+SHIM_API int shim_rig_get_lock_mode(hamlib_shim_handle_t h, int *lock);
+
+/* ===== Clock (Hamlib >= 4.7.0) ===== */
+
+SHIM_API int shim_rig_set_clock(hamlib_shim_handle_t h, int year, int month, int day,
+                                 int hour, int min, int sec, double msec, int utc_offset);
+SHIM_API int shim_rig_get_clock(hamlib_shim_handle_t h, int *year, int *month, int *day,
+                                 int *hour, int *min, int *sec, double *msec, int *utc_offset);
+
+/* ===== VFO Info (Hamlib >= 4.7.0) ===== */
+
+SHIM_API int shim_rig_get_vfo_info(hamlib_shim_handle_t h, int vfo,
+                                    double *freq, uint64_t *mode,
+                                    long *width, int *split);
+
 #ifdef __cplusplus
 }
 #endif

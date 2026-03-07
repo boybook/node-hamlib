@@ -45,7 +45,7 @@ SHIM_API void shim_rig_set_debug(int level) {
 SHIM_API int shim_rig_get_debug(void) {
     /* Hamlib doesn't have rig_get_debug in all versions,
        but we use the global variable if available */
-#ifdef HAVE_RIG_GET_DEBUG
+#ifdef SHIM_HAS_GET_DEBUG
     return (int)rig_get_debug();
 #else
     return -1;  /* Not available */
@@ -448,7 +448,7 @@ SHIM_API int shim_rig_get_split_mode(hamlib_shim_handle_t h, int vfo, int* mode,
 }
 
 SHIM_API int shim_rig_set_split_freq_mode(hamlib_shim_handle_t h, int vfo, double freq, int mode, int width) {
-#if HAVE_RIG_SPLIT_FREQ_MODE
+#ifdef SHIM_HAS_SPLIT_FREQ_MODE
     return rig_set_split_freq_mode((RIG*)h, (vfo_t)vfo, (freq_t)freq, (rmode_t)mode, (pbwidth_t)width);
 #else
     /* Fallback: set freq and mode separately */
@@ -459,7 +459,7 @@ SHIM_API int shim_rig_set_split_freq_mode(hamlib_shim_handle_t h, int vfo, doubl
 }
 
 SHIM_API int shim_rig_get_split_freq_mode(hamlib_shim_handle_t h, int vfo, double* freq, int* mode, int* width) {
-#if HAVE_RIG_SPLIT_FREQ_MODE
+#ifdef SHIM_HAS_SPLIT_FREQ_MODE
     freq_t f = 0;
     rmode_t m = 0;
     pbwidth_t w = 0;
@@ -712,7 +712,7 @@ SHIM_API int shim_rig_send_voice_mem(hamlib_shim_handle_t h, int vfo, int ch) {
 }
 
 SHIM_API int shim_rig_stop_voice_mem(hamlib_shim_handle_t h, int vfo) {
-#if HAVE_RIG_STOP_VOICE_MEM
+#ifdef SHIM_HAS_STOP_VOICE_MEM
     return rig_stop_voice_mem((RIG*)h, (vfo_t)vfo);
 #else
     (void)h; (void)vfo;
@@ -794,6 +794,7 @@ SHIM_API int shim_rig_set_ptt_callback(hamlib_shim_handle_t h, shim_ptt_cb_t cb,
     return rig_set_ptt_callback((RIG*)h, shim_ptt_cb_thunk, &ptt_cb_adapter);
 }
 
+/* rig_set_trn: deprecated in Hamlib 4.7.0, may be removed in future versions. */
 SHIM_API int shim_rig_set_trn(hamlib_shim_handle_t h, int trn) {
     return rig_set_trn((RIG*)h, trn);
 }
@@ -862,4 +863,80 @@ SHIM_API const char* shim_rig_type_str(int rig_type) {
         case RIG_TYPE_OTHER:       return "Other";
         default:                   return "Unknown";
     }
+}
+
+/* ===== Lock Mode (Hamlib >= 4.7.0) ===== */
+
+SHIM_API int shim_rig_set_lock_mode(hamlib_shim_handle_t h, int lock) {
+#ifdef SHIM_HAS_LOCK_MODE
+    RIG *rig = (RIG *)h;
+    if (!rig) return -RIG_EINVAL;
+    return rig_set_lock_mode(rig, lock);
+#else
+    (void)h; (void)lock;
+    return -RIG_ENIMPL;
+#endif
+}
+
+SHIM_API int shim_rig_get_lock_mode(hamlib_shim_handle_t h, int *lock) {
+#ifdef SHIM_HAS_LOCK_MODE
+    RIG *rig = (RIG *)h;
+    if (!rig) return -RIG_EINVAL;
+    return rig_get_lock_mode(rig, lock);
+#else
+    (void)h; (void)lock;
+    return -RIG_ENIMPL;
+#endif
+}
+
+/* ===== Clock (Hamlib >= 4.7.0) ===== */
+
+SHIM_API int shim_rig_set_clock(hamlib_shim_handle_t h, int year, int month, int day,
+                                 int hour, int min, int sec, double msec, int utc_offset) {
+#ifdef SHIM_HAS_CLOCK
+    RIG *rig = (RIG *)h;
+    if (!rig) return -RIG_EINVAL;
+    return rig_set_clock(rig, year, month, day, hour, min, sec, msec, utc_offset);
+#else
+    (void)h; (void)year; (void)month; (void)day;
+    (void)hour; (void)min; (void)sec; (void)msec; (void)utc_offset;
+    return -RIG_ENIMPL;
+#endif
+}
+
+SHIM_API int shim_rig_get_clock(hamlib_shim_handle_t h, int *year, int *month, int *day,
+                                 int *hour, int *min, int *sec, double *msec, int *utc_offset) {
+#ifdef SHIM_HAS_CLOCK
+    RIG *rig = (RIG *)h;
+    if (!rig) return -RIG_EINVAL;
+    return rig_get_clock(rig, year, month, day, hour, min, sec, msec, utc_offset);
+#else
+    (void)h; (void)year; (void)month; (void)day;
+    (void)hour; (void)min; (void)sec; (void)msec; (void)utc_offset;
+    return -RIG_ENIMPL;
+#endif
+}
+
+/* ===== VFO Info (Hamlib >= 4.7.0) ===== */
+
+SHIM_API int shim_rig_get_vfo_info(hamlib_shim_handle_t h, int vfo,
+                                    double *freq, uint64_t *mode,
+                                    long *width, int *split) {
+#ifdef SHIM_HAS_VFO_INFO
+    RIG *rig = (RIG *)h;
+    if (!rig) return -RIG_EINVAL;
+    freq_t f = 0;
+    rmode_t m = 0;
+    pbwidth_t w = 0;
+    split_t s = RIG_SPLIT_OFF;
+    int ret = rig_get_vfo_info(rig, (vfo_t)vfo, &f, &m, &w, &s);
+    if (freq) *freq = (double)f;
+    if (mode) *mode = (uint64_t)m;
+    if (width) *width = (long)w;
+    if (split) *split = (int)s;
+    return ret;
+#else
+    (void)h; (void)vfo; (void)freq; (void)mode; (void)width; (void)split;
+    return -RIG_ENIMPL;
+#endif
 }

@@ -10,7 +10,7 @@ on:
 jobs:
   build:
     env:
-      HAMLIB_VERSION: '4.6.5'
+      HAMLIB_VERSION: '4.7.0'
 
     strategy:
       fail-fast: false

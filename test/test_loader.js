@@ -112,19 +112,31 @@ try {
     test(`新增方法 ${method} 存在`, () => typeof testRig[method] === 'function');
   });
   
+  // Hamlib 4.7.0 新增方法存在性测试
+  console.log('\n🆕 Hamlib 4.7.0 新增方法存在性测试:');
+  const hamlib47Methods = [
+    'setLockMode', 'getLockMode',
+    'setClock', 'getClock',
+    'getVfoInfo'
+  ];
+
+  hamlib47Methods.forEach(method => {
+    test(`Hamlib 4.7.0 方法 ${method} 存在`, () => typeof testRig[method] === 'function');
+  });
+
   // 6. 方法计数测试
   console.log('\n📊 API完整性测试:');
   const instanceMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(testRig))
     .filter(name => name !== 'constructor' && typeof testRig[name] === 'function');
-  
+
   const staticMethods = Object.getOwnPropertyNames(HamLib)
     .filter(name => typeof HamLib[name] === 'function');
-  
+
   const totalMethods = instanceMethods.length + staticMethods.length;
 
-  test(`实例方法数量正确 (80个)`, () => instanceMethods.length === 80);
+  test(`实例方法数量正确 (85个)`, () => instanceMethods.length === 85);
   test(`静态方法数量正确 (4个)`, () => staticMethods.length === 4);
-  test(`总方法数量正确 (84个)`, () => totalMethods === 84);
+  test(`总方法数量正确 (89个)`, () => totalMethods === 89);
 
   console.log(`   📊 实例方法: ${instanceMethods.length}个`);
   console.log(`   📊 静态方法: ${staticMethods.length}个`);

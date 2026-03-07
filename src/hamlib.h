@@ -159,6 +159,17 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
   // Reset Function
   Napi::Value Reset(const Napi::CallbackInfo&);
 
+  // Lock Mode (Hamlib >= 4.7.0)
+  Napi::Value SetLockMode(const Napi::CallbackInfo&);
+  Napi::Value GetLockMode(const Napi::CallbackInfo&);
+
+  // Clock (Hamlib >= 4.7.0)
+  Napi::Value SetClock(const Napi::CallbackInfo&);
+  Napi::Value GetClock(const Napi::CallbackInfo&);
+
+  // VFO Info (Hamlib >= 4.7.0)
+  Napi::Value GetVfoInfo(const Napi::CallbackInfo&);
+
   // Static method to get supported rig models
   static Napi::Value GetSupportedRigs(const Napi::CallbackInfo&);
 

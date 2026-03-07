@@ -22,18 +22,25 @@ libhamlib
 
 shim 层解决 Windows 上 MSVC addon 与 MinGW Hamlib DLL 的跨编译器 ABI 不兼容问题（struct 内存布局差异导致崩溃）。所有平台统一使用 shim，保持代码一致性。
 
-- `src/shim/hamlib_shim.h` — 纯 C 头文件，定义 `hamlib_shim_handle_t`（不透明 `void*` 句柄）和 ~95 个 `shim_rig_*` 函数
+- `src/shim/hamlib_shim.h` — 纯 C 头文件，定义 `hamlib_shim_handle_t`（不透明 `void*` 句柄）和 ~100 个 `shim_rig_*` 函数
 - `src/shim/hamlib_shim.c` — 实现，内部 cast 回 `RIG*` 并调用 Hamlib API
 - `scripts/build-shim.js` — 编译脚本。Linux/macOS: `gcc → .a`（静态链入 addon）；Windows: `MinGW gcc → .dll`（addon 通过 MSVC import lib 动态加载）
 - shim 输出到 `shim-build/` 目录（避免被 node-gyp rebuild 清除 `build/`）
 
 **hamlib.cpp 中无条件编译**，统一通过 `shim_rig_*()` 调用 Hamlib，不直接 `#include <hamlib/rig.h>`，不直接访问 `RIG` 结构体。
 
+### Hamlib 版本与特性探测
+
+- 目标版本：**Hamlib 4.7.0**（Linux/macOS 从源码编译锁定 tag，Windows 下载预编译）
+- `build-shim.js` 编译前扫描 `rig.h` 自动探测可用函数，传递 `-DSHIM_HAS_*` 编译标志
+- `hamlib_shim.c` 中使用 `#ifdef SHIM_HAS_*` 守卫，缺失的 API 返回 `-RIG_ENIMPL`
+- 版本锁定位置：`scripts/build-hamlib.js`（source tag）、`.github/workflows/build.yml`（`HAMLIB_VERSION`）
+
 ### Key Files
 
 | 文件 | 说明 |
 |------|------|
-| `src/shim/hamlib_shim.h/.c` | 纯 C shim 层（~95 个函数） |
+| `src/shim/hamlib_shim.h/.c` | 纯 C shim 层（~100 个函数） |
 | `src/hamlib.cpp` | C++ N-API addon 主实现（~5300 行） |
 | `src/hamlib.h` | C++ 头文件，使用 `void*` 不透明句柄 |
 | `src/addon.cpp` | addon 入口 |

@@ -150,8 +150,9 @@ function cloneHamlib(workDir) {
   }
 
   logger.startSpinner('Cloning Hamlib from GitHub...');
-  exec(`git clone --depth 1 https://github.com/Hamlib/Hamlib.git "${hamlibDir}"`);
-  logger.succeedSpinner('Repository cloned');
+  const hamlibVersion = '4.7.0';
+  exec(`git clone --depth 1 --branch ${hamlibVersion} https://github.com/Hamlib/Hamlib.git "${hamlibDir}"`);
+  logger.succeedSpinner(`Repository cloned (tag ${hamlibVersion})`);
 
   return hamlibDir;
 }

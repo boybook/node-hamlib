@@ -1151,6 +1151,64 @@ declare class HamLib {
    * await rig.reset();         // Default soft reset
    */
   reset(resetType?: 'NONE' | 'SOFT' | 'VFO' | 'MCALL' | 'MASTER'): Promise<number>;
+
+  // ===== Lock Mode (Hamlib >= 4.7.0) =====
+
+  /**
+   * Set lock mode to prevent accidental front-panel changes
+   * @param lock - 0 to unlock, 1 to lock
+   */
+  setLockMode(lock: number): Promise<number>;
+
+  /**
+   * Get current lock mode status
+   * @returns 0 if unlocked, 1 if locked
+   */
+  getLockMode(): Promise<number>;
+
+  // ===== Clock (Hamlib >= 4.7.0) =====
+
+  /**
+   * Set the rig's internal clock
+   */
+  setClock(clock: ClockInfo): Promise<number>;
+
+  /**
+   * Get the rig's internal clock
+   */
+  getClock(): Promise<ClockInfo>;
+
+  // ===== VFO Info (Hamlib >= 4.7.0) =====
+
+  /**
+   * Get comprehensive VFO information in a single call
+   * @param vfo - Optional VFO to query (defaults to current)
+   */
+  getVfoInfo(vfo?: VFO): Promise<VfoInfo>;
+}
+
+/**
+ * Clock information for rig's internal clock
+ */
+interface ClockInfo {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  min: number;
+  sec: number;
+  msec: number;
+  utcOffset: number;
+}
+
+/**
+ * VFO information returned by getVfoInfo()
+ */
+interface VfoInfo {
+  frequency: number;
+  mode: string;
+  bandwidth: number;
+  split: boolean;
 }
 
 /**
@@ -1161,10 +1219,11 @@ declare const nodeHamlib: {
 };
 
 // Export types for use elsewhere
-export { ConnectionInfo, ModeInfo, SupportedRigInfo, AntennaInfo, VFO, RadioMode, MemoryChannelData, 
-         MemoryChannelInfo, SplitModeInfo, SplitStatusInfo, LevelType, FunctionType, 
-         ScanType, VfoOperationType, SerialConfigParam, SerialBaudRate, SerialParity, 
-         SerialHandshake, SerialControlState, PttType, DcdType, SerialConfigOptions, HamLib };
+export { ConnectionInfo, ModeInfo, SupportedRigInfo, AntennaInfo, VFO, RadioMode, MemoryChannelData,
+         MemoryChannelInfo, SplitModeInfo, SplitStatusInfo, LevelType, FunctionType,
+         ScanType, VfoOperationType, SerialConfigParam, SerialBaudRate, SerialParity,
+         SerialHandshake, SerialControlState, PttType, DcdType, SerialConfigOptions,
+         ClockInfo, VfoInfo, HamLib };
 
 // Support both CommonJS and ES module exports
 // @ts-ignore

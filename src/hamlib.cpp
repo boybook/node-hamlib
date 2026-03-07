@@ -3701,6 +3701,17 @@ Napi::Function NodeHamLib::GetClass(Napi::Env env) {
       // Reset Function
       NodeHamLib::InstanceMethod("reset", & NodeHamLib::Reset),
 
+      // Lock Mode (Hamlib >= 4.7.0)
+      NodeHamLib::InstanceMethod("setLockMode", & NodeHamLib::SetLockMode),
+      NodeHamLib::InstanceMethod("getLockMode", & NodeHamLib::GetLockMode),
+
+      // Clock (Hamlib >= 4.7.0)
+      NodeHamLib::InstanceMethod("setClock", & NodeHamLib::SetClock),
+      NodeHamLib::InstanceMethod("getClock", & NodeHamLib::GetClock),
+
+      // VFO Info (Hamlib >= 4.7.0)
+      NodeHamLib::InstanceMethod("getVfoInfo", & NodeHamLib::GetVfoInfo),
+
       NodeHamLib::InstanceMethod("close", & NodeHamLib::Close),
       NodeHamLib::InstanceMethod("destroy", & NodeHamLib::Destroy),
       NodeHamLib::InstanceMethod("getConnectionInfo", & NodeHamLib::GetConnectionInfo),
@@ -5355,6 +5366,275 @@ Napi::Value NodeHamLib::Reset(const Napi::CallbackInfo& info) {
   }
   
   ResetAsyncWorker* asyncWorker = new ResetAsyncWorker(env, this, reset);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+// ===== Lock Mode (Hamlib >= 4.7.0) =====
+
+class SetLockModeAsyncWorker : public HamLibAsyncWorker {
+public:
+    SetLockModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int lock)
+        : HamLibAsyncWorker(env, hamlib_instance), lock_(lock) {}
+
+    void Execute() override {
+        CHECK_RIG_VALID();
+        result_code_ = shim_rig_set_lock_mode(hamlib_instance_->my_rig, lock_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
+        }
+    }
+
+    void OnOK() override {
+        Napi::Env env = Env();
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
+    }
+
+    void OnError(const Napi::Error& e) override {
+        deferred_.Reject(Napi::Error::New(Env(), error_message_).Value());
+    }
+
+private:
+    int lock_;
+};
+
+class GetLockModeAsyncWorker : public HamLibAsyncWorker {
+public:
+    GetLockModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
+        : HamLibAsyncWorker(env, hamlib_instance), lock_(0) {}
+
+    void Execute() override {
+        CHECK_RIG_VALID();
+        result_code_ = shim_rig_get_lock_mode(hamlib_instance_->my_rig, &lock_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
+        }
+    }
+
+    void OnOK() override {
+        Napi::Env env = Env();
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, lock_));
+        }
+    }
+
+    void OnError(const Napi::Error& e) override {
+        deferred_.Reject(Napi::Error::New(Env(), error_message_).Value());
+    }
+
+private:
+    int lock_;
+};
+
+Napi::Value NodeHamLib::SetLockMode(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+
+  if (info.Length() < 1 || !info[0].IsNumber()) {
+    Napi::TypeError::New(env, "Expected lock mode as number").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+
+  int lock = info[0].As<Napi::Number>().Int32Value();
+
+  SetLockModeAsyncWorker* asyncWorker = new SetLockModeAsyncWorker(env, this, lock);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+Napi::Value NodeHamLib::GetLockMode(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+
+  GetLockModeAsyncWorker* asyncWorker = new GetLockModeAsyncWorker(env, this);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+// ===== Clock (Hamlib >= 4.7.0) =====
+
+class SetClockAsyncWorker : public HamLibAsyncWorker {
+public:
+    SetClockAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance,
+                        int year, int month, int day,
+                        int hour, int min, int sec, double msec, int utc_offset)
+        : HamLibAsyncWorker(env, hamlib_instance),
+          year_(year), month_(month), day_(day),
+          hour_(hour), min_(min), sec_(sec), msec_(msec), utc_offset_(utc_offset) {}
+
+    void Execute() override {
+        CHECK_RIG_VALID();
+        result_code_ = shim_rig_set_clock(hamlib_instance_->my_rig,
+                                           year_, month_, day_,
+                                           hour_, min_, sec_, msec_, utc_offset_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
+        }
+    }
+
+    void OnOK() override {
+        Napi::Env env = Env();
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::Number::New(env, result_code_));
+        }
+    }
+
+    void OnError(const Napi::Error& e) override {
+        deferred_.Reject(Napi::Error::New(Env(), error_message_).Value());
+    }
+
+private:
+    int year_, month_, day_, hour_, min_, sec_;
+    double msec_;
+    int utc_offset_;
+};
+
+class GetClockAsyncWorker : public HamLibAsyncWorker {
+public:
+    GetClockAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
+        : HamLibAsyncWorker(env, hamlib_instance),
+          year_(0), month_(0), day_(0),
+          hour_(0), min_(0), sec_(0), msec_(0.0), utc_offset_(0) {}
+
+    void Execute() override {
+        CHECK_RIG_VALID();
+        result_code_ = shim_rig_get_clock(hamlib_instance_->my_rig,
+                                           &year_, &month_, &day_,
+                                           &hour_, &min_, &sec_, &msec_, &utc_offset_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
+        }
+    }
+
+    void OnOK() override {
+        Napi::Env env = Env();
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            Napi::Object obj = Napi::Object::New(env);
+            obj.Set("year", Napi::Number::New(env, year_));
+            obj.Set("month", Napi::Number::New(env, month_));
+            obj.Set("day", Napi::Number::New(env, day_));
+            obj.Set("hour", Napi::Number::New(env, hour_));
+            obj.Set("min", Napi::Number::New(env, min_));
+            obj.Set("sec", Napi::Number::New(env, sec_));
+            obj.Set("msec", Napi::Number::New(env, msec_));
+            obj.Set("utcOffset", Napi::Number::New(env, utc_offset_));
+            deferred_.Resolve(obj);
+        }
+    }
+
+    void OnError(const Napi::Error& e) override {
+        deferred_.Reject(Napi::Error::New(Env(), error_message_).Value());
+    }
+
+private:
+    int year_, month_, day_, hour_, min_, sec_;
+    double msec_;
+    int utc_offset_;
+};
+
+Napi::Value NodeHamLib::SetClock(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+
+  if (info.Length() < 1 || !info[0].IsObject()) {
+    Napi::TypeError::New(env, "Expected clock object with year, month, day, hour, min, sec, msec, utcOffset").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+
+  Napi::Object obj = info[0].As<Napi::Object>();
+
+  auto getInt = [&](const char* key, int defaultVal) -> int {
+    if (obj.Has(key) && obj.Get(key).IsNumber()) {
+      return obj.Get(key).As<Napi::Number>().Int32Value();
+    }
+    return defaultVal;
+  };
+  auto getDouble = [&](const char* key, double defaultVal) -> double {
+    if (obj.Has(key) && obj.Get(key).IsNumber()) {
+      return obj.Get(key).As<Napi::Number>().DoubleValue();
+    }
+    return defaultVal;
+  };
+
+  int year = getInt("year", 0);
+  int month = getInt("month", 0);
+  int day = getInt("day", 0);
+  int hour = getInt("hour", 0);
+  int min = getInt("min", 0);
+  int sec = getInt("sec", 0);
+  double msec = getDouble("msec", 0.0);
+  int utcOffset = getInt("utcOffset", 0);
+
+  SetClockAsyncWorker* asyncWorker = new SetClockAsyncWorker(env, this,
+      year, month, day, hour, min, sec, msec, utcOffset);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+Napi::Value NodeHamLib::GetClock(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+
+  GetClockAsyncWorker* asyncWorker = new GetClockAsyncWorker(env, this);
+  asyncWorker->Queue();
+  return asyncWorker->GetPromise();
+}
+
+// ===== VFO Info (Hamlib >= 4.7.0) =====
+
+class GetVfoInfoAsyncWorker : public HamLibAsyncWorker {
+public:
+    GetVfoInfoAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
+        : HamLibAsyncWorker(env, hamlib_instance),
+          vfo_(vfo), freq_(0.0), mode_(0), width_(0), split_(0) {}
+
+    void Execute() override {
+        CHECK_RIG_VALID();
+        result_code_ = shim_rig_get_vfo_info(hamlib_instance_->my_rig, vfo_,
+                                              &freq_, &mode_, &width_, &split_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
+        }
+    }
+
+    void OnOK() override {
+        Napi::Env env = Env();
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            Napi::Object obj = Napi::Object::New(env);
+            obj.Set("frequency", Napi::Number::New(env, freq_));
+            obj.Set("mode", Napi::String::New(env, shim_rig_strrmode(static_cast<int>(mode_))));
+            obj.Set("bandwidth", Napi::Number::New(env, static_cast<double>(width_)));
+            obj.Set("split", Napi::Boolean::New(env, split_ != 0));
+            deferred_.Resolve(obj);
+        }
+    }
+
+    void OnError(const Napi::Error& e) override {
+        deferred_.Reject(Napi::Error::New(Env(), error_message_).Value());
+    }
+
+private:
+    int vfo_;
+    double freq_;
+    uint64_t mode_;
+    long width_;
+    int split_;
+};
+
+Napi::Value NodeHamLib::GetVfoInfo(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+
+  int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
+
+  GetVfoInfoAsyncWorker* asyncWorker = new GetVfoInfoAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
   return asyncWorker->GetPromise();
 }

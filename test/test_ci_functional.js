@@ -199,6 +199,67 @@ async function run() {
     assert(ps === 1, `expected 1, got ${ps}`);
   });
 
+  // --- Lock Mode (Hamlib >= 4.7.0) ---
+  console.log('\n[Lock Mode]');
+
+  await test('setLockMode(0) succeeds or returns ENIMPL', async () => {
+    try {
+      await rig.setLockMode(0);
+    } catch (e) {
+      if (!e.message.toLowerCase().includes('not implemented') &&
+          !e.message.toLowerCase().includes('enimpl')) throw e;
+    }
+  });
+
+  await test('getLockMode returns number or ENIMPL', async () => {
+    try {
+      const lock = await rig.getLockMode();
+      assert(typeof lock === 'number', `expected number, got ${typeof lock}`);
+    } catch (e) {
+      if (!e.message.toLowerCase().includes('not implemented') &&
+          !e.message.toLowerCase().includes('enimpl')) throw e;
+    }
+  });
+
+  // --- Clock (Hamlib >= 4.7.0) ---
+  console.log('\n[Clock]');
+
+  await test('setClock succeeds or returns ENIMPL', async () => {
+    try {
+      await rig.setClock({ year: 2026, month: 3, day: 7, hour: 12, min: 0, sec: 0, msec: 0, utcOffset: 0 });
+    } catch (e) {
+      if (!e.message.toLowerCase().includes('not implemented') &&
+          !e.message.toLowerCase().includes('enimpl')) throw e;
+    }
+  });
+
+  await test('getClock returns object or ENIMPL', async () => {
+    try {
+      const clock = await rig.getClock();
+      assert(typeof clock === 'object', `expected object, got ${typeof clock}`);
+      assert(clock.hasOwnProperty('year'), 'missing year field');
+    } catch (e) {
+      if (!e.message.toLowerCase().includes('not implemented') &&
+          !e.message.toLowerCase().includes('enimpl')) throw e;
+    }
+  });
+
+  // --- VFO Info (Hamlib >= 4.7.0) ---
+  console.log('\n[VFO Info]');
+
+  await test('getVfoInfo returns object or ENIMPL', async () => {
+    try {
+      const info = await rig.getVfoInfo('VFO-A');
+      assert(typeof info === 'object', `expected object, got ${typeof info}`);
+      assert(info.hasOwnProperty('frequency'), 'missing frequency field');
+      assert(info.hasOwnProperty('mode'), 'missing mode field');
+      assert(info.hasOwnProperty('split'), 'missing split field');
+    } catch (e) {
+      if (!e.message.toLowerCase().includes('not implemented') &&
+          !e.message.toLowerCase().includes('enimpl')) throw e;
+    }
+  });
+
   // --- Cleanup ---
   console.log('\n[Cleanup]');
 

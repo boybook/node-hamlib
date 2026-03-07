@@ -112,6 +112,35 @@ function findHamlibLib() {
   throw new Error('Cannot find Hamlib library directory. Set HAMLIB_PREFIX.');
 }
 
+/**
+ * Detect available Hamlib features by scanning rig.h for function declarations.
+ * Returns an array of -DSHIM_HAS_* flags to pass to the compiler.
+ */
+function detectHamlibFeatures(includeDir) {
+  const rigH = path.join(includeDir, 'hamlib', 'rig.h');
+  if (!fs.existsSync(rigH)) {
+    log('WARNING: rig.h not found, skipping feature detection');
+    return [];
+  }
+  const content = fs.readFileSync(rigH, 'utf-8');
+  const checks = [
+    ['SHIM_HAS_GET_DEBUG',       'rig_get_debug'],
+    ['SHIM_HAS_SPLIT_FREQ_MODE', 'rig_set_split_freq_mode'],
+    ['SHIM_HAS_STOP_VOICE_MEM',  'rig_stop_voice_mem'],
+    ['SHIM_HAS_LOCK_MODE',       'rig_set_lock_mode'],
+    ['SHIM_HAS_CLOCK',           'rig_set_clock'],
+    ['SHIM_HAS_VFO_INFO',        'rig_get_vfo_info'],
+  ];
+  const features = [];
+  for (const [define, func] of checks) {
+    if (content.includes(func)) {
+      features.push(`-D${define}`);
+    }
+  }
+  log(`Detected Hamlib features: ${features.length > 0 ? features.map(f => f.slice(2)).join(', ') : 'none'}`);
+  return features;
+}
+
 function findMingwGcc() {
   // Try MINGW_CC env var first
   if (process.env.MINGW_CC) return process.env.MINGW_CC;
@@ -150,11 +179,15 @@ function buildWindows() {
   const shimDll = path.join(buildDir, 'hamlib_shim.dll').replace(/\\/g, '/');
   const shimDef = path.join(buildDir, 'hamlib_shim.def').replace(/\\/g, '/');
 
+  // Detect available Hamlib features
+  const featureFlags = detectHamlibFeatures(includeDir);
+
   // Compile shim DLL with MinGW
   const gccCmd = [
     gcc,
     '-shared', '-O2',
     '-DHAMLIB_SHIM_BUILD',
+    ...featureFlags,
     `-I${includeDir.replace(/\\/g, '/')}`,
     `-L${libDir.replace(/\\/g, '/')}`,
     '-o', shimDll,
@@ -258,6 +291,9 @@ function buildUnix() {
 
   ensureDir(buildDir);
 
+  // Detect available Hamlib features
+  const featureFlags = detectHamlibFeatures(includeDir);
+
   const shimSrc = path.join(shimDir, 'hamlib_shim.c');
   const shimObj = path.join(buildDir, 'hamlib_shim.o');
   const shimLib = path.join(buildDir, 'libhamlib_shim.a');
@@ -267,6 +303,7 @@ function buildUnix() {
     cc,
     '-c', '-fPIC', '-O2',
     '-DHAMLIB_SHIM_BUILD',
+    ...featureFlags,
     `-I${includeDir}`,
     '-o', shimObj,
     shimSrc
