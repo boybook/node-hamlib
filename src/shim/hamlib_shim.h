@@ -83,6 +83,16 @@ typedef void* hamlib_shim_handle_t;
 #define SHIM_RIG_SCAN_DELTA  (1<<3)
 #define SHIM_RIG_SCAN_PRIO   (1<<4)
 
+/* Parm constants (bit positions for setting_t / uint64_t) */
+#define SHIM_RIG_PARM_ANN        (1ULL << 0)
+#define SHIM_RIG_PARM_APO        (1ULL << 1)
+#define SHIM_RIG_PARM_BACKLIGHT  (1ULL << 2)
+#define SHIM_RIG_PARM_BEEP       (1ULL << 4)
+#define SHIM_RIG_PARM_TIME       (1ULL << 5)
+#define SHIM_RIG_PARM_BAT        (1ULL << 6)
+#define SHIM_RIG_PARM_KEYLIGHT   (1ULL << 7)
+#define SHIM_RIG_PARM_SCREENSAVER (1ULL << 8)
+
 /* Transceive mode */
 #define SHIM_RIG_TRN_POLL    1
 
@@ -521,6 +531,32 @@ SHIM_API int shim_rig_get_clock(hamlib_shim_handle_t h, int *year, int *month, i
 SHIM_API int shim_rig_get_vfo_info(hamlib_shim_handle_t h, int vfo,
                                     double *freq, uint64_t *mode,
                                     long *width, int *split, int *satmode);
+
+/* ===== Rig info / Raw / Conf ===== */
+
+SHIM_API const char* shim_rig_get_info(hamlib_shim_handle_t h);
+SHIM_API int shim_rig_send_raw(hamlib_shim_handle_t h,
+    const unsigned char* send, int send_len,
+    unsigned char* reply, int reply_len, const unsigned char* term);
+SHIM_API int shim_rig_set_conf(hamlib_shim_handle_t h, const char* name, const char* val);
+SHIM_API int shim_rig_get_conf(hamlib_shim_handle_t h, const char* name, char* buf, int buflen);
+
+/* ===== Passband / Resolution ===== */
+
+SHIM_API int shim_rig_passband_normal(hamlib_shim_handle_t h, int mode);
+SHIM_API int shim_rig_get_resolution(hamlib_shim_handle_t h, int mode);
+
+/* ===== Capability queries (parm / vfo_ops / scan) ===== */
+
+SHIM_API uint64_t shim_rig_get_caps_has_get_parm(hamlib_shim_handle_t h);
+SHIM_API uint64_t shim_rig_get_caps_has_set_parm(hamlib_shim_handle_t h);
+SHIM_API int shim_rig_get_caps_vfo_ops(hamlib_shim_handle_t h);
+SHIM_API int shim_rig_get_caps_has_scan(hamlib_shim_handle_t h);
+
+/* ===== Static info ===== */
+
+SHIM_API const char* shim_rig_copyright(void);
+SHIM_API const char* shim_rig_license(void);
 
 #ifdef __cplusplus
 }

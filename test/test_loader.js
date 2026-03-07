@@ -124,6 +124,26 @@ try {
     test(`Hamlib 4.7.0 方法 ${method} 存在`, () => typeof testRig[method] === 'function');
   });
 
+  // 新增 API 方法存在性测试
+  console.log('\n🆕 补齐 API 方法存在性测试:');
+  const newApiMethods = [
+    'getInfo', 'sendRaw', 'setConf', 'getConf',
+    'getPassbandNormal', 'getPassbandNarrow', 'getPassbandWide',
+    'getResolution',
+    'getSupportedParms', 'getSupportedVfoOps', 'getSupportedScanTypes'
+  ];
+
+  newApiMethods.forEach(method => {
+    test(`新增方法 ${method} 存在`, () => typeof testRig[method] === 'function');
+  });
+
+  // 新增静态方法测试
+  console.log('\n🆕 新增静态方法测试:');
+  const newStaticMethods = ['getCopyright', 'getLicense'];
+  newStaticMethods.forEach(method => {
+    test(`静态方法 ${method} 存在`, () => typeof HamLib[method] === 'function');
+  });
+
   // 6. 方法计数测试
   console.log('\n📊 API完整性测试:');
   const instanceMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(testRig))
@@ -134,9 +154,9 @@ try {
 
   const totalMethods = instanceMethods.length + staticMethods.length;
 
-  test(`实例方法数量正确 (85个)`, () => instanceMethods.length === 85);
-  test(`静态方法数量正确 (4个)`, () => staticMethods.length === 4);
-  test(`总方法数量正确 (89个)`, () => totalMethods === 89);
+  test(`实例方法数量正确 (96个)`, () => instanceMethods.length === 96);
+  test(`静态方法数量正确 (6个)`, () => staticMethods.length === 6);
+  test(`总方法数量正确 (102个)`, () => totalMethods === 102);
 
   console.log(`   📊 实例方法: ${instanceMethods.length}个`);
   console.log(`   📊 静态方法: ${staticMethods.length}个`);

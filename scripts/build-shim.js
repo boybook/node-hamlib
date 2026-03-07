@@ -130,6 +130,8 @@ function detectHamlibFeatures(includeDir) {
     ['SHIM_HAS_LOCK_MODE',       'rig_set_lock_mode'],
     ['SHIM_HAS_CLOCK',           'rig_set_clock'],
     ['SHIM_HAS_VFO_INFO',        'rig_get_vfo_info'],
+    ['SHIM_HAS_SEND_RAW',        'rig_send_raw'],
+    ['SHIM_HAS_CONF2',           'rig_get_conf2'],
   ];
   const features = [];
   for (const [define, func] of checks) {

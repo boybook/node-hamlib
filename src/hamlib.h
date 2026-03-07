@@ -170,6 +170,23 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
   // VFO Info (Hamlib >= 4.7.0)
   Napi::Value GetVfoInfo(const Napi::CallbackInfo&);
 
+  // Rig Info / Raw / Conf (async)
+  Napi::Value GetInfo(const Napi::CallbackInfo&);
+  Napi::Value SendRaw(const Napi::CallbackInfo&);
+  Napi::Value SetConf(const Napi::CallbackInfo&);
+  Napi::Value GetConf(const Napi::CallbackInfo&);
+
+  // Passband / Resolution (sync)
+  Napi::Value GetPassbandNormal(const Napi::CallbackInfo&);
+  Napi::Value GetPassbandNarrow(const Napi::CallbackInfo&);
+  Napi::Value GetPassbandWide(const Napi::CallbackInfo&);
+  Napi::Value GetResolution(const Napi::CallbackInfo&);
+
+  // Capability queries (sync)
+  Napi::Value GetSupportedParms(const Napi::CallbackInfo&);
+  Napi::Value GetSupportedVfoOps(const Napi::CallbackInfo&);
+  Napi::Value GetSupportedScanTypes(const Napi::CallbackInfo&);
+
   // Static method to get supported rig models
   static Napi::Value GetSupportedRigs(const Napi::CallbackInfo&);
 
@@ -179,6 +196,10 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
   // Static methods to control debug level
   static Napi::Value SetDebugLevel(const Napi::CallbackInfo&);
   static Napi::Value GetDebugLevel(const Napi::CallbackInfo&);
+
+  // Static copyright/license
+  static Napi::Value GetCopyright(const Napi::CallbackInfo&);
+  static Napi::Value GetLicense(const Napi::CallbackInfo&);
 
   static Napi::Function GetClass(Napi::Env);
 

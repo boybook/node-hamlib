@@ -949,3 +949,89 @@ SHIM_API int shim_rig_get_vfo_info(hamlib_shim_handle_t h, int vfo,
     return -RIG_ENIMPL;
 #endif
 }
+
+/* ===== Rig info / Raw / Conf ===== */
+
+SHIM_API const char* shim_rig_get_info(hamlib_shim_handle_t h) {
+    RIG *rig = (RIG *)h;
+    if (!rig) return "";
+    const char *info = rig_get_info(rig);
+    return info ? info : "";
+}
+
+SHIM_API int shim_rig_send_raw(hamlib_shim_handle_t h,
+    const unsigned char* send, int send_len,
+    unsigned char* reply, int reply_len, const unsigned char* term) {
+#ifdef SHIM_HAS_SEND_RAW
+    RIG *rig = (RIG *)h;
+    if (!rig) return -RIG_EINVAL;
+    return rig_send_raw(rig, send, send_len, reply, reply_len, (unsigned char*)term);
+#else
+    (void)h; (void)send; (void)send_len; (void)reply; (void)reply_len; (void)term;
+    return -RIG_ENIMPL;
+#endif
+}
+
+SHIM_API int shim_rig_set_conf(hamlib_shim_handle_t h, const char* name, const char* val) {
+    RIG *rig = (RIG *)h;
+    if (!rig || !name || !val) return -RIG_EINVAL;
+    token_t token = rig_token_lookup(rig, name);
+    if (token == 0) return -RIG_EINVAL;
+    return rig_set_conf(rig, token, val);
+}
+
+SHIM_API int shim_rig_get_conf(hamlib_shim_handle_t h, const char* name, char* buf, int buflen) {
+    RIG *rig = (RIG *)h;
+    if (!rig || !name || !buf || buflen <= 0) return -RIG_EINVAL;
+    token_t token = rig_token_lookup(rig, name);
+    if (token == 0) return -RIG_EINVAL;
+#ifdef SHIM_HAS_CONF2
+    return rig_get_conf2(rig, token, buf, buflen);
+#else
+    return rig_get_conf(rig, token, buf);
+#endif
+}
+
+/* ===== Passband / Resolution ===== */
+
+SHIM_API int shim_rig_passband_normal(hamlib_shim_handle_t h, int mode) {
+    return (int)rig_passband_normal((RIG*)h, (rmode_t)mode);
+}
+
+SHIM_API int shim_rig_get_resolution(hamlib_shim_handle_t h, int mode) {
+    RIG *rig = (RIG *)h;
+    if (!rig) return 0;
+    return (int)rig_get_resolution(rig, (rmode_t)mode);
+}
+
+/* ===== Capability queries (parm / vfo_ops / scan) ===== */
+
+SHIM_API uint64_t shim_rig_get_caps_has_get_parm(hamlib_shim_handle_t h) {
+    RIG *rig = (RIG *)h;
+    return (uint64_t)(rig->caps->has_get_parm);
+}
+
+SHIM_API uint64_t shim_rig_get_caps_has_set_parm(hamlib_shim_handle_t h) {
+    RIG *rig = (RIG *)h;
+    return (uint64_t)(rig->caps->has_set_parm);
+}
+
+SHIM_API int shim_rig_get_caps_vfo_ops(hamlib_shim_handle_t h) {
+    RIG *rig = (RIG *)h;
+    return (int)(rig->caps->vfo_ops);
+}
+
+SHIM_API int shim_rig_get_caps_has_scan(hamlib_shim_handle_t h) {
+    RIG *rig = (RIG *)h;
+    return (int)(rig->caps->scan_ops);
+}
+
+/* ===== Static info ===== */
+
+SHIM_API const char* shim_rig_copyright(void) {
+    return rig_copyright();
+}
+
+SHIM_API const char* shim_rig_license(void) {
+    return rig_license();
+}

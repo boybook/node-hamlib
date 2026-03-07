@@ -1152,6 +1152,102 @@ declare class HamLib {
    */
   reset(resetType?: 'NONE' | 'SOFT' | 'VFO' | 'MCALL' | 'MASTER'): Promise<number>;
 
+  // ===== Rig Info / Raw / Conf (async) =====
+
+  /**
+   * Get rig identification info (model, firmware version, etc.)
+   * @returns Rig info string from the backend
+   */
+  getInfo(): Promise<string>;
+
+  /**
+   * Send raw command bytes and receive reply
+   * @param data Raw command data to send
+   * @param replyMaxLen Maximum reply length in bytes
+   * @param terminator Optional terminator bytes
+   * @returns Reply data as Buffer
+   */
+  sendRaw(data: Buffer, replyMaxLen: number, terminator?: Buffer): Promise<Buffer>;
+
+  /**
+   * Set a backend configuration parameter
+   * @param name Configuration token name
+   * @param value Configuration value
+   * @returns Success status
+   */
+  setConf(name: string, value: string): Promise<number>;
+
+  /**
+   * Get a backend configuration parameter
+   * @param name Configuration token name
+   * @returns Configuration value
+   */
+  getConf(name: string): Promise<string>;
+
+  // ===== Passband / Resolution (sync) =====
+
+  /**
+   * Get normal passband width for a given mode
+   * @param mode Radio mode
+   * @returns Normal passband width in Hz
+   */
+  getPassbandNormal(mode: RadioMode): number;
+
+  /**
+   * Get narrow passband width for a given mode
+   * @param mode Radio mode
+   * @returns Narrow passband width in Hz
+   */
+  getPassbandNarrow(mode: RadioMode): number;
+
+  /**
+   * Get wide passband width for a given mode
+   * @param mode Radio mode
+   * @returns Wide passband width in Hz
+   */
+  getPassbandWide(mode: RadioMode): number;
+
+  /**
+   * Get frequency resolution (step) for a given mode
+   * @param mode Radio mode
+   * @returns Resolution in Hz
+   */
+  getResolution(mode: RadioMode): number;
+
+  // ===== Capability queries (sync) =====
+
+  /**
+   * Get list of supported parameter types
+   * @returns Array of supported parameter type names
+   */
+  getSupportedParms(): string[];
+
+  /**
+   * Get list of supported VFO operations
+   * @returns Array of supported VFO operation types
+   */
+  getSupportedVfoOps(): VfoOperationType[];
+
+  /**
+   * Get list of supported scan types
+   * @returns Array of supported scan types
+   */
+  getSupportedScanTypes(): ScanType[];
+
+  // ===== Static: Copyright / License =====
+
+  /**
+   * Get Hamlib copyright information
+   * @static
+   */
+  static getCopyright(): string;
+
+  /**
+   * Get Hamlib license information
+   * @static
+   */
+  static getLicense(): string;
+
   // ===== Lock Mode (Hamlib >= 4.7.0) =====
 
   /**

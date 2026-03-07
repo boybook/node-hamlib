@@ -260,6 +260,99 @@ async function run() {
     }
   });
 
+  // --- New API: getInfo ---
+  console.log('\n[Rig Info]');
+
+  await test('getInfo returns string', async () => {
+    const info = await rig.getInfo();
+    assert(typeof info === 'string', `expected string, got ${typeof info}`);
+  });
+
+  // --- New API: sendRaw ---
+  console.log('\n[Send Raw]');
+
+  await test('sendRaw succeeds or returns ENIMPL', async () => {
+    try {
+      const data = Buffer.from([0xFE, 0xFE]);
+      await rig.sendRaw(data, 64);
+    } catch (e) {
+      if (!e.message.toLowerCase().includes('not implemented') &&
+          !e.message.toLowerCase().includes('enimpl') &&
+          !e.message.toLowerCase().includes('protocol') &&
+          !e.message.toLowerCase().includes('i/o')) throw e;
+    }
+  });
+
+  // --- New API: setConf / getConf ---
+  console.log('\n[Configuration]');
+
+  await test('setConf/getConf or returns error for invalid token', async () => {
+    try {
+      await rig.setConf('rig_pathname', '/dev/null');
+      const val = await rig.getConf('rig_pathname');
+      assert(typeof val === 'string', `expected string, got ${typeof val}`);
+    } catch (e) {
+      // Invalid token or unsupported is acceptable
+      if (!e.message.toLowerCase().includes('invalid') &&
+          !e.message.toLowerCase().includes('not implemented') &&
+          !e.message.toLowerCase().includes('enimpl')) throw e;
+    }
+  });
+
+  // --- New API: Passband methods ---
+  console.log('\n[Passband / Resolution]');
+
+  await test('getPassbandNormal returns number for USB', () => {
+    const pb = rig.getPassbandNormal('USB');
+    assert(typeof pb === 'number', `expected number, got ${typeof pb}`);
+  });
+
+  await test('getPassbandNarrow returns number for USB', () => {
+    const pb = rig.getPassbandNarrow('USB');
+    assert(typeof pb === 'number', `expected number, got ${typeof pb}`);
+  });
+
+  await test('getPassbandWide returns number for USB', () => {
+    const pb = rig.getPassbandWide('USB');
+    assert(typeof pb === 'number', `expected number, got ${typeof pb}`);
+  });
+
+  await test('getResolution returns number for USB', () => {
+    const res = rig.getResolution('USB');
+    assert(typeof res === 'number', `expected number, got ${typeof res}`);
+  });
+
+  // --- New API: Capability queries ---
+  console.log('\n[Capability Queries]');
+
+  await test('getSupportedParms returns array', () => {
+    const parms = rig.getSupportedParms();
+    assert(Array.isArray(parms), `expected array, got ${typeof parms}`);
+  });
+
+  await test('getSupportedVfoOps returns array', () => {
+    const ops = rig.getSupportedVfoOps();
+    assert(Array.isArray(ops), `expected array, got ${typeof ops}`);
+  });
+
+  await test('getSupportedScanTypes returns array', () => {
+    const types = rig.getSupportedScanTypes();
+    assert(Array.isArray(types), `expected array, got ${typeof types}`);
+  });
+
+  // --- New API: Static methods ---
+  console.log('\n[Static Copyright/License]');
+
+  await test('getCopyright returns non-empty string', () => {
+    const copyright = HamLib.getCopyright();
+    assert(typeof copyright === 'string' && copyright.length > 0, `got: "${copyright}"`);
+  });
+
+  await test('getLicense returns non-empty string', () => {
+    const license = HamLib.getLicense();
+    assert(typeof license === 'string' && license.length > 0, `got: "${license}"`);
+  });
+
   // --- Cleanup ---
   console.log('\n[Cleanup]');
 
