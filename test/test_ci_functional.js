@@ -353,6 +353,85 @@ async function run() {
     assert(typeof license === 'string' && license.length > 0, `got: "${license}"`);
   });
 
+  // --- Capability Query Batch 2 ---
+  console.log('\n[Capability Query - Batch 2]');
+
+  await test('getPreampValues returns number[]', () => {
+    const vals = rig.getPreampValues();
+    assert(Array.isArray(vals), `expected array, got ${typeof vals}`);
+    vals.forEach((v, i) => assert(typeof v === 'number', `element ${i} not number`));
+  });
+
+  await test('getAttenuatorValues returns number[]', () => {
+    const vals = rig.getAttenuatorValues();
+    assert(Array.isArray(vals), `expected array, got ${typeof vals}`);
+    vals.forEach((v, i) => assert(typeof v === 'number', `element ${i} not number`));
+  });
+
+  await test('getMaxRit returns number >= 0', () => {
+    const val = rig.getMaxRit();
+    assert(typeof val === 'number' && val >= 0, `expected number >= 0, got ${val}`);
+  });
+
+  await test('getMaxXit returns number >= 0', () => {
+    const val = rig.getMaxXit();
+    assert(typeof val === 'number' && val >= 0, `expected number >= 0, got ${val}`);
+  });
+
+  await test('getMaxIfShift returns number >= 0', () => {
+    const val = rig.getMaxIfShift();
+    assert(typeof val === 'number' && val >= 0, `expected number >= 0, got ${val}`);
+  });
+
+  await test('getAvailableCtcssTones returns number[]', () => {
+    const tones = rig.getAvailableCtcssTones();
+    assert(Array.isArray(tones), `expected array, got ${typeof tones}`);
+    if (tones.length > 0) {
+      assert(tones[0] > 0, `first tone should be > 0, got ${tones[0]}`);
+    }
+  });
+
+  await test('getAvailableDcsCodes returns number[]', () => {
+    const codes = rig.getAvailableDcsCodes();
+    assert(Array.isArray(codes), `expected array, got ${typeof codes}`);
+    if (codes.length > 0) {
+      assert(codes[0] > 0, `first code should be > 0, got ${codes[0]}`);
+    }
+  });
+
+  await test('getFrequencyRanges returns {rx, tx}', () => {
+    const ranges = rig.getFrequencyRanges();
+    assert(typeof ranges === 'object', `expected object, got ${typeof ranges}`);
+    assert(Array.isArray(ranges.rx), `expected rx array, got ${typeof ranges.rx}`);
+    assert(Array.isArray(ranges.tx), `expected tx array, got ${typeof ranges.tx}`);
+    if (ranges.rx.length > 0) {
+      const r = ranges.rx[0];
+      assert(r.startFreq !== undefined, 'missing startFreq');
+      assert(r.endFreq !== undefined, 'missing endFreq');
+      assert(Array.isArray(r.modes), 'modes should be array');
+    }
+  });
+
+  await test('getTuningSteps returns TuningStepInfo[]', () => {
+    const steps = rig.getTuningSteps();
+    assert(Array.isArray(steps), `expected array, got ${typeof steps}`);
+    if (steps.length > 0) {
+      const s = steps[0];
+      assert(Array.isArray(s.modes), 'modes should be array');
+      assert(typeof s.stepHz === 'number', `stepHz should be number, got ${typeof s.stepHz}`);
+    }
+  });
+
+  await test('getFilterList returns FilterInfo[]', () => {
+    const filters = rig.getFilterList();
+    assert(Array.isArray(filters), `expected array, got ${typeof filters}`);
+    if (filters.length > 0) {
+      const f = filters[0];
+      assert(Array.isArray(f.modes), 'modes should be array');
+      assert(typeof f.width === 'number', `width should be number, got ${typeof f.width}`);
+    }
+  });
+
   // --- Cleanup ---
   console.log('\n[Cleanup]');
 

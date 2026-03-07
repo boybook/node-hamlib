@@ -67,6 +67,46 @@ type VFO = 'VFO-A' | 'VFO-B';
 type RadioMode = 'USB' | 'LSB' | 'FM' | 'PKTFM' | 'AM' | 'CW' | 'RTTY' | 'DIG' | string;
 
 /**
+ * Frequency range information
+ */
+interface FrequencyRange {
+  /** Start frequency in Hz */
+  startFreq: number;
+  /** End frequency in Hz */
+  endFreq: number;
+  /** Supported modes for this range */
+  modes: RadioMode[];
+  /** Minimum power in mW */
+  lowPower: number;
+  /** Maximum power in mW */
+  highPower: number;
+  /** VFO bitmask */
+  vfo: number;
+  /** Antenna bitmask */
+  antenna: number;
+}
+
+/**
+ * Tuning step information
+ */
+interface TuningStepInfo {
+  /** Modes this step applies to */
+  modes: RadioMode[];
+  /** Step size in Hz */
+  stepHz: number;
+}
+
+/**
+ * Filter information
+ */
+interface FilterInfo {
+  /** Modes this filter applies to */
+  modes: RadioMode[];
+  /** Filter width in Hz */
+  width: number;
+}
+
+/**
  * Hamlib debug level type
  * Controls the verbosity of Hamlib library debug output
  */
@@ -1233,6 +1273,65 @@ declare class HamLib {
    * @returns Array of supported scan types
    */
   getSupportedScanTypes(): ScanType[];
+
+  // ===== Capability Queries - Batch 2 (sync) =====
+
+  /**
+   * Get supported preamplifier values
+   * @returns Array of preamp dB values
+   */
+  getPreampValues(): number[];
+
+  /**
+   * Get supported attenuator values
+   * @returns Array of attenuator dB values
+   */
+  getAttenuatorValues(): number[];
+
+  /**
+   * Get maximum RIT offset supported
+   * @returns Maximum RIT offset in Hz
+   */
+  getMaxRit(): number;
+
+  /**
+   * Get maximum XIT offset supported
+   * @returns Maximum XIT offset in Hz
+   */
+  getMaxXit(): number;
+
+  /**
+   * Get maximum IF shift supported
+   * @returns Maximum IF shift in Hz
+   */
+  getMaxIfShift(): number;
+
+  /**
+   * Get list of available CTCSS tone frequencies
+   * @returns Array of CTCSS tones in Hz
+   */
+  getAvailableCtcssTones(): number[];
+
+  /**
+   * Get list of available DCS codes
+   * @returns Array of DCS codes
+   */
+  getAvailableDcsCodes(): number[];
+
+  /**
+   * Get supported frequency ranges for RX and TX
+   */
+  getFrequencyRanges(): { rx: FrequencyRange[]; tx: FrequencyRange[] };
+
+  /**
+   * Get supported tuning steps per mode
+   */
+  getTuningSteps(): TuningStepInfo[];
+
+  /**
+   * Get supported filter widths per mode
+   */
+  getFilterList(): FilterInfo[];
 
   // ===== Static: Copyright / License =====
 

@@ -187,6 +187,18 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
   Napi::Value GetSupportedVfoOps(const Napi::CallbackInfo&);
   Napi::Value GetSupportedScanTypes(const Napi::CallbackInfo&);
 
+  // Capability queries - batch 2 (sync)
+  Napi::Value GetPreampValues(const Napi::CallbackInfo&);
+  Napi::Value GetAttenuatorValues(const Napi::CallbackInfo&);
+  Napi::Value GetMaxRit(const Napi::CallbackInfo&);
+  Napi::Value GetMaxXit(const Napi::CallbackInfo&);
+  Napi::Value GetMaxIfShift(const Napi::CallbackInfo&);
+  Napi::Value GetAvailableCtcssTones(const Napi::CallbackInfo&);
+  Napi::Value GetAvailableDcsCodes(const Napi::CallbackInfo&);
+  Napi::Value GetFrequencyRanges(const Napi::CallbackInfo&);
+  Napi::Value GetTuningSteps(const Napi::CallbackInfo&);
+  Napi::Value GetFilterList(const Napi::CallbackInfo&);
+
   // Static method to get supported rig models
   static Napi::Value GetSupportedRigs(const Napi::CallbackInfo&);
 

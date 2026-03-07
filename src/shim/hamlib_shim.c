@@ -1026,6 +1026,138 @@ SHIM_API int shim_rig_get_caps_has_scan(hamlib_shim_handle_t h) {
     return (int)(rig->caps->scan_ops);
 }
 
+/* ===== Capability Query: Preamp/Attenuator/Max values ===== */
+
+SHIM_API int shim_rig_get_caps_preamp(hamlib_shim_handle_t h, int* out, int max_count) {
+    RIG *rig = (RIG *)h;
+    if (!rig || !out || max_count <= 0) return 0;
+    int count = 0;
+    for (int i = 0; i < HAMLIB_MAXDBLSTSIZ && rig->caps->preamp[i] != 0 && count < max_count; i++) {
+        out[count++] = rig->caps->preamp[i];
+    }
+    return count;
+}
+
+SHIM_API int shim_rig_get_caps_attenuator(hamlib_shim_handle_t h, int* out, int max_count) {
+    RIG *rig = (RIG *)h;
+    if (!rig || !out || max_count <= 0) return 0;
+    int count = 0;
+    for (int i = 0; i < HAMLIB_MAXDBLSTSIZ && rig->caps->attenuator[i] != 0 && count < max_count; i++) {
+        out[count++] = rig->caps->attenuator[i];
+    }
+    return count;
+}
+
+SHIM_API long shim_rig_get_caps_max_rit(hamlib_shim_handle_t h) {
+    RIG *rig = (RIG *)h;
+    if (!rig) return 0;
+    return (long)rig->caps->max_rit;
+}
+
+SHIM_API long shim_rig_get_caps_max_xit(hamlib_shim_handle_t h) {
+    RIG *rig = (RIG *)h;
+    if (!rig) return 0;
+    return (long)rig->caps->max_xit;
+}
+
+SHIM_API long shim_rig_get_caps_max_ifshift(hamlib_shim_handle_t h) {
+    RIG *rig = (RIG *)h;
+    if (!rig) return 0;
+    return (long)rig->caps->max_ifshift;
+}
+
+/* ===== Capability Query: CTCSS/DCS lists ===== */
+
+SHIM_API int shim_rig_get_caps_ctcss_list(hamlib_shim_handle_t h, unsigned int* out, int max_count) {
+    RIG *rig = (RIG *)h;
+    if (!rig || !out || max_count <= 0) return 0;
+    if (!rig->caps->ctcss_list) return 0;
+    int count = 0;
+    for (int i = 0; rig->caps->ctcss_list[i] != 0 && count < max_count; i++) {
+        out[count++] = rig->caps->ctcss_list[i];
+    }
+    return count;
+}
+
+SHIM_API int shim_rig_get_caps_dcs_list(hamlib_shim_handle_t h, unsigned int* out, int max_count) {
+    RIG *rig = (RIG *)h;
+    if (!rig || !out || max_count <= 0) return 0;
+    if (!rig->caps->dcs_list) return 0;
+    int count = 0;
+    for (int i = 0; rig->caps->dcs_list[i] != 0 && count < max_count; i++) {
+        out[count++] = rig->caps->dcs_list[i];
+    }
+    return count;
+}
+
+/* ===== Capability Query: Frequency ranges ===== */
+
+SHIM_API int shim_rig_get_caps_rx_range(hamlib_shim_handle_t h, shim_freq_range_t* out, int max_count) {
+    RIG *rig = (RIG *)h;
+    if (!rig || !out || max_count <= 0) return 0;
+    int count = 0;
+    for (int i = 0; i < HAMLIB_FRQRANGESIZ && count < max_count; i++) {
+        const freq_range_t *r = &rig->caps->rx_range_list1[i];
+        if (r->startf == 0 && r->endf == 0) break;
+        out[count].start_freq = (double)r->startf;
+        out[count].end_freq = (double)r->endf;
+        out[count].modes = (uint64_t)r->modes;
+        out[count].low_power = (int)r->low_power;
+        out[count].high_power = (int)r->high_power;
+        out[count].vfo = (int)r->vfo;
+        out[count].ant = (int)r->ant;
+        count++;
+    }
+    return count;
+}
+
+SHIM_API int shim_rig_get_caps_tx_range(hamlib_shim_handle_t h, shim_freq_range_t* out, int max_count) {
+    RIG *rig = (RIG *)h;
+    if (!rig || !out || max_count <= 0) return 0;
+    int count = 0;
+    for (int i = 0; i < HAMLIB_FRQRANGESIZ && count < max_count; i++) {
+        const freq_range_t *r = &rig->caps->tx_range_list1[i];
+        if (r->startf == 0 && r->endf == 0) break;
+        out[count].start_freq = (double)r->startf;
+        out[count].end_freq = (double)r->endf;
+        out[count].modes = (uint64_t)r->modes;
+        out[count].low_power = (int)r->low_power;
+        out[count].high_power = (int)r->high_power;
+        out[count].vfo = (int)r->vfo;
+        out[count].ant = (int)r->ant;
+        count++;
+    }
+    return count;
+}
+
+/* ===== Capability Query: Tuning steps / Filters ===== */
+
+SHIM_API int shim_rig_get_caps_tuning_steps(hamlib_shim_handle_t h, shim_mode_value_t* out, int max_count) {
+    RIG *rig = (RIG *)h;
+    if (!rig || !out || max_count <= 0) return 0;
+    int count = 0;
+    for (int i = 0; i < HAMLIB_TSLSTSIZ && count < max_count; i++) {
+        if (rig->caps->tuning_steps[i].modes == 0) break;
+        out[count].modes = (uint64_t)rig->caps->tuning_steps[i].modes;
+        out[count].value = (int)rig->caps->tuning_steps[i].ts;
+        count++;
+    }
+    return count;
+}
+
+SHIM_API int shim_rig_get_caps_filters(hamlib_shim_handle_t h, shim_mode_value_t* out, int max_count) {
+    RIG *rig = (RIG *)h;
+    if (!rig || !out || max_count <= 0) return 0;
+    int count = 0;
+    for (int i = 0; i < HAMLIB_FLTLSTSIZ && count < max_count; i++) {
+        if (rig->caps->filters[i].modes == 0) break;
+        out[count].modes = (uint64_t)rig->caps->filters[i].modes;
+        out[count].value = (int)rig->caps->filters[i].width;
+        count++;
+    }
+    return count;
+}
+
 /* ===== Static info ===== */
 
 SHIM_API const char* shim_rig_copyright(void) {

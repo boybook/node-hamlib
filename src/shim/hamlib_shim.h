@@ -514,6 +514,42 @@ SHIM_API int shim_rig_sprintf_mode(uint64_t modes, char* buf, int buflen);
 /* Rig type to string conversion */
 SHIM_API const char* shim_rig_type_str(int rig_type);
 
+/* ===== Capability Query: Structured data types ===== */
+
+/* ABI-safe struct for frequency range (no Hamlib types cross boundary) */
+typedef struct {
+    double start_freq;   /* Hz */
+    double end_freq;     /* Hz */
+    uint64_t modes;      /* rmode_t bitmask */
+    int low_power;       /* mW */
+    int high_power;      /* mW */
+    int vfo;             /* vfo_t */
+    int ant;             /* ant_t */
+} shim_freq_range_t;
+
+/* ABI-safe struct for tuning step / filter */
+typedef struct {
+    uint64_t modes;      /* rmode_t bitmask */
+    int value;           /* step Hz or filter width Hz */
+} shim_mode_value_t;
+
+/* Group A: Simple value queries */
+SHIM_API int shim_rig_get_caps_preamp(hamlib_shim_handle_t h, int* out, int max_count);
+SHIM_API int shim_rig_get_caps_attenuator(hamlib_shim_handle_t h, int* out, int max_count);
+SHIM_API long shim_rig_get_caps_max_rit(hamlib_shim_handle_t h);
+SHIM_API long shim_rig_get_caps_max_xit(hamlib_shim_handle_t h);
+SHIM_API long shim_rig_get_caps_max_ifshift(hamlib_shim_handle_t h);
+
+/* Group B: Tone/code lists */
+SHIM_API int shim_rig_get_caps_ctcss_list(hamlib_shim_handle_t h, unsigned int* out, int max_count);
+SHIM_API int shim_rig_get_caps_dcs_list(hamlib_shim_handle_t h, unsigned int* out, int max_count);
+
+/* Group C: Structured data */
+SHIM_API int shim_rig_get_caps_rx_range(hamlib_shim_handle_t h, shim_freq_range_t* out, int max_count);
+SHIM_API int shim_rig_get_caps_tx_range(hamlib_shim_handle_t h, shim_freq_range_t* out, int max_count);
+SHIM_API int shim_rig_get_caps_tuning_steps(hamlib_shim_handle_t h, shim_mode_value_t* out, int max_count);
+SHIM_API int shim_rig_get_caps_filters(hamlib_shim_handle_t h, shim_mode_value_t* out, int max_count);
+
 /* ===== Lock Mode (Hamlib >= 4.7.0) ===== */
 
 SHIM_API int shim_rig_set_lock_mode(hamlib_shim_handle_t h, int lock);

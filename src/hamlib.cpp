@@ -3729,6 +3729,18 @@ Napi::Function NodeHamLib::GetClass(Napi::Env env) {
       NodeHamLib::InstanceMethod("getSupportedVfoOps", & NodeHamLib::GetSupportedVfoOps),
       NodeHamLib::InstanceMethod("getSupportedScanTypes", & NodeHamLib::GetSupportedScanTypes),
 
+      // Capability queries - batch 2 (sync)
+      NodeHamLib::InstanceMethod("getPreampValues", & NodeHamLib::GetPreampValues),
+      NodeHamLib::InstanceMethod("getAttenuatorValues", & NodeHamLib::GetAttenuatorValues),
+      NodeHamLib::InstanceMethod("getMaxRit", & NodeHamLib::GetMaxRit),
+      NodeHamLib::InstanceMethod("getMaxXit", & NodeHamLib::GetMaxXit),
+      NodeHamLib::InstanceMethod("getMaxIfShift", & NodeHamLib::GetMaxIfShift),
+      NodeHamLib::InstanceMethod("getAvailableCtcssTones", & NodeHamLib::GetAvailableCtcssTones),
+      NodeHamLib::InstanceMethod("getAvailableDcsCodes", & NodeHamLib::GetAvailableDcsCodes),
+      NodeHamLib::InstanceMethod("getFrequencyRanges", & NodeHamLib::GetFrequencyRanges),
+      NodeHamLib::InstanceMethod("getTuningSteps", & NodeHamLib::GetTuningSteps),
+      NodeHamLib::InstanceMethod("getFilterList", & NodeHamLib::GetFilterList),
+
       NodeHamLib::InstanceMethod("close", & NodeHamLib::Close),
       NodeHamLib::InstanceMethod("destroy", & NodeHamLib::Destroy),
       NodeHamLib::InstanceMethod("getConnectionInfo", & NodeHamLib::GetConnectionInfo),
@@ -6013,6 +6025,139 @@ Napi::Value NodeHamLib::GetSupportedScanTypes(const Napi::CallbackInfo& info) {
   if (scan & SHIM_RIG_SCAN_PRIO) scanArray[index++] = Napi::String::New(env, "PRIO");
 
   return scanArray;
+}
+
+// ===== Capability Query Batch 2 (sync) =====
+
+// Helper: convert mode bitmask to array of mode strings
+static Napi::Array ModeBitmaskToArray(Napi::Env env, uint64_t modes) {
+  Napi::Array arr = Napi::Array::New(env);
+  uint32_t idx = 0;
+  for (unsigned int i = 0; i < SHIM_HAMLIB_MAX_MODES; i++) {
+    uint64_t bit = modes & (1ULL << i);
+    if (bit) {
+      const char* name = shim_rig_strrmode(bit);
+      if (name && name[0] != '\0') {
+        arr[idx++] = Napi::String::New(env, name);
+      }
+    }
+  }
+  return arr;
+}
+
+Napi::Value NodeHamLib::GetPreampValues(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  int buf[SHIM_HAMLIB_MAX_MODES];
+  int count = shim_rig_get_caps_preamp(my_rig, buf, SHIM_HAMLIB_MAX_MODES);
+  Napi::Array arr = Napi::Array::New(env, count);
+  for (int i = 0; i < count; i++) {
+    arr[(uint32_t)i] = Napi::Number::New(env, buf[i]);
+  }
+  return arr;
+}
+
+Napi::Value NodeHamLib::GetAttenuatorValues(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  int buf[SHIM_HAMLIB_MAX_MODES];
+  int count = shim_rig_get_caps_attenuator(my_rig, buf, SHIM_HAMLIB_MAX_MODES);
+  Napi::Array arr = Napi::Array::New(env, count);
+  for (int i = 0; i < count; i++) {
+    arr[(uint32_t)i] = Napi::Number::New(env, buf[i]);
+  }
+  return arr;
+}
+
+Napi::Value NodeHamLib::GetMaxRit(const Napi::CallbackInfo& info) {
+  return Napi::Number::New(info.Env(), (double)shim_rig_get_caps_max_rit(my_rig));
+}
+
+Napi::Value NodeHamLib::GetMaxXit(const Napi::CallbackInfo& info) {
+  return Napi::Number::New(info.Env(), (double)shim_rig_get_caps_max_xit(my_rig));
+}
+
+Napi::Value NodeHamLib::GetMaxIfShift(const Napi::CallbackInfo& info) {
+  return Napi::Number::New(info.Env(), (double)shim_rig_get_caps_max_ifshift(my_rig));
+}
+
+Napi::Value NodeHamLib::GetAvailableCtcssTones(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  unsigned int buf[256];
+  int count = shim_rig_get_caps_ctcss_list(my_rig, buf, 256);
+  Napi::Array arr = Napi::Array::New(env, count);
+  for (int i = 0; i < count; i++) {
+    // CTCSS tones stored as tenths of Hz, convert to Hz
+    arr[(uint32_t)i] = Napi::Number::New(env, buf[i] / 10.0);
+  }
+  return arr;
+}
+
+Napi::Value NodeHamLib::GetAvailableDcsCodes(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  unsigned int buf[256];
+  int count = shim_rig_get_caps_dcs_list(my_rig, buf, 256);
+  Napi::Array arr = Napi::Array::New(env, count);
+  for (int i = 0; i < count; i++) {
+    arr[(uint32_t)i] = Napi::Number::New(env, buf[i]);
+  }
+  return arr;
+}
+
+Napi::Value NodeHamLib::GetFrequencyRanges(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+
+  shim_freq_range_t rx_buf[30];
+  shim_freq_range_t tx_buf[30];
+  int rx_count = shim_rig_get_caps_rx_range(my_rig, rx_buf, 30);
+  int tx_count = shim_rig_get_caps_tx_range(my_rig, tx_buf, 30);
+
+  auto buildArray = [&](shim_freq_range_t* buf, int count) -> Napi::Array {
+    Napi::Array arr = Napi::Array::New(env, count);
+    for (int i = 0; i < count; i++) {
+      Napi::Object obj = Napi::Object::New(env);
+      obj.Set("startFreq", Napi::Number::New(env, buf[i].start_freq));
+      obj.Set("endFreq", Napi::Number::New(env, buf[i].end_freq));
+      obj.Set("modes", ModeBitmaskToArray(env, buf[i].modes));
+      obj.Set("lowPower", Napi::Number::New(env, buf[i].low_power));
+      obj.Set("highPower", Napi::Number::New(env, buf[i].high_power));
+      obj.Set("vfo", Napi::Number::New(env, buf[i].vfo));
+      obj.Set("antenna", Napi::Number::New(env, buf[i].ant));
+      arr[(uint32_t)i] = obj;
+    }
+    return arr;
+  };
+
+  Napi::Object result = Napi::Object::New(env);
+  result.Set("rx", buildArray(rx_buf, rx_count));
+  result.Set("tx", buildArray(tx_buf, tx_count));
+  return result;
+}
+
+Napi::Value NodeHamLib::GetTuningSteps(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  shim_mode_value_t buf[20];
+  int count = shim_rig_get_caps_tuning_steps(my_rig, buf, 20);
+  Napi::Array arr = Napi::Array::New(env, count);
+  for (int i = 0; i < count; i++) {
+    Napi::Object obj = Napi::Object::New(env);
+    obj.Set("modes", ModeBitmaskToArray(env, buf[i].modes));
+    obj.Set("stepHz", Napi::Number::New(env, buf[i].value));
+    arr[(uint32_t)i] = obj;
+  }
+  return arr;
+}
+
+Napi::Value NodeHamLib::GetFilterList(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  shim_mode_value_t buf[60];
+  int count = shim_rig_get_caps_filters(my_rig, buf, 60);
+  Napi::Array arr = Napi::Array::New(env, count);
+  for (int i = 0; i < count; i++) {
+    Napi::Object obj = Napi::Object::New(env);
+    obj.Set("modes", ModeBitmaskToArray(env, buf[i].modes));
+    obj.Set("width", Napi::Number::New(env, buf[i].value));
+    arr[(uint32_t)i] = obj;
+  }
+  return arr;
 }
 
 // ===== Static: getCopyright / getLicense =====

@@ -144,6 +144,19 @@ try {
     test(`静态方法 ${method} 存在`, () => typeof HamLib[method] === 'function');
   });
 
+  // Capability Query Batch 2 方法存在性测试
+  console.log('\n🆕 能力查询方法存在性测试 (第二批):');
+  const capQueryMethods = [
+    'getPreampValues', 'getAttenuatorValues',
+    'getMaxRit', 'getMaxXit', 'getMaxIfShift',
+    'getAvailableCtcssTones', 'getAvailableDcsCodes',
+    'getFrequencyRanges', 'getTuningSteps', 'getFilterList'
+  ];
+
+  capQueryMethods.forEach(method => {
+    test(`能力查询方法 ${method} 存在`, () => typeof testRig[method] === 'function');
+  });
+
   // 6. 方法计数测试
   console.log('\n📊 API完整性测试:');
   const instanceMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(testRig))
@@ -154,9 +167,9 @@ try {
 
   const totalMethods = instanceMethods.length + staticMethods.length;
 
-  test(`实例方法数量正确 (96个)`, () => instanceMethods.length === 96);
+  test(`实例方法数量正确 (106个)`, () => instanceMethods.length === 106);
   test(`静态方法数量正确 (6个)`, () => staticMethods.length === 6);
-  test(`总方法数量正确 (102个)`, () => totalMethods === 102);
+  test(`总方法数量正确 (112个)`, () => totalMethods === 112);
 
   console.log(`   📊 实例方法: ${instanceMethods.length}个`);
   console.log(`   📊 静态方法: ${staticMethods.length}个`);
