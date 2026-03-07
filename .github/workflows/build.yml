@@ -38,6 +38,9 @@ jobs:
         node-version: '18'
         cache: 'npm'
 
+    - name: Install Python setuptools (for node-gyp)
+      run: pip3 install setuptools --break-system-packages || pip3 install setuptools || true
+
     - name: Install system dependencies (Linux)
       if: startsWith(matrix.os, 'ubuntu')
       run: |

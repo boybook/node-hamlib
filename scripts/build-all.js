@@ -85,14 +85,14 @@ function buildShim() {
 
     // Verify shim output
     if (process.platform === 'win32') {
-      const shimDll = path.join(__dirname, '..', 'build', 'hamlib_shim.dll');
-      const shimLib = path.join(__dirname, '..', 'build', 'hamlib_shim.lib');
+      const shimDll = path.join(__dirname, '..', 'shim-build', 'hamlib_shim.dll');
+      const shimLib = path.join(__dirname, '..', 'shim-build', 'hamlib_shim.lib');
       if (!exists(shimDll) || !exists(shimLib)) {
         throw new Error('Shim DLL or import library not found after build');
       }
       logger.log('Shim DLL and import library ready', 'success');
     } else {
-      const shimA = path.join(__dirname, '..', 'build', 'libhamlib_shim.a');
+      const shimA = path.join(__dirname, '..', 'shim-build', 'libhamlib_shim.a');
       if (!exists(shimA)) {
         throw new Error('Shim static library not found after build');
       }

@@ -176,6 +176,7 @@ class WindowsBundler {
 
     // Copy hamlib_shim.dll (built by build-shim.js)
     const shimPaths = [
+      path.join(__dirname, '..', 'shim-build', 'hamlib_shim.dll'),
       path.join(__dirname, '..', 'build', 'Release', 'hamlib_shim.dll'),
       path.join(__dirname, '..', 'build', 'hamlib_shim.dll')
     ];

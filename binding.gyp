@@ -29,7 +29,7 @@
             "/usr/local/include"
           ],
           "libraries": [
-            "<(module_root_dir)/build/libhamlib_shim.a",
+            "<(module_root_dir)/shim-build/libhamlib_shim.a",
             "<!@(node -e \"if(process.env.HAMLIB_PREFIX) console.log('-L' + process.env.HAMLIB_PREFIX + '/lib')\")",
             "-L/usr/lib",
             "-L/usr/local/lib",
@@ -51,7 +51,7 @@
             "/opt/homebrew/opt/libusb/include"
           ],
           "libraries": [
-            "<(module_root_dir)/build/libhamlib_shim.a",
+            "<(module_root_dir)/shim-build/libhamlib_shim.a",
             "<!@(node -e \"if(process.env.HAMLIB_PREFIX) console.log('-L' + process.env.HAMLIB_PREFIX + '/lib')\")",
             "-L/usr/local/lib",
             "-L/usr/local/opt/hamlib/lib",
@@ -79,7 +79,7 @@
           "conditions": [
             ["target_arch==\"x64\"", {
               "library_dirs": [
-                "<(module_root_dir)/build"
+                "<(module_root_dir)/shim-build"
               ],
               "libraries": [
                 "hamlib_shim.lib",

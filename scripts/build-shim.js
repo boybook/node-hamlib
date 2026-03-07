@@ -22,7 +22,7 @@ const { execSync } = require('child_process');
 const verbose = process.argv.includes('--verbose');
 const projectRoot = path.join(__dirname, '..');
 const shimDir = path.join(projectRoot, 'src', 'shim');
-const buildDir = path.join(projectRoot, 'build');
+const buildDir = path.join(projectRoot, 'shim-build');
 const isWindows = process.platform === 'win32';
 const isMac = process.platform === 'darwin';
 
@@ -174,8 +174,8 @@ function buildWindows() {
   // Generate MSVC import library from the DLL
   generateMsvcImportLib(shimDll, shimDef);
 
-  // Copy shim DLL to Release dir if it exists
-  const releaseDir = path.join(buildDir, 'Release');
+  // Copy shim DLL to build/Release dir if it exists (for local dev)
+  const releaseDir = path.join(projectRoot, 'build', 'Release');
   if (fs.existsSync(releaseDir)) {
     fs.copyFileSync(
       shimDll.replace(/\//g, '\\'),
