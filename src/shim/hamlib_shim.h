@@ -520,7 +520,7 @@ SHIM_API int shim_rig_get_clock(hamlib_shim_handle_t h, int *year, int *month, i
 
 SHIM_API int shim_rig_get_vfo_info(hamlib_shim_handle_t h, int vfo,
                                     double *freq, uint64_t *mode,
-                                    long *width, int *split);
+                                    long *width, int *split, int *satmode);
 
 #ifdef __cplusplus
 }

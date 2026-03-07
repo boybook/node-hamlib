@@ -1209,6 +1209,7 @@ interface VfoInfo {
   mode: string;
   bandwidth: number;
   split: boolean;
+  satMode: boolean;
 }
 
 /**

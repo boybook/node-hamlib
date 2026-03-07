@@ -43,10 +43,10 @@ SHIM_API void shim_rig_set_debug(int level) {
 }
 
 SHIM_API int shim_rig_get_debug(void) {
-    /* Hamlib doesn't have rig_get_debug in all versions,
-       but we use the global variable if available */
 #ifdef SHIM_HAS_GET_DEBUG
-    return (int)rig_get_debug();
+    enum rig_debug_level_e level;
+    rig_get_debug(&level);
+    return (int)level;
 #else
     return -1;  /* Not available */
 #endif
@@ -795,9 +795,16 @@ SHIM_API int shim_rig_set_ptt_callback(hamlib_shim_handle_t h, shim_ptt_cb_t cb,
 }
 
 /* rig_set_trn: deprecated in Hamlib 4.7.0, may be removed in future versions. */
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
 SHIM_API int shim_rig_set_trn(hamlib_shim_handle_t h, int trn) {
     return rig_set_trn((RIG*)h, trn);
 }
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
 
 /* ===== Capability queries ===== */
 
@@ -921,7 +928,7 @@ SHIM_API int shim_rig_get_clock(hamlib_shim_handle_t h, int *year, int *month, i
 
 SHIM_API int shim_rig_get_vfo_info(hamlib_shim_handle_t h, int vfo,
                                     double *freq, uint64_t *mode,
-                                    long *width, int *split) {
+                                    long *width, int *split, int *satmode) {
 #ifdef SHIM_HAS_VFO_INFO
     RIG *rig = (RIG *)h;
     if (!rig) return -RIG_EINVAL;
@@ -929,14 +936,16 @@ SHIM_API int shim_rig_get_vfo_info(hamlib_shim_handle_t h, int vfo,
     rmode_t m = 0;
     pbwidth_t w = 0;
     split_t s = RIG_SPLIT_OFF;
-    int ret = rig_get_vfo_info(rig, (vfo_t)vfo, &f, &m, &w, &s);
+    int sm = 0;
+    int ret = rig_get_vfo_info(rig, (vfo_t)vfo, &f, &m, &w, &s, &sm);
     if (freq) *freq = (double)f;
     if (mode) *mode = (uint64_t)m;
     if (width) *width = (long)w;
     if (split) *split = (int)s;
+    if (satmode) *satmode = sm;
     return ret;
 #else
-    (void)h; (void)vfo; (void)freq; (void)mode; (void)width; (void)split;
+    (void)h; (void)vfo; (void)freq; (void)mode; (void)width; (void)split; (void)satmode;
     return -RIG_ENIMPL;
 #endif
 }

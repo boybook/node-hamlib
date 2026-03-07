@@ -5592,12 +5592,12 @@ class GetVfoInfoAsyncWorker : public HamLibAsyncWorker {
 public:
     GetVfoInfoAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance),
-          vfo_(vfo), freq_(0.0), mode_(0), width_(0), split_(0) {}
+          vfo_(vfo), freq_(0.0), mode_(0), width_(0), split_(0), satmode_(0) {}
 
     void Execute() override {
         CHECK_RIG_VALID();
         result_code_ = shim_rig_get_vfo_info(hamlib_instance_->my_rig, vfo_,
-                                              &freq_, &mode_, &width_, &split_);
+                                              &freq_, &mode_, &width_, &split_, &satmode_);
         if (result_code_ != SHIM_RIG_OK) {
             error_message_ = shim_rigerror(result_code_);
         }
@@ -5613,6 +5613,7 @@ public:
             obj.Set("mode", Napi::String::New(env, shim_rig_strrmode(static_cast<int>(mode_))));
             obj.Set("bandwidth", Napi::Number::New(env, static_cast<double>(width_)));
             obj.Set("split", Napi::Boolean::New(env, split_ != 0));
+            obj.Set("satMode", Napi::Boolean::New(env, satmode_ != 0));
             deferred_.Resolve(obj);
         }
     }
@@ -5627,6 +5628,7 @@ private:
     uint64_t mode_;
     long width_;
     int split_;
+    int satmode_;
 };
 
 Napi::Value NodeHamLib::GetVfoInfo(const Napi::CallbackInfo& info) {
