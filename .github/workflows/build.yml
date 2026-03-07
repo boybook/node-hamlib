@@ -116,6 +116,7 @@ jobs:
     - name: Run tests
       run: |
         node test/test_loader.js
+        node test/test_ci_functional.js
 
     - name: Upload prebuilds artifact
       uses: actions/upload-artifact@v4
