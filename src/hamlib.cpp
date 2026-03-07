@@ -1,25 +1,15 @@
 #include "hamlib.h"
-#include "hamlib_compat.h"
+#include "shim/hamlib_shim.h"
 #include <string>
 #include <vector>
 #include <memory>
 #include <algorithm>
 
-// Cross-platform compatibility for hamlib token types
-// Linux versions use token_t, some others use hamlib_token_t
-#ifndef HAMLIB_TOKEN_T
-#ifdef __linux__
-#define HAMLIB_TOKEN_T token_t
-#else
-#define HAMLIB_TOKEN_T hamlib_token_t
-#endif
-#endif
-
 // 安全宏 - 检查RIG指针有效性，防止空指针解引用和已销毁对象访问
 #define CHECK_RIG_VALID() \
   do { \
     if (!hamlib_instance_ || !hamlib_instance_->my_rig) { \
-      result_code_ = -RIG_EINVAL; \
+      result_code_ = SHIM_RIG_EINVAL; \
       error_message_ = "RIG is not initialized or has been destroyed"; \
       return; \
     } \
@@ -49,24 +39,24 @@ public:
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_open(hamlib_instance_->my_rig);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_open(hamlib_instance_->my_rig);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         } else {
-            rig_set_freq_callback(hamlib_instance_->my_rig, NodeHamLib::freq_change_cb, hamlib_instance_);
-            auto ppt_cb = +[](RIG *rig, vfo_t vfo, ptt_t ptt, rig_ptr_t arg) {
+            shim_rig_set_freq_callback(hamlib_instance_->my_rig, NodeHamLib::freq_change_cb, hamlib_instance_);
+            auto ppt_cb = +[](void* handle, int vfo, int ptt, void* arg) -> int {
                 printf("PPT pushed!");
                 return 0;
             };
-            int cb_result = rig_set_ptt_callback(hamlib_instance_->my_rig, ppt_cb, NULL);
-            rig_set_trn(hamlib_instance_->my_rig, RIG_TRN_POLL);
+            int cb_result = shim_rig_set_ptt_callback(hamlib_instance_->my_rig, ppt_cb, NULL);
+            shim_rig_set_trn(hamlib_instance_->my_rig, SHIM_RIG_TRN_POLL);
             hamlib_instance_->rig_is_open = true;
         }
     }
-    
+
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -81,21 +71,21 @@ public:
 
 class SetFrequencyAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetFrequencyAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, freq_t freq, vfo_t vfo)
+    SetFrequencyAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, double freq, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), freq_(freq), vfo_(vfo) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_set_freq(hamlib_instance_->my_rig, vfo_, freq_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_set_freq(hamlib_instance_->my_rig, vfo_, freq_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -108,27 +98,27 @@ public:
     }
     
 private:
-    freq_t freq_;
-    vfo_t vfo_;
+    double freq_;
+    int vfo_;
 };
 
 class GetFrequencyAsyncWorker : public HamLibAsyncWorker {
 public:
-    GetFrequencyAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
+    GetFrequencyAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), freq_(0) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_get_freq(hamlib_instance_->my_rig, vfo_, &freq_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_get_freq(hamlib_instance_->my_rig, vfo_, &freq_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, freq_));
@@ -141,27 +131,27 @@ public:
     }
     
 private:
-    vfo_t vfo_;
-    freq_t freq_;
+    int vfo_;
+    double freq_;
 };
 
 class SetModeAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, rmode_t mode, pbwidth_t width, vfo_t vfo = RIG_VFO_CURR)
+    SetModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int mode, int width, int vfo = SHIM_RIG_VFO_CURR)
         : HamLibAsyncWorker(env, hamlib_instance), mode_(mode), width_(width), vfo_(vfo) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_set_mode(hamlib_instance_->my_rig, vfo_, mode_, width_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_set_mode(hamlib_instance_->my_rig, vfo_, mode_, width_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -174,9 +164,9 @@ public:
     }
     
 private:
-    rmode_t mode_;
-    pbwidth_t width_;
-    vfo_t vfo_;
+    int mode_;
+    int width_;
+    int vfo_;
 };
 
 class GetModeAsyncWorker : public HamLibAsyncWorker {
@@ -187,20 +177,20 @@ public:
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_get_mode(hamlib_instance_->my_rig, RIG_VFO_CURR, &mode_, &width_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_get_mode(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, &mode_, &width_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             Napi::Object obj = Napi::Object::New(env);
             // Convert mode to string using rig_strrmode
-            const char* mode_str = rig_strrmode(mode_);
+            const char* mode_str = shim_rig_strrmode(mode_);
             obj.Set(Napi::String::New(env, "mode"), Napi::String::New(env, mode_str));
             obj.Set(Napi::String::New(env, "bandwidth"), width_);
             deferred_.Resolve(obj);
@@ -213,27 +203,27 @@ public:
     }
     
 private:
-    rmode_t mode_;
-    pbwidth_t width_;
+    int mode_;
+    int width_;
 };
 
 class SetPttAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetPttAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, ptt_t ptt)
+    SetPttAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int ptt)
         : HamLibAsyncWorker(env, hamlib_instance), ptt_(ptt) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_set_ptt(hamlib_instance_->my_rig, RIG_VFO_CURR, ptt_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_set_ptt(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, ptt_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -246,26 +236,26 @@ public:
     }
     
 private:
-    ptt_t ptt_;
+    int ptt_;
 };
 
 class GetStrengthAsyncWorker : public HamLibAsyncWorker {
 public:
-    GetStrengthAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
+    GetStrengthAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), strength_(0) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_get_strength(hamlib_instance_->my_rig, vfo_, &strength_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_get_strength(hamlib_instance_->my_rig, vfo_, &strength_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, strength_));
@@ -278,95 +268,93 @@ public:
     }
     
 private:
-    vfo_t vfo_;
+    int vfo_;
     int strength_;
 };
 
 class SetLevelAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetLevelAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, setting_t level_type, value_t value)
+    SetLevelAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, uint64_t level_type, float value)
         : HamLibAsyncWorker(env, hamlib_instance), level_type_(level_type), value_(value) {}
-    
+
     void Execute() override {
         CHECK_RIG_VALID();
-        
-        result_code_ = rig_set_level(hamlib_instance_->my_rig, RIG_VFO_CURR, level_type_, value_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+
+        result_code_ = shim_rig_set_level_f(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, level_type_, value_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
-    
+
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
         }
     }
-    
+
     void OnError(const Napi::Error& e) override {
         Napi::Env env = Env();
         deferred_.Reject(Napi::Error::New(env, error_message_).Value());
     }
-    
+
 private:
-    setting_t level_type_;
-    value_t value_;
+    uint64_t level_type_;
+    float value_;
 };
 
 class GetLevelAsyncWorker : public HamLibAsyncWorker {
 public:
-    GetLevelAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, setting_t level_type)
-        : HamLibAsyncWorker(env, hamlib_instance), level_type_(level_type) {
-        value_.f = 0.0;
-    }
-    
+    GetLevelAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, uint64_t level_type)
+        : HamLibAsyncWorker(env, hamlib_instance), level_type_(level_type), value_(0.0f) {}
+
     void Execute() override {
         CHECK_RIG_VALID();
-        
-        result_code_ = rig_get_level(hamlib_instance_->my_rig, RIG_VFO_CURR, level_type_, &value_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+
+        result_code_ = shim_rig_get_level_f(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, level_type_, &value_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
-    
+
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
-            deferred_.Resolve(Napi::Number::New(env, value_.f));
+            deferred_.Resolve(Napi::Number::New(env, value_));
         }
     }
-    
+
     void OnError(const Napi::Error& e) override {
         Napi::Env env = Env();
         deferred_.Reject(Napi::Error::New(env, error_message_).Value());
     }
-    
+
 private:
-    setting_t level_type_;
-    value_t value_;
+    uint64_t level_type_;
+    float value_;
 };
 
 class SetFunctionAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetFunctionAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, setting_t func_type, int enable)
+    SetFunctionAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, uint64_t func_type, int enable)
         : HamLibAsyncWorker(env, hamlib_instance), func_type_(func_type), enable_(enable) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_set_func(hamlib_instance_->my_rig, RIG_VFO_CURR, func_type_, enable_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_set_func(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, func_type_, enable_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -379,27 +367,27 @@ public:
     }
     
 private:
-    setting_t func_type_;
+    uint64_t func_type_;
     int enable_;
 };
 
 class GetFunctionAsyncWorker : public HamLibAsyncWorker {
 public:
-    GetFunctionAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, setting_t func_type)
+    GetFunctionAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, uint64_t func_type)
         : HamLibAsyncWorker(env, hamlib_instance), func_type_(func_type), state_(0) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_get_func(hamlib_instance_->my_rig, RIG_VFO_CURR, func_type_, &state_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_get_func(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, func_type_, &state_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Boolean::New(env, state_ != 0));
@@ -412,27 +400,27 @@ public:
     }
     
 private:
-    setting_t func_type_;
+    uint64_t func_type_;
     int state_;
 };
 
 class SetMemoryChannelAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetMemoryChannelAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, const channel_t& chan)
+    SetMemoryChannelAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, const shim_channel_t& chan)
         : HamLibAsyncWorker(env, hamlib_instance), chan_(chan) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_set_channel(hamlib_instance_->my_rig, RIG_VFO_MEM, &chan_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_set_channel(hamlib_instance_->my_rig, SHIM_RIG_VFO_MEM, &chan_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -445,7 +433,7 @@ public:
     }
     
 private:
-    channel_t chan_;
+    shim_channel_t chan_;
 };
 
 class GetMemoryChannelAsyncWorker : public HamLibAsyncWorker {
@@ -459,10 +447,10 @@ public:
         CHECK_RIG_VALID();
         
         chan_.channel_num = channel_num_;
-        chan_.vfo = RIG_VFO_MEM;
-        result_code_ = rig_get_channel(hamlib_instance_->my_rig, RIG_VFO_MEM, &chan_, read_only_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        chan_.vfo = SHIM_RIG_VFO_MEM;
+        result_code_ = shim_rig_get_channel(hamlib_instance_->my_rig, SHIM_RIG_VFO_MEM, &chan_, read_only_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
@@ -473,8 +461,8 @@ public:
         obj.Set(Napi::String::New(env, "channelNumber"), chan_.channel_num);
         obj.Set(Napi::String::New(env, "frequency"), chan_.freq);
         
-        if (chan_.mode != RIG_MODE_NONE) {
-            const char* mode_str = rig_strrmode(chan_.mode);
+        if (chan_.mode != SHIM_RIG_MODE_NONE) {
+            const char* mode_str = shim_rig_strrmode(chan_.mode);
             obj.Set(Napi::String::New(env, "mode"), Napi::String::New(env, mode_str));
         }
         
@@ -484,7 +472,7 @@ public:
             obj.Set(Napi::String::New(env, "description"), Napi::String::New(env, chan_.channel_desc));
         }
         
-        if (chan_.split == RIG_SPLIT_ON) {
+        if (chan_.split == SHIM_RIG_SPLIT_ON) {
             obj.Set(Napi::String::New(env, "txFrequency"), chan_.tx_freq);
         }
         
@@ -503,7 +491,7 @@ public:
 private:
     int channel_num_;
     bool read_only_;
-    channel_t chan_;
+    shim_channel_t chan_;
 };
 
 class SelectMemoryChannelAsyncWorker : public HamLibAsyncWorker {
@@ -514,15 +502,15 @@ public:
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_set_mem(hamlib_instance_->my_rig, RIG_VFO_CURR, channel_num_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_set_mem(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, channel_num_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -540,21 +528,21 @@ private:
 
 class SetRitAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetRitAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, shortfreq_t rit_offset)
+    SetRitAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int rit_offset)
         : HamLibAsyncWorker(env, hamlib_instance), rit_offset_(rit_offset) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_set_rit(hamlib_instance_->my_rig, RIG_VFO_CURR, rit_offset_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_set_rit(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, rit_offset_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -567,7 +555,7 @@ public:
     }
     
 private:
-    shortfreq_t rit_offset_;
+    int rit_offset_;
 };
 
 class GetRitAsyncWorker : public HamLibAsyncWorker {
@@ -578,15 +566,15 @@ public:
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_get_rit(hamlib_instance_->my_rig, RIG_VFO_CURR, &rit_offset_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_get_rit(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, &rit_offset_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, rit_offset_));
@@ -599,26 +587,26 @@ public:
     }
     
 private:
-    shortfreq_t rit_offset_;
+    int rit_offset_;
 };
 
 class SetXitAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetXitAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, shortfreq_t xit_offset)
+    SetXitAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int xit_offset)
         : HamLibAsyncWorker(env, hamlib_instance), xit_offset_(xit_offset) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_set_xit(hamlib_instance_->my_rig, RIG_VFO_CURR, xit_offset_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_set_xit(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, xit_offset_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -631,7 +619,7 @@ public:
     }
     
 private:
-    shortfreq_t xit_offset_;
+    int xit_offset_;
 };
 
 class GetXitAsyncWorker : public HamLibAsyncWorker {
@@ -642,15 +630,15 @@ public:
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_get_xit(hamlib_instance_->my_rig, RIG_VFO_CURR, &xit_offset_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_get_xit(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, &xit_offset_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, xit_offset_));
@@ -663,7 +651,7 @@ public:
     }
     
 private:
-    shortfreq_t xit_offset_;
+    int xit_offset_;
 };
 
 class ClearRitXitAsyncWorker : public HamLibAsyncWorker {
@@ -674,23 +662,23 @@ public:
     void Execute() override {
         CHECK_RIG_VALID();
         
-        int ritCode = rig_set_rit(hamlib_instance_->my_rig, RIG_VFO_CURR, 0);
-        int xitCode = rig_set_xit(hamlib_instance_->my_rig, RIG_VFO_CURR, 0);
+        int ritCode = shim_rig_set_rit(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, 0);
+        int xitCode = shim_rig_set_xit(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, 0);
         
-        if (ritCode != RIG_OK) {
+        if (ritCode != SHIM_RIG_OK) {
             result_code_ = ritCode;
-            error_message_ = rigerror(ritCode);
-        } else if (xitCode != RIG_OK) {
+            error_message_ = shim_rigerror(ritCode);
+        } else if (xitCode != SHIM_RIG_OK) {
             result_code_ = xitCode;
-            error_message_ = rigerror(xitCode);
+            error_message_ = shim_rigerror(xitCode);
         } else {
-            result_code_ = RIG_OK;
+            result_code_ = SHIM_RIG_OK;
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -705,21 +693,21 @@ public:
 
 class SetSplitFreqAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetSplitFreqAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, freq_t tx_freq, vfo_t vfo = RIG_VFO_CURR)
+    SetSplitFreqAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, double tx_freq, int vfo = SHIM_RIG_VFO_CURR)
         : HamLibAsyncWorker(env, hamlib_instance), tx_freq_(tx_freq), vfo_(vfo) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_set_split_freq(hamlib_instance_->my_rig, vfo_, tx_freq_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_set_split_freq(hamlib_instance_->my_rig, vfo_, tx_freq_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -732,27 +720,27 @@ public:
     }
     
 private:
-    freq_t tx_freq_;
-    vfo_t vfo_;
+    double tx_freq_;
+    int vfo_;
 };
 
 class GetSplitFreqAsyncWorker : public HamLibAsyncWorker {
 public:
-    GetSplitFreqAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo = RIG_VFO_CURR)
+    GetSplitFreqAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo = SHIM_RIG_VFO_CURR)
         : HamLibAsyncWorker(env, hamlib_instance), tx_freq_(0), vfo_(vfo) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_get_split_freq(hamlib_instance_->my_rig, vfo_, &tx_freq_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_get_split_freq(hamlib_instance_->my_rig, vfo_, &tx_freq_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, tx_freq_));
@@ -765,27 +753,27 @@ public:
     }
     
 private:
-    freq_t tx_freq_;
-    vfo_t vfo_;
+    double tx_freq_;
+    int vfo_;
 };
 
 class SetSplitAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetSplitAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t rx_vfo, split_t split, vfo_t tx_vfo)
+    SetSplitAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int rx_vfo, int split, int tx_vfo)
         : HamLibAsyncWorker(env, hamlib_instance), rx_vfo_(rx_vfo), split_(split), tx_vfo_(tx_vfo) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_set_split_vfo(hamlib_instance_->my_rig, rx_vfo_, split_, tx_vfo_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_set_split_vfo(hamlib_instance_->my_rig, rx_vfo_, split_, tx_vfo_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -798,35 +786,35 @@ public:
     }
     
 private:
-    vfo_t rx_vfo_;
-    split_t split_;
-    vfo_t tx_vfo_;
+    int rx_vfo_;
+    int split_;
+    int tx_vfo_;
 };
 
 class GetSplitAsyncWorker : public HamLibAsyncWorker {
 public:
-    GetSplitAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo = RIG_VFO_CURR)
-        : HamLibAsyncWorker(env, hamlib_instance), split_(RIG_SPLIT_OFF), tx_vfo_(RIG_VFO_B), vfo_(vfo) {}
+    GetSplitAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo = SHIM_RIG_VFO_CURR)
+        : HamLibAsyncWorker(env, hamlib_instance), split_(SHIM_RIG_SPLIT_OFF), tx_vfo_(SHIM_RIG_VFO_B), vfo_(vfo) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_get_split_vfo(hamlib_instance_->my_rig, vfo_, &split_, &tx_vfo_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_get_split_vfo(hamlib_instance_->my_rig, vfo_, &split_, &tx_vfo_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             Napi::Object obj = Napi::Object::New(env);
-            obj.Set(Napi::String::New(env, "enabled"), Napi::Boolean::New(env, split_ == RIG_SPLIT_ON));
+            obj.Set(Napi::String::New(env, "enabled"), Napi::Boolean::New(env, split_ == SHIM_RIG_SPLIT_ON));
             
             const char* vfo_str = "VFO-B";
-            if (tx_vfo_ == RIG_VFO_A) {
+            if (tx_vfo_ == SHIM_RIG_VFO_A) {
                 vfo_str = "VFO-A";
             }
             obj.Set(Napi::String::New(env, "txVfo"), Napi::String::New(env, vfo_str));
@@ -841,28 +829,28 @@ public:
     }
     
 private:
-    split_t split_;
-    vfo_t tx_vfo_;
-    vfo_t vfo_;
+    int split_;
+    int tx_vfo_;
+    int vfo_;
 };
 
 class SetVfoAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetVfoAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
+    SetVfoAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_set_vfo(hamlib_instance_->my_rig, vfo_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_set_vfo(hamlib_instance_->my_rig, vfo_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -875,7 +863,7 @@ public:
     }
     
 private:
-    vfo_t vfo_;
+    int vfo_;
 };
 
 class GetVfoAsyncWorker : public HamLibAsyncWorker {
@@ -886,21 +874,20 @@ public:
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_get_vfo(hamlib_instance_->my_rig, &vfo_);
-        if (result_code_ != RIG_OK) {
+        result_code_ = shim_rig_get_vfo(hamlib_instance_->my_rig, &vfo_);
+        if (result_code_ != SHIM_RIG_OK) {
             // 提供更清晰的错误信息
             switch (result_code_) {
-                case RIG_ENAVAIL:
-                case -11:  // Feature not available
+                case SHIM_RIG_ENAVAIL:
                     error_message_ = "VFO query not supported by this radio";
                     break;
-                case RIG_EIO:
+                case SHIM_RIG_EIO:
                     error_message_ = "I/O error during VFO query";
                     break;
-                case RIG_ETIMEOUT:
+                case SHIM_RIG_ETIMEOUT:
                     error_message_ = "Timeout during VFO query";
                     break;
-                case RIG_EPROTO:
+                case SHIM_RIG_EPROTO:
                     error_message_ = "Protocol error during VFO query";
                     break;
                 default:
@@ -914,19 +901,19 @@ public:
         Napi::Env env = Env();
         
         // 如果API调用失败，reject Promise
-        if (result_code_ != RIG_OK) {
+        if (result_code_ != SHIM_RIG_OK) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
             return;
         }
         
         const char* vfo_str = "VFO-CURR";  // 默认值
-        if (vfo_ == RIG_VFO_A) {
+        if (vfo_ == SHIM_RIG_VFO_A) {
             vfo_str = "VFO-A";
-        } else if (vfo_ == RIG_VFO_B) {
+        } else if (vfo_ == SHIM_RIG_VFO_B) {
             vfo_str = "VFO-B";
-        } else if (vfo_ == RIG_VFO_CURR) {
+        } else if (vfo_ == SHIM_RIG_VFO_CURR) {
             vfo_str = "VFO-CURR";
-        } else if (vfo_ == RIG_VFO_MEM) {
+        } else if (vfo_ == SHIM_RIG_VFO_MEM) {
             vfo_str = "VFO-MEM";
         }
         deferred_.Resolve(Napi::String::New(env, vfo_str));
@@ -938,7 +925,7 @@ public:
     }
     
 private:
-    vfo_t vfo_;
+    int vfo_;
 };
 
 class CloseAsyncWorker : public HamLibAsyncWorker {
@@ -951,13 +938,13 @@ public:
         
         // 检查rig是否已经关闭
         if (!hamlib_instance_->rig_is_open) {
-            result_code_ = RIG_OK;  // 已经关闭，返回成功
+            result_code_ = SHIM_RIG_OK;  // 已经关闭，返回成功
             return;
         }
         
-        result_code_ = rig_close(hamlib_instance_->my_rig);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_close(hamlib_instance_->my_rig);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         } else {
             hamlib_instance_->rig_is_open = false;
         }
@@ -965,7 +952,7 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -987,9 +974,9 @@ public:
         CHECK_RIG_VALID();
         
         // rig_cleanup会自动调用rig_close，所以我们不需要重复调用
-        result_code_ = rig_cleanup(hamlib_instance_->my_rig);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_cleanup(hamlib_instance_->my_rig);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         } else {
             hamlib_instance_->rig_is_open = false;
             hamlib_instance_->my_rig = nullptr;  // 重要：清空指针防止重复释放
@@ -998,7 +985,7 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -1014,21 +1001,21 @@ public:
 // Start Scan AsyncWorker
 class StartScanAsyncWorker : public HamLibAsyncWorker {
 public:
-    StartScanAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, scan_t scan_type, int channel)
-        : HamLibAsyncWorker(env, hamlib_instance), scan_type_(scan_type), channel_(channel) {}
+    StartScanAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int intype, int channel)
+        : HamLibAsyncWorker(env, hamlib_instance), intype_(intype), channel_(channel) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_scan(hamlib_instance_->my_rig, RIG_VFO_CURR, scan_type_, channel_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_scan(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, intype_, channel_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -1041,7 +1028,7 @@ public:
     }
     
 private:
-    scan_t scan_type_;
+    int intype_;
     int channel_;
 };
 
@@ -1054,15 +1041,15 @@ public:
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_scan(hamlib_instance_->my_rig, RIG_VFO_CURR, RIG_SCAN_STOP, 0);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_scan(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, SHIM_RIG_SCAN_STOP, 0);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -1078,21 +1065,21 @@ public:
 // VFO Operation AsyncWorker
 class VfoOperationAsyncWorker : public HamLibAsyncWorker {
 public:
-    VfoOperationAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_op_t vfo_op)
+    VfoOperationAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo_op)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_op_(vfo_op) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_vfo_op(hamlib_instance_->my_rig, RIG_VFO_CURR, vfo_op_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_vfo_op(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, vfo_op_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -1105,109 +1092,109 @@ public:
     }
     
 private:
-    vfo_op_t vfo_op_;
+    int vfo_op_;
 };
 
 // Set Antenna AsyncWorker
 class SetAntennaAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetAntennaAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, ant_t antenna, vfo_t vfo, value_t option)
+    SetAntennaAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int antenna, int vfo, float option)
         : HamLibAsyncWorker(env, hamlib_instance), antenna_(antenna), vfo_(vfo), option_(option) {}
-    
+
     void Execute() override {
         CHECK_RIG_VALID();
-        
-        result_code_ = rig_set_ant(hamlib_instance_->my_rig, vfo_, antenna_, option_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+
+        result_code_ = shim_rig_set_ant(hamlib_instance_->my_rig, vfo_, antenna_, option_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
-    
+
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
         }
     }
-    
+
     void OnError(const Napi::Error& e) override {
         Napi::Env env = Env();
         deferred_.Reject(Napi::Error::New(env, error_message_).Value());
     }
-    
+
 private:
-    ant_t antenna_;
-    vfo_t vfo_;
-    value_t option_;
+    int antenna_;
+    int vfo_;
+    float option_;
 };
 
 // Get Antenna AsyncWorker
 class GetAntennaAsyncWorker : public HamLibAsyncWorker {
 public:
-    GetAntennaAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo, ant_t antenna)
+    GetAntennaAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, int antenna)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), antenna_(antenna), antenna_curr_(0), antenna_tx_(0), antenna_rx_(0) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        option_ = {0};
-        
-        result_code_ = rig_get_ant(hamlib_instance_->my_rig, vfo_, antenna_, &option_, &antenna_curr_, &antenna_tx_, &antenna_rx_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        option_ = 0.0f;
+
+        result_code_ = shim_rig_get_ant(hamlib_instance_->my_rig, vfo_, antenna_, &option_, &antenna_curr_, &antenna_tx_, &antenna_rx_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
-    
+
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             Napi::Object result = Napi::Object::New(env);
-            
+
             result.Set("currentAntenna", Napi::Number::New(env, antenna_curr_));
             result.Set("txAntenna", Napi::Number::New(env, antenna_tx_));
             result.Set("rxAntenna", Napi::Number::New(env, antenna_rx_));
-            result.Set("option", Napi::Number::New(env, option_.f));
-            
+            result.Set("option", Napi::Number::New(env, option_));
+
             deferred_.Resolve(result);
         }
     }
-    
+
     void OnError(const Napi::Error& e) override {
         Napi::Env env = Env();
         deferred_.Reject(Napi::Error::New(env, error_message_).Value());
     }
-    
+
 private:
-    vfo_t vfo_;
-    ant_t antenna_;
-    ant_t antenna_curr_;
-    ant_t antenna_tx_;
-    ant_t antenna_rx_;
-    value_t option_;
+    int vfo_;
+    int antenna_;
+    int antenna_curr_;
+    int antenna_tx_;
+    int antenna_rx_;
+    float option_;
 };
 
 // Power to mW Conversion AsyncWorker
 class Power2mWAsyncWorker : public HamLibAsyncWorker {
 public:
-    Power2mWAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, float power, freq_t freq, rmode_t mode)
+    Power2mWAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, float power, double freq, int mode)
         : HamLibAsyncWorker(env, hamlib_instance), power_(power), freq_(freq), mode_(mode), mwpower_(0) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_power2mW(hamlib_instance_->my_rig, &mwpower_, power_, freq_, mode_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_power2mW(hamlib_instance_->my_rig, &mwpower_, power_, freq_, mode_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, mwpower_));
@@ -1221,29 +1208,29 @@ public:
     
 private:
     float power_;
-    freq_t freq_;
-    rmode_t mode_;
+    double freq_;
+    int mode_;
     unsigned int mwpower_;
 };
 
 // mW to Power Conversion AsyncWorker
 class MW2PowerAsyncWorker : public HamLibAsyncWorker {
 public:
-    MW2PowerAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, unsigned int mwpower, freq_t freq, rmode_t mode)
+    MW2PowerAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, unsigned int mwpower, double freq, int mode)
         : HamLibAsyncWorker(env, hamlib_instance), mwpower_(mwpower), freq_(freq), mode_(mode), power_(0.0) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_mW2power(hamlib_instance_->my_rig, &power_, mwpower_, freq_, mode_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_mW2power(hamlib_instance_->my_rig, &power_, mwpower_, freq_, mode_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, power_));
@@ -1257,29 +1244,29 @@ public:
     
 private:
     unsigned int mwpower_;
-    freq_t freq_;
-    rmode_t mode_;
+    double freq_;
+    int mode_;
     float power_;
 };
 
 // Set Split Mode AsyncWorker
 class SetSplitModeAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetSplitModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, rmode_t tx_mode, pbwidth_t tx_width, vfo_t vfo = RIG_VFO_CURR)
+    SetSplitModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int tx_mode, int tx_width, int vfo = SHIM_RIG_VFO_CURR)
         : HamLibAsyncWorker(env, hamlib_instance), tx_mode_(tx_mode), tx_width_(tx_width), vfo_(vfo) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_set_split_mode(hamlib_instance_->my_rig, vfo_, tx_mode_, tx_width_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_set_split_mode(hamlib_instance_->my_rig, vfo_, tx_mode_, tx_width_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -1292,34 +1279,34 @@ public:
     }
     
 private:
-    rmode_t tx_mode_;
-    pbwidth_t tx_width_;
-    vfo_t vfo_;
+    int tx_mode_;
+    int tx_width_;
+    int vfo_;
 };
 
 // Get Split Mode AsyncWorker
 class GetSplitModeAsyncWorker : public HamLibAsyncWorker {
 public:
-    GetSplitModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo = RIG_VFO_CURR)
+    GetSplitModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo = SHIM_RIG_VFO_CURR)
         : HamLibAsyncWorker(env, hamlib_instance), tx_mode_(0), tx_width_(0), vfo_(vfo) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_get_split_mode(hamlib_instance_->my_rig, vfo_, &tx_mode_, &tx_width_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_get_split_mode(hamlib_instance_->my_rig, vfo_, &tx_mode_, &tx_width_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             Napi::Object obj = Napi::Object::New(env);
             // Convert mode to string using rig_strrmode
-            const char* mode_str = rig_strrmode(tx_mode_);
+            const char* mode_str = shim_rig_strrmode(tx_mode_);
             obj.Set(Napi::String::New(env, "mode"), Napi::String::New(env, mode_str));
             obj.Set(Napi::String::New(env, "width"), tx_width_);
             deferred_.Resolve(obj);
@@ -1332,9 +1319,9 @@ public:
     }
     
 private:
-    rmode_t tx_mode_;
-    pbwidth_t tx_width_;
-    vfo_t vfo_;
+    int tx_mode_;
+    int tx_width_;
+    int vfo_;
 };
 
 // Set Serial Config AsyncWorker
@@ -1349,137 +1336,137 @@ public:
         // Apply serial configuration parameter
         if (param_name_ == "data_bits") {
             int data_bits = std::stoi(param_value_);
-            hamlib_instance_->my_rig->state.rigport.parm.serial.data_bits = data_bits;
-            result_code_ = RIG_OK;
+            shim_rig_set_serial_data_bits(hamlib_instance_->my_rig, data_bits);
+            result_code_ = SHIM_RIG_OK;
         } else if (param_name_ == "stop_bits") {
             int stop_bits = std::stoi(param_value_);
-            hamlib_instance_->my_rig->state.rigport.parm.serial.stop_bits = stop_bits;
-            result_code_ = RIG_OK;
+            shim_rig_set_serial_stop_bits(hamlib_instance_->my_rig, stop_bits);
+            result_code_ = SHIM_RIG_OK;
         } else if (param_name_ == "serial_parity") {
-            enum serial_parity_e parity;
+            int parity;
             if (param_value_ == "None") {
-                parity = RIG_PARITY_NONE;
+                parity = SHIM_RIG_PARITY_NONE;
             } else if (param_value_ == "Even") {
-                parity = RIG_PARITY_EVEN;
+                parity = SHIM_RIG_PARITY_EVEN;
             } else if (param_value_ == "Odd") {
-                parity = RIG_PARITY_ODD;
+                parity = SHIM_RIG_PARITY_ODD;
             } else {
-                result_code_ = -RIG_EINVAL;
+                result_code_ = SHIM_RIG_EINVAL;
                 error_message_ = "Invalid parity value";
                 return;
             }
-            hamlib_instance_->my_rig->state.rigport.parm.serial.parity = parity;
-            result_code_ = RIG_OK;
+            shim_rig_set_serial_parity(hamlib_instance_->my_rig, parity);
+            result_code_ = SHIM_RIG_OK;
         } else if (param_name_ == "serial_handshake") {
-            enum serial_handshake_e handshake;
+            int handshake;
             if (param_value_ == "None") {
-                handshake = RIG_HANDSHAKE_NONE;
+                handshake = SHIM_RIG_HANDSHAKE_NONE;
             } else if (param_value_ == "Hardware") {
-                handshake = RIG_HANDSHAKE_HARDWARE;
+                handshake = SHIM_RIG_HANDSHAKE_HARDWARE;
             } else if (param_value_ == "Software") {
-                handshake = RIG_HANDSHAKE_XONXOFF;
+                handshake = SHIM_RIG_HANDSHAKE_XONXOFF;
             } else {
-                result_code_ = -RIG_EINVAL;
+                result_code_ = SHIM_RIG_EINVAL;
                 error_message_ = "Invalid handshake value";
                 return;
             }
-            hamlib_instance_->my_rig->state.rigport.parm.serial.handshake = handshake;
-            result_code_ = RIG_OK;
+            shim_rig_set_serial_handshake(hamlib_instance_->my_rig, handshake);
+            result_code_ = SHIM_RIG_OK;
         } else if (param_name_ == "rts_state") {
-            enum serial_control_state_e state;
+            int state;
             if (param_value_ == "ON") {
-                state = RIG_SIGNAL_ON;
+                state = SHIM_RIG_SIGNAL_ON;
             } else if (param_value_ == "OFF") {
-                state = RIG_SIGNAL_OFF;
+                state = SHIM_RIG_SIGNAL_OFF;
             } else {
-                result_code_ = -RIG_EINVAL;
+                result_code_ = SHIM_RIG_EINVAL;
                 error_message_ = "Invalid RTS state value";
                 return;
             }
-            hamlib_instance_->my_rig->state.rigport.parm.serial.rts_state = state;
-            result_code_ = RIG_OK;
+            shim_rig_set_serial_rts_state(hamlib_instance_->my_rig, state);
+            result_code_ = SHIM_RIG_OK;
         } else if (param_name_ == "dtr_state") {
-            enum serial_control_state_e state;
+            int state;
             if (param_value_ == "ON") {
-                state = RIG_SIGNAL_ON;
+                state = SHIM_RIG_SIGNAL_ON;
             } else if (param_value_ == "OFF") {
-                state = RIG_SIGNAL_OFF;
+                state = SHIM_RIG_SIGNAL_OFF;
             } else {
-                result_code_ = -RIG_EINVAL;
+                result_code_ = SHIM_RIG_EINVAL;
                 error_message_ = "Invalid DTR state value";
                 return;
             }
-            hamlib_instance_->my_rig->state.rigport.parm.serial.dtr_state = state;
-            result_code_ = RIG_OK;
+            shim_rig_set_serial_dtr_state(hamlib_instance_->my_rig, state);
+            result_code_ = SHIM_RIG_OK;
         } else if (param_name_ == "rate") {
             int rate = std::stoi(param_value_);
             // Validate supported baud rates based on common values in Hamlib
-            std::vector<int> valid_rates = {150, 300, 600, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 
-                                          230400, 460800, 500000, 576000, 921600, 1000000, 1152000, 1500000, 
+            std::vector<int> valid_rates = {150, 300, 600, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200,
+                                          230400, 460800, 500000, 576000, 921600, 1000000, 1152000, 1500000,
                                           2000000, 2500000, 3000000, 3500000, 4000000};
             if (std::find(valid_rates.begin(), valid_rates.end(), rate) != valid_rates.end()) {
-                hamlib_instance_->my_rig->state.rigport.parm.serial.rate = rate;
-                result_code_ = RIG_OK;
+                shim_rig_set_serial_rate(hamlib_instance_->my_rig, rate);
+                result_code_ = SHIM_RIG_OK;
             } else {
-                result_code_ = -RIG_EINVAL;
+                result_code_ = SHIM_RIG_EINVAL;
                 error_message_ = "Invalid baud rate value";
             }
         } else if (param_name_ == "timeout") {
             int timeout_val = std::stoi(param_value_);
             if (timeout_val >= 0) {
-                hamlib_instance_->my_rig->state.rigport.timeout = timeout_val;
-                result_code_ = RIG_OK;
+                shim_rig_set_port_timeout(hamlib_instance_->my_rig, timeout_val);
+                result_code_ = SHIM_RIG_OK;
             } else {
-                result_code_ = -RIG_EINVAL;
+                result_code_ = SHIM_RIG_EINVAL;
                 error_message_ = "Timeout must be non-negative";
             }
         } else if (param_name_ == "retry") {
             int retry_val = std::stoi(param_value_);
             if (retry_val >= 0) {
-                hamlib_instance_->my_rig->state.rigport.retry = (short)retry_val;
-                result_code_ = RIG_OK;
+                shim_rig_set_port_retry(hamlib_instance_->my_rig, retry_val);
+                result_code_ = SHIM_RIG_OK;
             } else {
-                result_code_ = -RIG_EINVAL;
+                result_code_ = SHIM_RIG_EINVAL;
                 error_message_ = "Retry count must be non-negative";
             }
         } else if (param_name_ == "write_delay") {
             int delay = std::stoi(param_value_);
             if (delay >= 0) {
-                hamlib_instance_->my_rig->state.rigport.write_delay = delay;
-                result_code_ = RIG_OK;
+                shim_rig_set_port_write_delay(hamlib_instance_->my_rig, delay);
+                result_code_ = SHIM_RIG_OK;
             } else {
-                result_code_ = -RIG_EINVAL;
+                result_code_ = SHIM_RIG_EINVAL;
                 error_message_ = "Write delay must be non-negative";
             }
         } else if (param_name_ == "post_write_delay") {
             int delay = std::stoi(param_value_);
             if (delay >= 0) {
-                hamlib_instance_->my_rig->state.rigport.post_write_delay = delay;
-                result_code_ = RIG_OK;
+                shim_rig_set_port_post_write_delay(hamlib_instance_->my_rig, delay);
+                result_code_ = SHIM_RIG_OK;
             } else {
-                result_code_ = -RIG_EINVAL;
+                result_code_ = SHIM_RIG_EINVAL;
                 error_message_ = "Post write delay must be non-negative";
             }
         } else if (param_name_ == "flushx") {
             if (param_value_ == "true" || param_value_ == "1") {
-                hamlib_instance_->my_rig->state.rigport.flushx = 1;
-                result_code_ = RIG_OK;
+                shim_rig_set_port_flushx(hamlib_instance_->my_rig, 1);
+                result_code_ = SHIM_RIG_OK;
             } else if (param_value_ == "false" || param_value_ == "0") {
-                hamlib_instance_->my_rig->state.rigport.flushx = 0;
-                result_code_ = RIG_OK;
+                shim_rig_set_port_flushx(hamlib_instance_->my_rig, 0);
+                result_code_ = SHIM_RIG_OK;
             } else {
-                result_code_ = -RIG_EINVAL;
+                result_code_ = SHIM_RIG_EINVAL;
                 error_message_ = "Flushx must be true/false or 1/0";
             }
         } else {
-            result_code_ = -RIG_EINVAL;
+            result_code_ = SHIM_RIG_EINVAL;
             error_message_ = "Unknown serial configuration parameter";
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -1507,96 +1494,96 @@ public:
         
         // Get serial configuration parameter
         if (param_name_ == "data_bits") {
-            param_value_ = std::to_string(hamlib_instance_->my_rig->state.rigport.parm.serial.data_bits);
-            result_code_ = RIG_OK;
+            param_value_ = std::to_string(shim_rig_get_serial_data_bits(hamlib_instance_->my_rig));
+            result_code_ = SHIM_RIG_OK;
         } else if (param_name_ == "stop_bits") {
-            param_value_ = std::to_string(hamlib_instance_->my_rig->state.rigport.parm.serial.stop_bits);
-            result_code_ = RIG_OK;
+            param_value_ = std::to_string(shim_rig_get_serial_stop_bits(hamlib_instance_->my_rig));
+            result_code_ = SHIM_RIG_OK;
         } else if (param_name_ == "serial_parity") {
-            switch (hamlib_instance_->my_rig->state.rigport.parm.serial.parity) {
-                case RIG_PARITY_NONE:
+            switch (shim_rig_get_serial_parity(hamlib_instance_->my_rig)) {
+                case SHIM_RIG_PARITY_NONE:
                     param_value_ = "None";
                     break;
-                case RIG_PARITY_EVEN:
+                case SHIM_RIG_PARITY_EVEN:
                     param_value_ = "Even";
                     break;
-                case RIG_PARITY_ODD:
+                case SHIM_RIG_PARITY_ODD:
                     param_value_ = "Odd";
                     break;
                 default:
                     param_value_ = "Unknown";
                     break;
             }
-            result_code_ = RIG_OK;
+            result_code_ = SHIM_RIG_OK;
         } else if (param_name_ == "serial_handshake") {
-            switch (hamlib_instance_->my_rig->state.rigport.parm.serial.handshake) {
-                case RIG_HANDSHAKE_NONE:
+            switch (shim_rig_get_serial_handshake(hamlib_instance_->my_rig)) {
+                case SHIM_RIG_HANDSHAKE_NONE:
                     param_value_ = "None";
                     break;
-                case RIG_HANDSHAKE_HARDWARE:
+                case SHIM_RIG_HANDSHAKE_HARDWARE:
                     param_value_ = "Hardware";
                     break;
-                case RIG_HANDSHAKE_XONXOFF:
+                case SHIM_RIG_HANDSHAKE_XONXOFF:
                     param_value_ = "Software";
                     break;
                 default:
                     param_value_ = "Unknown";
                     break;
             }
-            result_code_ = RIG_OK;
+            result_code_ = SHIM_RIG_OK;
         } else if (param_name_ == "rts_state") {
-            switch (hamlib_instance_->my_rig->state.rigport.parm.serial.rts_state) {
-                case RIG_SIGNAL_ON:
+            switch (shim_rig_get_serial_rts_state(hamlib_instance_->my_rig)) {
+                case SHIM_RIG_SIGNAL_ON:
                     param_value_ = "ON";
                     break;
-                case RIG_SIGNAL_OFF:
+                case SHIM_RIG_SIGNAL_OFF:
                     param_value_ = "OFF";
                     break;
                 default:
                     param_value_ = "Unknown";
                     break;
             }
-            result_code_ = RIG_OK;
+            result_code_ = SHIM_RIG_OK;
         } else if (param_name_ == "dtr_state") {
-            switch (hamlib_instance_->my_rig->state.rigport.parm.serial.dtr_state) {
-                case RIG_SIGNAL_ON:
+            switch (shim_rig_get_serial_dtr_state(hamlib_instance_->my_rig)) {
+                case SHIM_RIG_SIGNAL_ON:
                     param_value_ = "ON";
                     break;
-                case RIG_SIGNAL_OFF:
+                case SHIM_RIG_SIGNAL_OFF:
                     param_value_ = "OFF";
                     break;
                 default:
                     param_value_ = "Unknown";
                     break;
             }
-            result_code_ = RIG_OK;
+            result_code_ = SHIM_RIG_OK;
         } else if (param_name_ == "rate") {
-            param_value_ = std::to_string(hamlib_instance_->my_rig->state.rigport.parm.serial.rate);
-            result_code_ = RIG_OK;
+            param_value_ = std::to_string(shim_rig_get_serial_rate(hamlib_instance_->my_rig));
+            result_code_ = SHIM_RIG_OK;
         } else if (param_name_ == "timeout") {
-            param_value_ = std::to_string(hamlib_instance_->my_rig->state.rigport.timeout);
-            result_code_ = RIG_OK;
+            param_value_ = std::to_string(shim_rig_get_port_timeout(hamlib_instance_->my_rig));
+            result_code_ = SHIM_RIG_OK;
         } else if (param_name_ == "retry") {
-            param_value_ = std::to_string(hamlib_instance_->my_rig->state.rigport.retry);
-            result_code_ = RIG_OK;
+            param_value_ = std::to_string(shim_rig_get_port_retry(hamlib_instance_->my_rig));
+            result_code_ = SHIM_RIG_OK;
         } else if (param_name_ == "write_delay") {
-            param_value_ = std::to_string(hamlib_instance_->my_rig->state.rigport.write_delay);
-            result_code_ = RIG_OK;
+            param_value_ = std::to_string(shim_rig_get_port_write_delay(hamlib_instance_->my_rig));
+            result_code_ = SHIM_RIG_OK;
         } else if (param_name_ == "post_write_delay") {
-            param_value_ = std::to_string(hamlib_instance_->my_rig->state.rigport.post_write_delay);
-            result_code_ = RIG_OK;
+            param_value_ = std::to_string(shim_rig_get_port_post_write_delay(hamlib_instance_->my_rig));
+            result_code_ = SHIM_RIG_OK;
         } else if (param_name_ == "flushx") {
-            param_value_ = hamlib_instance_->my_rig->state.rigport.flushx ? "true" : "false";
-            result_code_ = RIG_OK;
+            param_value_ = shim_rig_get_port_flushx(hamlib_instance_->my_rig) ? "true" : "false";
+            result_code_ = SHIM_RIG_OK;
         } else {
-            result_code_ = -RIG_EINVAL;
+            result_code_ = SHIM_RIG_EINVAL;
             error_message_ = "Unknown serial configuration parameter";
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::String::New(env, param_value_));
@@ -1616,42 +1603,42 @@ private:
 // Set PTT Type AsyncWorker
 class SetPttTypeAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetPttTypeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, const std::string& ptt_type)
-        : HamLibAsyncWorker(env, hamlib_instance), ptt_type_(ptt_type) {}
+    SetPttTypeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, const std::string& intype)
+        : HamLibAsyncWorker(env, hamlib_instance), intype_(intype) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        ptt_type_t ptt_type;
-        if (ptt_type_ == "RIG") {
-            ptt_type = RIG_PTT_RIG;
-        } else if (ptt_type_ == "DTR") {
-            ptt_type = RIG_PTT_SERIAL_DTR;
-        } else if (ptt_type_ == "RTS") {
-            ptt_type = RIG_PTT_SERIAL_RTS;
-        } else if (ptt_type_ == "PARALLEL") {
-            ptt_type = RIG_PTT_PARALLEL;
-        } else if (ptt_type_ == "CM108") {
-            ptt_type = RIG_PTT_CM108;
-        } else if (ptt_type_ == "GPIO") {
-            ptt_type = RIG_PTT_GPIO;
-        } else if (ptt_type_ == "GPION") {
-            ptt_type = RIG_PTT_GPION;
-        } else if (ptt_type_ == "NONE") {
-            ptt_type = RIG_PTT_NONE;
+        int intype;
+        if (intype_ == "RIG") {
+            intype = SHIM_RIG_PTT_RIG;
+        } else if (intype_ == "DTR") {
+            intype = SHIM_RIG_PTT_SERIAL_DTR;
+        } else if (intype_ == "RTS") {
+            intype = SHIM_RIG_PTT_SERIAL_RTS;
+        } else if (intype_ == "PARALLEL") {
+            intype = SHIM_RIG_PTT_PARALLEL;
+        } else if (intype_ == "CM108") {
+            intype = SHIM_RIG_PTT_CM108;
+        } else if (intype_ == "GPIO") {
+            intype = SHIM_RIG_PTT_GPIO;
+        } else if (intype_ == "GPION") {
+            intype = SHIM_RIG_PTT_GPION;
+        } else if (intype_ == "NONE") {
+            intype = SHIM_RIG_PTT_NONE;
         } else {
-            result_code_ = -RIG_EINVAL;
+            result_code_ = SHIM_RIG_EINVAL;
             error_message_ = "Invalid PTT type";
             return;
         }
         
-        hamlib_instance_->my_rig->state.pttport.type.ptt = ptt_type;
-        result_code_ = RIG_OK;
+        shim_rig_set_ptt_type(hamlib_instance_->my_rig, intype);
+        result_code_ = SHIM_RIG_OK;
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -1664,7 +1651,7 @@ public:
     }
     
 private:
-    std::string ptt_type_;
+    std::string intype_;
 };
 
 // Get PTT Type AsyncWorker
@@ -1676,46 +1663,46 @@ public:
     void Execute() override {
         CHECK_RIG_VALID();
         
-        ptt_type_t ptt_type = hamlib_instance_->my_rig->state.pttport.type.ptt;
+        int intype = shim_rig_get_ptt_type(hamlib_instance_->my_rig);
         
-        switch (ptt_type) {
-            case RIG_PTT_RIG:
-                ptt_type_str_ = "RIG";
+        switch (intype) {
+            case SHIM_RIG_PTT_RIG:
+                intype_str_ = "RIG";
                 break;
-            case RIG_PTT_SERIAL_DTR:
-                ptt_type_str_ = "DTR";
+            case SHIM_RIG_PTT_SERIAL_DTR:
+                intype_str_ = "DTR";
                 break;
-            case RIG_PTT_SERIAL_RTS:
-                ptt_type_str_ = "RTS";
+            case SHIM_RIG_PTT_SERIAL_RTS:
+                intype_str_ = "RTS";
                 break;
-            case RIG_PTT_PARALLEL:
-                ptt_type_str_ = "PARALLEL";
+            case SHIM_RIG_PTT_PARALLEL:
+                intype_str_ = "PARALLEL";
                 break;
-            case RIG_PTT_CM108:
-                ptt_type_str_ = "CM108";
+            case SHIM_RIG_PTT_CM108:
+                intype_str_ = "CM108";
                 break;
-            case RIG_PTT_GPIO:
-                ptt_type_str_ = "GPIO";
+            case SHIM_RIG_PTT_GPIO:
+                intype_str_ = "GPIO";
                 break;
-            case RIG_PTT_GPION:
-                ptt_type_str_ = "GPION";
+            case SHIM_RIG_PTT_GPION:
+                intype_str_ = "GPION";
                 break;
-            case RIG_PTT_NONE:
-                ptt_type_str_ = "NONE";
+            case SHIM_RIG_PTT_NONE:
+                intype_str_ = "NONE";
                 break;
             default:
-                ptt_type_str_ = "Unknown";
+                intype_str_ = "Unknown";
                 break;
         }
-        result_code_ = RIG_OK;
+        result_code_ = SHIM_RIG_OK;
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
-            deferred_.Resolve(Napi::String::New(env, ptt_type_str_));
+            deferred_.Resolve(Napi::String::New(env, intype_str_));
         }
     }
     
@@ -1725,50 +1712,50 @@ public:
     }
     
 private:
-    std::string ptt_type_str_;
+    std::string intype_str_;
 };
 
 // Set DCD Type AsyncWorker
 class SetDcdTypeAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetDcdTypeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, const std::string& dcd_type)
-        : HamLibAsyncWorker(env, hamlib_instance), dcd_type_(dcd_type) {}
+    SetDcdTypeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, const std::string& intype)
+        : HamLibAsyncWorker(env, hamlib_instance), intype_(intype) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        dcd_type_t dcd_type;
-        if (dcd_type_ == "RIG") {
-            dcd_type = RIG_DCD_RIG;
-        } else if (dcd_type_ == "DSR") {
-            dcd_type = RIG_DCD_SERIAL_DSR;
-        } else if (dcd_type_ == "CTS") {
-            dcd_type = RIG_DCD_SERIAL_CTS;
-        } else if (dcd_type_ == "CD") {
-            dcd_type = RIG_DCD_SERIAL_CAR;
-        } else if (dcd_type_ == "PARALLEL") {
-            dcd_type = RIG_DCD_PARALLEL;
-        } else if (dcd_type_ == "CM108") {
-            dcd_type = RIG_DCD_CM108;
-        } else if (dcd_type_ == "GPIO") {
-            dcd_type = RIG_DCD_GPIO;
-        } else if (dcd_type_ == "GPION") {
-            dcd_type = RIG_DCD_GPION;
-        } else if (dcd_type_ == "NONE") {
-            dcd_type = RIG_DCD_NONE;
+        int intype;
+        if (intype_ == "RIG") {
+            intype = SHIM_RIG_DCD_RIG;
+        } else if (intype_ == "DSR") {
+            intype = SHIM_RIG_DCD_SERIAL_DSR;
+        } else if (intype_ == "CTS") {
+            intype = SHIM_RIG_DCD_SERIAL_CTS;
+        } else if (intype_ == "CD") {
+            intype = SHIM_RIG_DCD_SERIAL_CAR;
+        } else if (intype_ == "PARALLEL") {
+            intype = SHIM_RIG_DCD_PARALLEL;
+        } else if (intype_ == "CM108") {
+            intype = SHIM_RIG_DCD_CM108;
+        } else if (intype_ == "GPIO") {
+            intype = SHIM_RIG_DCD_GPIO;
+        } else if (intype_ == "GPION") {
+            intype = SHIM_RIG_DCD_GPION;
+        } else if (intype_ == "NONE") {
+            intype = SHIM_RIG_DCD_NONE;
         } else {
-            result_code_ = -RIG_EINVAL;
+            result_code_ = SHIM_RIG_EINVAL;
             error_message_ = "Invalid DCD type";
             return;
         }
         
-        hamlib_instance_->my_rig->state.dcdport.type.dcd = dcd_type;
-        result_code_ = RIG_OK;
+        shim_rig_set_dcd_type(hamlib_instance_->my_rig, intype);
+        result_code_ = SHIM_RIG_OK;
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -1781,7 +1768,7 @@ public:
     }
     
 private:
-    std::string dcd_type_;
+    std::string intype_;
 };
 
 // Get DCD Type AsyncWorker
@@ -1793,49 +1780,49 @@ public:
     void Execute() override {
         CHECK_RIG_VALID();
         
-        dcd_type_t dcd_type = hamlib_instance_->my_rig->state.dcdport.type.dcd;
+        int intype = shim_rig_get_dcd_type(hamlib_instance_->my_rig);
         
-        switch (dcd_type) {
-            case RIG_DCD_RIG:
-                dcd_type_str_ = "RIG";
+        switch (intype) {
+            case SHIM_RIG_DCD_RIG:
+                intype_str_ = "RIG";
                 break;
-            case RIG_DCD_SERIAL_DSR:
-                dcd_type_str_ = "DSR";
+            case SHIM_RIG_DCD_SERIAL_DSR:
+                intype_str_ = "DSR";
                 break;
-            case RIG_DCD_SERIAL_CTS:
-                dcd_type_str_ = "CTS";
+            case SHIM_RIG_DCD_SERIAL_CTS:
+                intype_str_ = "CTS";
                 break;
-            case RIG_DCD_SERIAL_CAR:
-                dcd_type_str_ = "CD";
+            case SHIM_RIG_DCD_SERIAL_CAR:
+                intype_str_ = "CD";
                 break;
-            case RIG_DCD_PARALLEL:
-                dcd_type_str_ = "PARALLEL";
+            case SHIM_RIG_DCD_PARALLEL:
+                intype_str_ = "PARALLEL";
                 break;
-            case RIG_DCD_CM108:
-                dcd_type_str_ = "CM108";
+            case SHIM_RIG_DCD_CM108:
+                intype_str_ = "CM108";
                 break;
-            case RIG_DCD_GPIO:
-                dcd_type_str_ = "GPIO";
+            case SHIM_RIG_DCD_GPIO:
+                intype_str_ = "GPIO";
                 break;
-            case RIG_DCD_GPION:
-                dcd_type_str_ = "GPION";
+            case SHIM_RIG_DCD_GPION:
+                intype_str_ = "GPION";
                 break;
-            case RIG_DCD_NONE:
-                dcd_type_str_ = "NONE";
+            case SHIM_RIG_DCD_NONE:
+                intype_str_ = "NONE";
                 break;
             default:
-                dcd_type_str_ = "Unknown";
+                intype_str_ = "Unknown";
                 break;
         }
-        result_code_ = RIG_OK;
+        result_code_ = SHIM_RIG_OK;
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
-            deferred_.Resolve(Napi::String::New(env, dcd_type_str_));
+            deferred_.Resolve(Napi::String::New(env, intype_str_));
         }
     }
     
@@ -1845,27 +1832,27 @@ public:
     }
     
 private:
-    std::string dcd_type_str_;
+    std::string intype_str_;
 };
 
 // Power Control AsyncWorker classes
 class SetPowerstatAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetPowerstatAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, powerstat_t status)
+    SetPowerstatAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int status)
         : HamLibAsyncWorker(env, hamlib_instance), status_(status) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_set_powerstat(hamlib_instance_->my_rig, status_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_set_powerstat(hamlib_instance_->my_rig, status_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -1878,26 +1865,26 @@ public:
     }
     
 private:
-    powerstat_t status_;
+    int status_;
 };
 
 class GetPowerstatAsyncWorker : public HamLibAsyncWorker {
 public:
     GetPowerstatAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
-        : HamLibAsyncWorker(env, hamlib_instance), status_(RIG_POWER_UNKNOWN) {}
+        : HamLibAsyncWorker(env, hamlib_instance), status_(SHIM_RIG_POWER_UNKNOWN) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_get_powerstat(hamlib_instance_->my_rig, &status_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_get_powerstat(hamlib_instance_->my_rig, &status_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, static_cast<int>(status_)));
@@ -1910,30 +1897,30 @@ public:
     }
     
 private:
-    powerstat_t status_;
+    int status_;
 };
 
 // PTT Status Detection AsyncWorker
 class GetPttAsyncWorker : public HamLibAsyncWorker {
 public:
-    GetPttAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
-        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), ptt_(RIG_PTT_OFF) {}
+    GetPttAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
+        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), ptt_(SHIM_RIG_PTT_OFF) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_get_ptt(hamlib_instance_->my_rig, vfo_, &ptt_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_get_ptt(hamlib_instance_->my_rig, vfo_, &ptt_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
-            deferred_.Resolve(Napi::Boolean::New(env, ptt_ == RIG_PTT_ON));
+            deferred_.Resolve(Napi::Boolean::New(env, ptt_ == SHIM_RIG_PTT_ON));
         }
     }
     
@@ -1943,31 +1930,31 @@ public:
     }
     
 private:
-    vfo_t vfo_;
-    ptt_t ptt_;
+    int vfo_;
+    int ptt_;
 };
 
 // Data Carrier Detect AsyncWorker
 class GetDcdAsyncWorker : public HamLibAsyncWorker {
 public:
-    GetDcdAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
-        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), dcd_(RIG_DCD_OFF) {}
+    GetDcdAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
+        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), dcd_(SHIM_RIG_DCD_OFF) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_get_dcd(hamlib_instance_->my_rig, vfo_, &dcd_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_get_dcd(hamlib_instance_->my_rig, vfo_, &dcd_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
-            deferred_.Resolve(Napi::Boolean::New(env, dcd_ == RIG_DCD_ON));
+            deferred_.Resolve(Napi::Boolean::New(env, dcd_ == SHIM_RIG_DCD_ON));
         }
     }
     
@@ -1977,28 +1964,28 @@ public:
     }
     
 private:
-    vfo_t vfo_;
-    dcd_t dcd_;
+    int vfo_;
+    int dcd_;
 };
 
 // Tuning Step Control AsyncWorker classes
 class SetTuningStepAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetTuningStepAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo, shortfreq_t ts)
+    SetTuningStepAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, int ts)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), ts_(ts) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_set_ts(hamlib_instance_->my_rig, vfo_, ts_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_set_ts(hamlib_instance_->my_rig, vfo_, ts_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -2011,27 +1998,27 @@ public:
     }
     
 private:
-    vfo_t vfo_;
-    shortfreq_t ts_;
+    int vfo_;
+    int ts_;
 };
 
 class GetTuningStepAsyncWorker : public HamLibAsyncWorker {
 public:
-    GetTuningStepAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
+    GetTuningStepAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), ts_(0) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_get_ts(hamlib_instance_->my_rig, vfo_, &ts_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_get_ts(hamlib_instance_->my_rig, vfo_, &ts_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, ts_));
@@ -2044,28 +2031,28 @@ public:
     }
     
 private:
-    vfo_t vfo_;
-    shortfreq_t ts_;
+    int vfo_;
+    int ts_;
 };
 
 // Repeater Control AsyncWorker classes
 class SetRepeaterShiftAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetRepeaterShiftAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo, rptr_shift_t shift)
+    SetRepeaterShiftAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, int shift)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), shift_(shift) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_set_rptr_shift(hamlib_instance_->my_rig, vfo_, shift_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_set_rptr_shift(hamlib_instance_->my_rig, vfo_, shift_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -2078,27 +2065,27 @@ public:
     }
     
 private:
-    vfo_t vfo_;
-    rptr_shift_t shift_;
+    int vfo_;
+    int shift_;
 };
 
 class GetRepeaterShiftAsyncWorker : public HamLibAsyncWorker {
 public:
-    GetRepeaterShiftAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
-        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), shift_(RIG_RPT_SHIFT_NONE) {}
+    GetRepeaterShiftAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
+        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), shift_(SHIM_RIG_RPT_SHIFT_NONE) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_get_rptr_shift(hamlib_instance_->my_rig, vfo_, &shift_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_get_rptr_shift(hamlib_instance_->my_rig, vfo_, &shift_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        const char* shift_str = rig_strptrshift(shift_);
+        const char* shift_str = shim_rig_strptrshift(shift_);
         deferred_.Resolve(Napi::String::New(env, shift_str));
     }
     
@@ -2108,27 +2095,27 @@ public:
     }
     
 private:
-    vfo_t vfo_;
-    rptr_shift_t shift_;
+    int vfo_;
+    int shift_;
 };
 
 class SetRepeaterOffsetAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetRepeaterOffsetAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo, shortfreq_t offset)
+    SetRepeaterOffsetAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, int offset)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), offset_(offset) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_set_rptr_offs(hamlib_instance_->my_rig, vfo_, offset_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_set_rptr_offs(hamlib_instance_->my_rig, vfo_, offset_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -2141,27 +2128,27 @@ public:
     }
     
 private:
-    vfo_t vfo_;
-    shortfreq_t offset_;
+    int vfo_;
+    int offset_;
 };
 
 class GetRepeaterOffsetAsyncWorker : public HamLibAsyncWorker {
 public:
-    GetRepeaterOffsetAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
+    GetRepeaterOffsetAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), offset_(0) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_get_rptr_offs(hamlib_instance_->my_rig, vfo_, &offset_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_get_rptr_offs(hamlib_instance_->my_rig, vfo_, &offset_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, offset_));
@@ -2174,18 +2161,18 @@ public:
     }
     
 private:
-    vfo_t vfo_;
-    shortfreq_t offset_;
+    int vfo_;
+    int offset_;
 };
 
 // Helper function to parse VFO parameter from JavaScript
-vfo_t parseVfoParameter(const Napi::CallbackInfo& info, int index, vfo_t defaultVfo = RIG_VFO_CURR) {
+int parseVfoParameter(const Napi::CallbackInfo& info, int index, int defaultVfo = SHIM_RIG_VFO_CURR) {
     if (info.Length() > index && info[index].IsString()) {
         std::string vfoStr = info[index].As<Napi::String>().Utf8Value();
         if (vfoStr == "VFO-A") {
-            return RIG_VFO_A;
+            return SHIM_RIG_VFO_A;
         } else if (vfoStr == "VFO-B") {
-            return RIG_VFO_B;
+            return SHIM_RIG_VFO_B;
         }
     }
     return defaultVfo;
@@ -2205,35 +2192,35 @@ NodeHamLib::NodeHamLib(const Napi::CallbackInfo & info): ObjectWrap(info) {
   }
 
   // Set default port path if not provided
-  strncpy(port_path, "/dev/ttyUSB0", HAMLIB_FILPATHLEN - 1);
-  port_path[HAMLIB_FILPATHLEN - 1] = '\0';
+  strncpy(port_path, "/dev/ttyUSB0", SHIM_HAMLIB_FILPATHLEN - 1);
+  port_path[SHIM_HAMLIB_FILPATHLEN - 1] = '\0';
 
   // Check if port path is provided as second argument
   if (info.Length() >= 2) {
     if (info[1].IsString()) {
       std::string portStr = info[1].As<Napi::String>().Utf8Value();
-      strncpy(port_path, portStr.c_str(), HAMLIB_FILPATHLEN - 1);
-      port_path[HAMLIB_FILPATHLEN - 1] = '\0';
+      strncpy(port_path, portStr.c_str(), SHIM_HAMLIB_FILPATHLEN - 1);
+      port_path[SHIM_HAMLIB_FILPATHLEN - 1] = '\0';
     }
     // Note: Debug level is now controlled globally via HamLib.setDebugLevel()
     // and set to RIG_DEBUG_NONE by default in addon initialization
   }
-  //rig_model_t myrig_model;
+  //unsigned int myrig_model;
   //   hamlib_port_t myport;
   // /* may be overriden by backend probe */
   // myport.type.rig = RIG_PORT_SERIAL;
   // myport.parm.serial.rate = 38400;
   // myport.parm.serial.data_bits = 8;
   // myport.parm.serial.stop_bits = 2;
-  // myport.parm.serial.parity = RIG_PARITY_NONE;
-  // myport.parm.serial.handshake = RIG_HANDSHAKE_HARDWARE;
-  // strncpy(myport.pathname, "/dev/ttyUSB0", HAMLIB_FILPATHLEN - 1);
+  // myport.parm.serial.parity = SHIM_RIG_PARITY_NONE;
+  // myport.parm.serial.handshake = SHIM_RIG_HANDSHAKE_HARDWARE;
+  // strncpy(myport.pathname, "/dev/ttyUSB0", SHIM_HAMLIB_FILPATHLEN - 1);
 
-  // rig_load_all_backends();
+  // shim_rig_load_all_backends();
   // myrig_model = rig_probe(&myport);
   // fprintf(stderr, "Got Rig Model %d \n", myrig_model);
 
-  rig_model_t myrig_model = info[0].As < Napi::Number > ().DoubleValue();
+  unsigned int myrig_model = info[0].As < Napi::Number > ().DoubleValue();
   original_model = myrig_model;
 
   // Check if port_path is a network address (contains colon)
@@ -2245,7 +2232,7 @@ NodeHamLib::NodeHamLib(const Napi::CallbackInfo & info): ObjectWrap(info) {
     // Network connection will be established on open()
   }
 
-  my_rig = rig_init(myrig_model);
+  my_rig = shim_rig_init(myrig_model);
   //int retcode = 0;
   if (!my_rig) {
     // Create detailed error message
@@ -2256,15 +2243,15 @@ NodeHamLib::NodeHamLib(const Napi::CallbackInfo & info): ObjectWrap(info) {
   }
   
   // Set port path and type based on connection type
-  strncpy(my_rig -> state.rigport.pathname, port_path, HAMLIB_FILPATHLEN - 1);
-  
+  shim_rig_set_port_path(my_rig, port_path);
+
   if (is_network_rig) {
-    my_rig -> state.rigport.type.rig = RIG_PORT_NETWORK;
+    shim_rig_set_port_type(my_rig, SHIM_RIG_PORT_NETWORK);
   } else {
-    my_rig -> state.rigport.type.rig = RIG_PORT_SERIAL;
+    shim_rig_set_port_type(my_rig, SHIM_RIG_PORT_SERIAL);
   }
 
-  // this->freq_emit_cb = [info](freq_t freq) {
+  // this->freq_emit_cb = [info](double freq) {
   //     Napi::Env env = info.Env();
   //     Napi::Function emit = info.This().As<Napi::Object>().Get("emit").As<Napi::Function>();
   //       emit.Call(
@@ -2281,16 +2268,16 @@ NodeHamLib::~NodeHamLib() {
   if (my_rig) {
     // 如果rig是打开状态，先关闭
     if (rig_is_open) {
-      rig_close(my_rig);
+      shim_rig_close(my_rig);
       rig_is_open = false;
     }
     // 清理rig资源
-    rig_cleanup(my_rig);
+    shim_rig_cleanup(my_rig);
     my_rig = nullptr;
   }
 }
 
-int NodeHamLib::freq_change_cb(RIG *rig, vfo_t vfo, freq_t freq, void* arg) {
+int NodeHamLib::freq_change_cb(void *handle, int vfo, double freq, void* arg) {
       auto instance = static_cast<NodeHamLib*>(arg);
       printf("Rig changed freq to %0.7f Hz\n", freq);
       Napi::Env env = instance->m_currentInfo->Env();
@@ -2336,12 +2323,12 @@ Napi::Value NodeHamLib::SetVFO(const Napi::CallbackInfo & info) {
   }
   
   std::string name = info[0].As<Napi::String>().Utf8Value();
-  vfo_t vfo;
+  int vfo;
   
   if (name == "VFO-A") {
-    vfo = RIG_VFO_A;
+    vfo = SHIM_RIG_VFO_A;
   } else if (name == "VFO-B") {
-    vfo = RIG_VFO_B;
+    vfo = SHIM_RIG_VFO_B;
   } else {
     Napi::TypeError::New(env, "Invalid VFO name")
       .ThrowAsJavaScriptException();
@@ -2375,7 +2362,7 @@ Napi::Value NodeHamLib::SetFrequency(const Napi::CallbackInfo & info) {
     return env.Null();
   }
   
-  freq_t freq = info[0].As<Napi::Number>().DoubleValue();
+  double freq = info[0].As<Napi::Number>().DoubleValue();
   
   // Basic frequency range validation
   if (freq < 1000 || freq > 10000000000) { // 1 kHz to 10 GHz reasonable range
@@ -2384,14 +2371,14 @@ Napi::Value NodeHamLib::SetFrequency(const Napi::CallbackInfo & info) {
   }
   
   // Support optional VFO parameter
-  vfo_t vfo = RIG_VFO_CURR;
+  int vfo = SHIM_RIG_VFO_CURR;
   
   if (info.Length() >= 2 && info[1].IsString()) {
     std::string vfostr = info[1].As<Napi::String>().Utf8Value();
     if (vfostr == "VFO-A") {
-      vfo = RIG_VFO_A;
+      vfo = SHIM_RIG_VFO_A;
     } else if (vfostr == "VFO-B") {
-      vfo = RIG_VFO_B;
+      vfo = SHIM_RIG_VFO_B;
     }
   }
   
@@ -2423,32 +2410,32 @@ Napi::Value NodeHamLib::SetMode(const Napi::CallbackInfo & info) {
   }
 
   std::string modestr = info[0].As<Napi::String>().Utf8Value();
-  rmode_t mode = rig_parse_mode(modestr.c_str());
+  int mode = shim_rig_parse_mode(modestr.c_str());
   
-  if (mode == RIG_MODE_NONE) {
+  if (mode == SHIM_RIG_MODE_NONE) {
     Napi::Error::New(env, "Invalid mode: " + modestr).ThrowAsJavaScriptException();
     return env.Null();
   }
   
-  pbwidth_t bandwidth = RIG_PASSBAND_NORMAL;
-  vfo_t vfo = RIG_VFO_CURR;
+  int bandwidth = SHIM_RIG_PASSBAND_NORMAL;
+  int vfo = SHIM_RIG_VFO_CURR;
 
   // Parse parameters: setMode(mode) or setMode(mode, bandwidth) or setMode(mode, bandwidth, vfo)
   if (info.Length() >= 2 && info[1].IsString()) {
     std::string bandstr = info[1].As<Napi::String>().Utf8Value();
     if (bandstr == "narrow") {
-      bandwidth = rig_passband_narrow(my_rig, mode);
+      bandwidth = shim_rig_passband_narrow(my_rig, mode);
     } else if (bandstr == "wide") {
-      bandwidth = rig_passband_wide(my_rig, mode);
+      bandwidth = shim_rig_passband_wide(my_rig, mode);
     } else {
       // If second parameter is not "narrow" or "wide", might be VFO
-      vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+      vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
     }
   }
   
   // Check for third parameter (VFO) if bandwidth was specified
   if (info.Length() >= 3) {
-    vfo = parseVfoParameter(info, 2, RIG_VFO_CURR);
+    vfo = parseVfoParameter(info, 2, SHIM_RIG_VFO_CURR);
   }
 
   SetModeAsyncWorker* worker = new SetModeAsyncWorker(env, this, mode, bandwidth, vfo);
@@ -2480,7 +2467,7 @@ Napi::Value NodeHamLib::SetPtt(const Napi::CallbackInfo & info) {
   
   bool ptt_state = info[0].As<Napi::Boolean>();
   
-  ptt_t ptt = ptt_state ? RIG_PTT_ON : RIG_PTT_OFF;
+  int ptt = ptt_state ? SHIM_RIG_PTT_ON : SHIM_RIG_PTT_OFF;
   SetPttAsyncWorker* worker = new SetPttAsyncWorker(env, this, ptt);
   worker->Queue();
   
@@ -2512,14 +2499,14 @@ Napi::Value NodeHamLib::GetFrequency(const Napi::CallbackInfo & info) {
   }
   
   // Support optional VFO parameter
-  vfo_t vfo = RIG_VFO_CURR;
+  int vfo = SHIM_RIG_VFO_CURR;
   
   if (info.Length() >= 1 && info[0].IsString()) {
     std::string vfostr = info[0].As<Napi::String>().Utf8Value();
     if (vfostr == "VFO-A") {
-      vfo = RIG_VFO_A;
+      vfo = SHIM_RIG_VFO_A;
     } else if (vfostr == "VFO-B") {
-      vfo = RIG_VFO_B;
+      vfo = SHIM_RIG_VFO_B;
     }
   }
   
@@ -2554,10 +2541,10 @@ Napi::Value NodeHamLib::GetStrength(const Napi::CallbackInfo & info) {
   }
   
   // Support optional VFO parameter: getStrength() or getStrength(vfo)
-  vfo_t vfo = RIG_VFO_CURR;
+  int vfo = SHIM_RIG_VFO_CURR;
   
   if (info.Length() >= 1 && info[0].IsString()) {
-    vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+    vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
   }
   
   GetStrengthAsyncWorker* worker = new GetStrengthAsyncWorker(env, this, vfo);
@@ -2626,11 +2613,11 @@ Napi::Value NodeHamLib::SetMemoryChannel(const Napi::CallbackInfo & info) {
   Napi::Object chanObj = info[1].As<Napi::Object>();
   
   // Create channel structure
-  channel_t chan;
+  shim_channel_t chan;
   memset(&chan, 0, sizeof(chan));
   
   chan.channel_num = channel_num;
-  chan.vfo = RIG_VFO_MEM;
+  chan.vfo = SHIM_RIG_VFO_MEM;
   
   // Extract frequency
   if (chanObj.Has("frequency")) {
@@ -2640,14 +2627,14 @@ Napi::Value NodeHamLib::SetMemoryChannel(const Napi::CallbackInfo & info) {
   // Extract mode
   if (chanObj.Has("mode")) {
     std::string modeStr = chanObj.Get("mode").As<Napi::String>().Utf8Value();
-    chan.mode = rig_parse_mode(modeStr.c_str());
+    chan.mode = shim_rig_parse_mode(modeStr.c_str());
   }
   
   // Extract bandwidth
   if (chanObj.Has("bandwidth")) {
     chan.width = chanObj.Get("bandwidth").As<Napi::Number>().Int32Value();
   } else {
-    chan.width = RIG_PASSBAND_NORMAL;
+    chan.width = SHIM_RIG_PASSBAND_NORMAL;
   }
   
   // Extract channel description
@@ -2660,7 +2647,7 @@ Napi::Value NodeHamLib::SetMemoryChannel(const Napi::CallbackInfo & info) {
   // Extract TX frequency for split operation
   if (chanObj.Has("txFrequency")) {
     chan.tx_freq = chanObj.Get("txFrequency").As<Napi::Number>().DoubleValue();
-    chan.split = RIG_SPLIT_ON;
+    chan.split = SHIM_RIG_SPLIT_ON;
   }
   
   // Extract CTCSS tone
@@ -2736,7 +2723,7 @@ Napi::Value NodeHamLib::SetRit(const Napi::CallbackInfo & info) {
     return env.Null();
   }
   
-  shortfreq_t rit_offset = info[0].As<Napi::Number>().Int32Value();
+  int rit_offset = info[0].As<Napi::Number>().Int32Value();
   
   SetRitAsyncWorker* worker = new SetRitAsyncWorker(env, this, rit_offset);
   worker->Queue();
@@ -2771,7 +2758,7 @@ Napi::Value NodeHamLib::SetXit(const Napi::CallbackInfo & info) {
     return env.Null();
   }
   
-  shortfreq_t xit_offset = info[0].As<Napi::Number>().Int32Value();
+  int xit_offset = info[0].As<Napi::Number>().Int32Value();
   
   SetXitAsyncWorker* worker = new SetXitAsyncWorker(env, this, xit_offset);
   worker->Queue();
@@ -2822,18 +2809,18 @@ Napi::Value NodeHamLib::StartScan(const Napi::CallbackInfo & info) {
   }
   
   std::string scanTypeStr = info[0].As<Napi::String>().Utf8Value();
-  scan_t scanType;
+  int scanType;
   
   if (scanTypeStr == "VFO") {
-    scanType = RIG_SCAN_VFO;
+    scanType = SHIM_RIG_SCAN_VFO;
   } else if (scanTypeStr == "MEM") {
-    scanType = RIG_SCAN_MEM;
+    scanType = SHIM_RIG_SCAN_MEM;
   } else if (scanTypeStr == "PROG") {
-    scanType = RIG_SCAN_PROG;
+    scanType = SHIM_RIG_SCAN_PROG;
   } else if (scanTypeStr == "DELTA") {
-    scanType = RIG_SCAN_DELTA;
+    scanType = SHIM_RIG_SCAN_DELTA;
   } else if (scanTypeStr == "PRIO") {
-    scanType = RIG_SCAN_PRIO;
+    scanType = SHIM_RIG_SCAN_PRIO;
   } else {
     Napi::TypeError::New(env, "Invalid scan type").ThrowAsJavaScriptException();
     return env.Null();
@@ -2880,56 +2867,54 @@ Napi::Value NodeHamLib::SetLevel(const Napi::CallbackInfo & info) {
   double levelValue = info[1].As<Napi::Number>().DoubleValue();
   
   // Map level type strings to hamlib constants
-  setting_t levelType;
+  uint64_t levelType;
   if (levelTypeStr == "AF") {
-    levelType = RIG_LEVEL_AF;
+    levelType = SHIM_RIG_LEVEL_AF;
   } else if (levelTypeStr == "RF") {
-    levelType = RIG_LEVEL_RF;
+    levelType = SHIM_RIG_LEVEL_RF;
   } else if (levelTypeStr == "SQL") {
-    levelType = RIG_LEVEL_SQL;
+    levelType = SHIM_RIG_LEVEL_SQL;
   } else if (levelTypeStr == "RFPOWER") {
-    levelType = RIG_LEVEL_RFPOWER;
+    levelType = SHIM_RIG_LEVEL_RFPOWER;
   } else if (levelTypeStr == "MICGAIN") {
-    levelType = RIG_LEVEL_MICGAIN;
+    levelType = SHIM_RIG_LEVEL_MICGAIN;
   } else if (levelTypeStr == "IF") {
-    levelType = RIG_LEVEL_IF;
+    levelType = SHIM_RIG_LEVEL_IF;
   } else if (levelTypeStr == "APF") {
-    levelType = RIG_LEVEL_APF;
+    levelType = SHIM_RIG_LEVEL_APF;
   } else if (levelTypeStr == "NR") {
-    levelType = RIG_LEVEL_NR;
+    levelType = SHIM_RIG_LEVEL_NR;
   } else if (levelTypeStr == "PBT_IN") {
-    levelType = RIG_LEVEL_PBT_IN;
+    levelType = SHIM_RIG_LEVEL_PBT_IN;
   } else if (levelTypeStr == "PBT_OUT") {
-    levelType = RIG_LEVEL_PBT_OUT;
+    levelType = SHIM_RIG_LEVEL_PBT_OUT;
   } else if (levelTypeStr == "CWPITCH") {
-    levelType = RIG_LEVEL_CWPITCH;
+    levelType = SHIM_RIG_LEVEL_CWPITCH;
   } else if (levelTypeStr == "KEYSPD") {
-    levelType = RIG_LEVEL_KEYSPD;
+    levelType = SHIM_RIG_LEVEL_KEYSPD;
   } else if (levelTypeStr == "NOTCHF") {
-    levelType = RIG_LEVEL_NOTCHF;
+    levelType = SHIM_RIG_LEVEL_NOTCHF;
   } else if (levelTypeStr == "COMP") {
-    levelType = RIG_LEVEL_COMP;
+    levelType = SHIM_RIG_LEVEL_COMP;
   } else if (levelTypeStr == "AGC") {
-    levelType = RIG_LEVEL_AGC;
+    levelType = SHIM_RIG_LEVEL_AGC;
   } else if (levelTypeStr == "BKINDL") {
-    levelType = RIG_LEVEL_BKINDL;
+    levelType = SHIM_RIG_LEVEL_BKINDL;
   } else if (levelTypeStr == "BALANCE") {
-    levelType = RIG_LEVEL_BALANCE;
+    levelType = SHIM_RIG_LEVEL_BALANCE;
   } else if (levelTypeStr == "VOXGAIN") {
-    levelType = RIG_LEVEL_VOXGAIN;
+    levelType = SHIM_RIG_LEVEL_VOXGAIN;
   } else if (levelTypeStr == "VOXDELAY") {
-    levelType = RIG_LEVEL_VOXDELAY;
+    levelType = SHIM_RIG_LEVEL_VOXDELAY;
   } else if (levelTypeStr == "ANTIVOX") {
-    levelType = RIG_LEVEL_ANTIVOX;
+    levelType = SHIM_RIG_LEVEL_ANTIVOX;
   } else {
     Napi::TypeError::New(env, "Invalid level type").ThrowAsJavaScriptException();
     return env.Null();
   }
   
-  // Create value union
-  value_t val;
-  val.f = levelValue;
-  
+  float val = static_cast<float>(levelValue);
+
   SetLevelAsyncWorker* worker = new SetLevelAsyncWorker(env, this, levelType, val);
   worker->Queue();
   
@@ -2952,35 +2937,35 @@ Napi::Value NodeHamLib::GetLevel(const Napi::CallbackInfo & info) {
   std::string levelTypeStr = info[0].As<Napi::String>().Utf8Value();
   
   // Map level type strings to hamlib constants
-  setting_t levelType;
+  uint64_t levelType;
   if (levelTypeStr == "AF") {
-    levelType = RIG_LEVEL_AF;
+    levelType = SHIM_RIG_LEVEL_AF;
   } else if (levelTypeStr == "RF") {
-    levelType = RIG_LEVEL_RF;
+    levelType = SHIM_RIG_LEVEL_RF;
   } else if (levelTypeStr == "SQL") {
-    levelType = RIG_LEVEL_SQL;
+    levelType = SHIM_RIG_LEVEL_SQL;
   } else if (levelTypeStr == "RFPOWER") {
-    levelType = RIG_LEVEL_RFPOWER;
+    levelType = SHIM_RIG_LEVEL_RFPOWER;
   } else if (levelTypeStr == "MICGAIN") {
-    levelType = RIG_LEVEL_MICGAIN;
+    levelType = SHIM_RIG_LEVEL_MICGAIN;
   } else if (levelTypeStr == "SWR") {
-    levelType = RIG_LEVEL_SWR;
+    levelType = SHIM_RIG_LEVEL_SWR;
   } else if (levelTypeStr == "ALC") {
-    levelType = RIG_LEVEL_ALC;
+    levelType = SHIM_RIG_LEVEL_ALC;
   } else if (levelTypeStr == "STRENGTH") {
-    levelType = RIG_LEVEL_STRENGTH;
+    levelType = SHIM_RIG_LEVEL_STRENGTH;
   } else if (levelTypeStr == "RAWSTR") {
-    levelType = RIG_LEVEL_RAWSTR;
+    levelType = SHIM_RIG_LEVEL_RAWSTR;
   } else if (levelTypeStr == "RFPOWER_METER") {
-    levelType = RIG_LEVEL_RFPOWER_METER;
+    levelType = SHIM_RIG_LEVEL_RFPOWER_METER;
   } else if (levelTypeStr == "COMP_METER") {
-    levelType = RIG_LEVEL_COMP_METER;
+    levelType = SHIM_RIG_LEVEL_COMP_METER;
   } else if (levelTypeStr == "VD_METER") {
-    levelType = RIG_LEVEL_VD_METER;
+    levelType = SHIM_RIG_LEVEL_VD_METER;
   } else if (levelTypeStr == "ID_METER") {
-    levelType = RIG_LEVEL_ID_METER;
+    levelType = SHIM_RIG_LEVEL_ID_METER;
   } else if (levelTypeStr == "TEMP_METER") {
-    levelType = RIG_LEVEL_TEMP_METER;
+    levelType = SHIM_RIG_LEVEL_TEMP_METER;
   } else {
     Napi::TypeError::New(env, "Invalid level type").ThrowAsJavaScriptException();
     return env.Null();
@@ -2996,40 +2981,40 @@ Napi::Value NodeHamLib::GetSupportedLevels(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
   // Get capabilities from rig caps instead of state (doesn't require rig to be open)
-  setting_t levels = my_rig->caps->has_get_level | my_rig->caps->has_set_level;
+  uint64_t levels = shim_rig_get_caps_has_get_level(my_rig) | shim_rig_get_caps_has_set_level(my_rig);
   Napi::Array levelArray = Napi::Array::New(env);
   uint32_t index = 0;
   
   // Check each level type
-  if (levels & RIG_LEVEL_AF) levelArray[index++] = Napi::String::New(env, "AF");
-  if (levels & RIG_LEVEL_RF) levelArray[index++] = Napi::String::New(env, "RF");
-  if (levels & RIG_LEVEL_SQL) levelArray[index++] = Napi::String::New(env, "SQL");
-  if (levels & RIG_LEVEL_RFPOWER) levelArray[index++] = Napi::String::New(env, "RFPOWER");
-  if (levels & RIG_LEVEL_MICGAIN) levelArray[index++] = Napi::String::New(env, "MICGAIN");
-  if (levels & RIG_LEVEL_IF) levelArray[index++] = Napi::String::New(env, "IF");
-  if (levels & RIG_LEVEL_APF) levelArray[index++] = Napi::String::New(env, "APF");
-  if (levels & RIG_LEVEL_NR) levelArray[index++] = Napi::String::New(env, "NR");
-  if (levels & RIG_LEVEL_PBT_IN) levelArray[index++] = Napi::String::New(env, "PBT_IN");
-  if (levels & RIG_LEVEL_PBT_OUT) levelArray[index++] = Napi::String::New(env, "PBT_OUT");
-  if (levels & RIG_LEVEL_CWPITCH) levelArray[index++] = Napi::String::New(env, "CWPITCH");
-  if (levels & RIG_LEVEL_KEYSPD) levelArray[index++] = Napi::String::New(env, "KEYSPD");
-  if (levels & RIG_LEVEL_NOTCHF) levelArray[index++] = Napi::String::New(env, "NOTCHF");
-  if (levels & RIG_LEVEL_COMP) levelArray[index++] = Napi::String::New(env, "COMP");
-  if (levels & RIG_LEVEL_AGC) levelArray[index++] = Napi::String::New(env, "AGC");
-  if (levels & RIG_LEVEL_BKINDL) levelArray[index++] = Napi::String::New(env, "BKINDL");
-  if (levels & RIG_LEVEL_BALANCE) levelArray[index++] = Napi::String::New(env, "BALANCE");
-  if (levels & RIG_LEVEL_VOXGAIN) levelArray[index++] = Napi::String::New(env, "VOXGAIN");
-  if (levels & RIG_LEVEL_VOXDELAY) levelArray[index++] = Napi::String::New(env, "VOXDELAY");
-  if (levels & RIG_LEVEL_ANTIVOX) levelArray[index++] = Napi::String::New(env, "ANTIVOX");
-  if (levels & RIG_LEVEL_STRENGTH) levelArray[index++] = Napi::String::New(env, "STRENGTH");
-  if (levels & RIG_LEVEL_RAWSTR) levelArray[index++] = Napi::String::New(env, "RAWSTR");
-  if (levels & RIG_LEVEL_SWR) levelArray[index++] = Napi::String::New(env, "SWR");
-  if (levels & RIG_LEVEL_ALC) levelArray[index++] = Napi::String::New(env, "ALC");
-  if (levels & RIG_LEVEL_RFPOWER_METER) levelArray[index++] = Napi::String::New(env, "RFPOWER_METER");
-  if (levels & RIG_LEVEL_COMP_METER) levelArray[index++] = Napi::String::New(env, "COMP_METER");
-  if (levels & RIG_LEVEL_VD_METER) levelArray[index++] = Napi::String::New(env, "VD_METER");
-  if (levels & RIG_LEVEL_ID_METER) levelArray[index++] = Napi::String::New(env, "ID_METER");
-  if (levels & RIG_LEVEL_TEMP_METER) levelArray[index++] = Napi::String::New(env, "TEMP_METER");
+  if (levels & SHIM_RIG_LEVEL_AF) levelArray[index++] = Napi::String::New(env, "AF");
+  if (levels & SHIM_RIG_LEVEL_RF) levelArray[index++] = Napi::String::New(env, "RF");
+  if (levels & SHIM_RIG_LEVEL_SQL) levelArray[index++] = Napi::String::New(env, "SQL");
+  if (levels & SHIM_RIG_LEVEL_RFPOWER) levelArray[index++] = Napi::String::New(env, "RFPOWER");
+  if (levels & SHIM_RIG_LEVEL_MICGAIN) levelArray[index++] = Napi::String::New(env, "MICGAIN");
+  if (levels & SHIM_RIG_LEVEL_IF) levelArray[index++] = Napi::String::New(env, "IF");
+  if (levels & SHIM_RIG_LEVEL_APF) levelArray[index++] = Napi::String::New(env, "APF");
+  if (levels & SHIM_RIG_LEVEL_NR) levelArray[index++] = Napi::String::New(env, "NR");
+  if (levels & SHIM_RIG_LEVEL_PBT_IN) levelArray[index++] = Napi::String::New(env, "PBT_IN");
+  if (levels & SHIM_RIG_LEVEL_PBT_OUT) levelArray[index++] = Napi::String::New(env, "PBT_OUT");
+  if (levels & SHIM_RIG_LEVEL_CWPITCH) levelArray[index++] = Napi::String::New(env, "CWPITCH");
+  if (levels & SHIM_RIG_LEVEL_KEYSPD) levelArray[index++] = Napi::String::New(env, "KEYSPD");
+  if (levels & SHIM_RIG_LEVEL_NOTCHF) levelArray[index++] = Napi::String::New(env, "NOTCHF");
+  if (levels & SHIM_RIG_LEVEL_COMP) levelArray[index++] = Napi::String::New(env, "COMP");
+  if (levels & SHIM_RIG_LEVEL_AGC) levelArray[index++] = Napi::String::New(env, "AGC");
+  if (levels & SHIM_RIG_LEVEL_BKINDL) levelArray[index++] = Napi::String::New(env, "BKINDL");
+  if (levels & SHIM_RIG_LEVEL_BALANCE) levelArray[index++] = Napi::String::New(env, "BALANCE");
+  if (levels & SHIM_RIG_LEVEL_VOXGAIN) levelArray[index++] = Napi::String::New(env, "VOXGAIN");
+  if (levels & SHIM_RIG_LEVEL_VOXDELAY) levelArray[index++] = Napi::String::New(env, "VOXDELAY");
+  if (levels & SHIM_RIG_LEVEL_ANTIVOX) levelArray[index++] = Napi::String::New(env, "ANTIVOX");
+  if (levels & SHIM_RIG_LEVEL_STRENGTH) levelArray[index++] = Napi::String::New(env, "STRENGTH");
+  if (levels & SHIM_RIG_LEVEL_RAWSTR) levelArray[index++] = Napi::String::New(env, "RAWSTR");
+  if (levels & SHIM_RIG_LEVEL_SWR) levelArray[index++] = Napi::String::New(env, "SWR");
+  if (levels & SHIM_RIG_LEVEL_ALC) levelArray[index++] = Napi::String::New(env, "ALC");
+  if (levels & SHIM_RIG_LEVEL_RFPOWER_METER) levelArray[index++] = Napi::String::New(env, "RFPOWER_METER");
+  if (levels & SHIM_RIG_LEVEL_COMP_METER) levelArray[index++] = Napi::String::New(env, "COMP_METER");
+  if (levels & SHIM_RIG_LEVEL_VD_METER) levelArray[index++] = Napi::String::New(env, "VD_METER");
+  if (levels & SHIM_RIG_LEVEL_ID_METER) levelArray[index++] = Napi::String::New(env, "ID_METER");
+  if (levels & SHIM_RIG_LEVEL_TEMP_METER) levelArray[index++] = Napi::String::New(env, "TEMP_METER");
   
   return levelArray;
 }
@@ -3052,63 +3037,63 @@ Napi::Value NodeHamLib::SetFunction(const Napi::CallbackInfo & info) {
   bool enable = info[1].As<Napi::Boolean>().Value();
   
   // Map function type strings to hamlib constants
-  setting_t funcType;
+  uint64_t funcType;
   if (funcTypeStr == "FAGC") {
-    funcType = RIG_FUNC_FAGC;
+    funcType = SHIM_RIG_FUNC_FAGC;
   } else if (funcTypeStr == "NB") {
-    funcType = RIG_FUNC_NB;
+    funcType = SHIM_RIG_FUNC_NB;
   } else if (funcTypeStr == "COMP") {
-    funcType = RIG_FUNC_COMP;
+    funcType = SHIM_RIG_FUNC_COMP;
   } else if (funcTypeStr == "VOX") {
-    funcType = RIG_FUNC_VOX;
+    funcType = SHIM_RIG_FUNC_VOX;
   } else if (funcTypeStr == "TONE") {
-    funcType = RIG_FUNC_TONE;
+    funcType = SHIM_RIG_FUNC_TONE;
   } else if (funcTypeStr == "TSQL") {
-    funcType = RIG_FUNC_TSQL;
+    funcType = SHIM_RIG_FUNC_TSQL;
   } else if (funcTypeStr == "SBKIN") {
-    funcType = RIG_FUNC_SBKIN;
+    funcType = SHIM_RIG_FUNC_SBKIN;
   } else if (funcTypeStr == "FBKIN") {
-    funcType = RIG_FUNC_FBKIN;
+    funcType = SHIM_RIG_FUNC_FBKIN;
   } else if (funcTypeStr == "ANF") {
-    funcType = RIG_FUNC_ANF;
+    funcType = SHIM_RIG_FUNC_ANF;
   } else if (funcTypeStr == "NR") {
-    funcType = RIG_FUNC_NR;
+    funcType = SHIM_RIG_FUNC_NR;
   } else if (funcTypeStr == "AIP") {
-    funcType = RIG_FUNC_AIP;
+    funcType = SHIM_RIG_FUNC_AIP;
   } else if (funcTypeStr == "APF") {
-    funcType = RIG_FUNC_APF;
+    funcType = SHIM_RIG_FUNC_APF;
   } else if (funcTypeStr == "TUNER") {
-    funcType = RIG_FUNC_TUNER;
+    funcType = SHIM_RIG_FUNC_TUNER;
   } else if (funcTypeStr == "XIT") {
-    funcType = RIG_FUNC_XIT;
+    funcType = SHIM_RIG_FUNC_XIT;
   } else if (funcTypeStr == "RIT") {
-    funcType = RIG_FUNC_RIT;
+    funcType = SHIM_RIG_FUNC_RIT;
   } else if (funcTypeStr == "LOCK") {
-    funcType = RIG_FUNC_LOCK;
+    funcType = SHIM_RIG_FUNC_LOCK;
   } else if (funcTypeStr == "MUTE") {
-    funcType = RIG_FUNC_MUTE;
+    funcType = SHIM_RIG_FUNC_MUTE;
   } else if (funcTypeStr == "VSC") {
-    funcType = RIG_FUNC_VSC;
+    funcType = SHIM_RIG_FUNC_VSC;
   } else if (funcTypeStr == "REV") {
-    funcType = RIG_FUNC_REV;
+    funcType = SHIM_RIG_FUNC_REV;
   } else if (funcTypeStr == "SQL") {
-    funcType = RIG_FUNC_SQL;
+    funcType = SHIM_RIG_FUNC_SQL;
   } else if (funcTypeStr == "ABM") {
-    funcType = RIG_FUNC_ABM;
+    funcType = SHIM_RIG_FUNC_ABM;
   } else if (funcTypeStr == "BC") {
-    funcType = RIG_FUNC_BC;
+    funcType = SHIM_RIG_FUNC_BC;
   } else if (funcTypeStr == "MBC") {
-    funcType = RIG_FUNC_MBC;
+    funcType = SHIM_RIG_FUNC_MBC;
   } else if (funcTypeStr == "AFC") {
-    funcType = RIG_FUNC_AFC;
+    funcType = SHIM_RIG_FUNC_AFC;
   } else if (funcTypeStr == "SATMODE") {
-    funcType = RIG_FUNC_SATMODE;
+    funcType = SHIM_RIG_FUNC_SATMODE;
   } else if (funcTypeStr == "SCOPE") {
-    funcType = RIG_FUNC_SCOPE;
+    funcType = SHIM_RIG_FUNC_SCOPE;
   } else if (funcTypeStr == "RESUME") {
-    funcType = RIG_FUNC_RESUME;
+    funcType = SHIM_RIG_FUNC_RESUME;
   } else if (funcTypeStr == "TBURST") {
-    funcType = RIG_FUNC_TBURST;
+    funcType = SHIM_RIG_FUNC_TBURST;
   } else {
     Napi::TypeError::New(env, "Invalid function type").ThrowAsJavaScriptException();
     return env.Null();
@@ -3136,63 +3121,63 @@ Napi::Value NodeHamLib::GetFunction(const Napi::CallbackInfo & info) {
   std::string funcTypeStr = info[0].As<Napi::String>().Utf8Value();
   
   // Map function type strings to hamlib constants (same as SetFunction)
-  setting_t funcType;
+  uint64_t funcType;
   if (funcTypeStr == "FAGC") {
-    funcType = RIG_FUNC_FAGC;
+    funcType = SHIM_RIG_FUNC_FAGC;
   } else if (funcTypeStr == "NB") {
-    funcType = RIG_FUNC_NB;
+    funcType = SHIM_RIG_FUNC_NB;
   } else if (funcTypeStr == "COMP") {
-    funcType = RIG_FUNC_COMP;
+    funcType = SHIM_RIG_FUNC_COMP;
   } else if (funcTypeStr == "VOX") {
-    funcType = RIG_FUNC_VOX;
+    funcType = SHIM_RIG_FUNC_VOX;
   } else if (funcTypeStr == "TONE") {
-    funcType = RIG_FUNC_TONE;
+    funcType = SHIM_RIG_FUNC_TONE;
   } else if (funcTypeStr == "TSQL") {
-    funcType = RIG_FUNC_TSQL;
+    funcType = SHIM_RIG_FUNC_TSQL;
   } else if (funcTypeStr == "SBKIN") {
-    funcType = RIG_FUNC_SBKIN;
+    funcType = SHIM_RIG_FUNC_SBKIN;
   } else if (funcTypeStr == "FBKIN") {
-    funcType = RIG_FUNC_FBKIN;
+    funcType = SHIM_RIG_FUNC_FBKIN;
   } else if (funcTypeStr == "ANF") {
-    funcType = RIG_FUNC_ANF;
+    funcType = SHIM_RIG_FUNC_ANF;
   } else if (funcTypeStr == "NR") {
-    funcType = RIG_FUNC_NR;
+    funcType = SHIM_RIG_FUNC_NR;
   } else if (funcTypeStr == "AIP") {
-    funcType = RIG_FUNC_AIP;
+    funcType = SHIM_RIG_FUNC_AIP;
   } else if (funcTypeStr == "APF") {
-    funcType = RIG_FUNC_APF;
+    funcType = SHIM_RIG_FUNC_APF;
   } else if (funcTypeStr == "TUNER") {
-    funcType = RIG_FUNC_TUNER;
+    funcType = SHIM_RIG_FUNC_TUNER;
   } else if (funcTypeStr == "XIT") {
-    funcType = RIG_FUNC_XIT;
+    funcType = SHIM_RIG_FUNC_XIT;
   } else if (funcTypeStr == "RIT") {
-    funcType = RIG_FUNC_RIT;
+    funcType = SHIM_RIG_FUNC_RIT;
   } else if (funcTypeStr == "LOCK") {
-    funcType = RIG_FUNC_LOCK;
+    funcType = SHIM_RIG_FUNC_LOCK;
   } else if (funcTypeStr == "MUTE") {
-    funcType = RIG_FUNC_MUTE;
+    funcType = SHIM_RIG_FUNC_MUTE;
   } else if (funcTypeStr == "VSC") {
-    funcType = RIG_FUNC_VSC;
+    funcType = SHIM_RIG_FUNC_VSC;
   } else if (funcTypeStr == "REV") {
-    funcType = RIG_FUNC_REV;
+    funcType = SHIM_RIG_FUNC_REV;
   } else if (funcTypeStr == "SQL") {
-    funcType = RIG_FUNC_SQL;
+    funcType = SHIM_RIG_FUNC_SQL;
   } else if (funcTypeStr == "ABM") {
-    funcType = RIG_FUNC_ABM;
+    funcType = SHIM_RIG_FUNC_ABM;
   } else if (funcTypeStr == "BC") {
-    funcType = RIG_FUNC_BC;
+    funcType = SHIM_RIG_FUNC_BC;
   } else if (funcTypeStr == "MBC") {
-    funcType = RIG_FUNC_MBC;
+    funcType = SHIM_RIG_FUNC_MBC;
   } else if (funcTypeStr == "AFC") {
-    funcType = RIG_FUNC_AFC;
+    funcType = SHIM_RIG_FUNC_AFC;
   } else if (funcTypeStr == "SATMODE") {
-    funcType = RIG_FUNC_SATMODE;
+    funcType = SHIM_RIG_FUNC_SATMODE;
   } else if (funcTypeStr == "SCOPE") {
-    funcType = RIG_FUNC_SCOPE;
+    funcType = SHIM_RIG_FUNC_SCOPE;
   } else if (funcTypeStr == "RESUME") {
-    funcType = RIG_FUNC_RESUME;
+    funcType = SHIM_RIG_FUNC_RESUME;
   } else if (funcTypeStr == "TBURST") {
-    funcType = RIG_FUNC_TBURST;
+    funcType = SHIM_RIG_FUNC_TBURST;
   } else {
     Napi::TypeError::New(env, "Invalid function type").ThrowAsJavaScriptException();
     return env.Null();
@@ -3208,39 +3193,39 @@ Napi::Value NodeHamLib::GetSupportedFunctions(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
   // Get capabilities from rig caps instead of state (doesn't require rig to be open)
-  setting_t functions = my_rig->caps->has_get_func | my_rig->caps->has_set_func;
+  uint64_t functions = shim_rig_get_caps_has_get_func(my_rig) | shim_rig_get_caps_has_set_func(my_rig);
   Napi::Array funcArray = Napi::Array::New(env);
   uint32_t index = 0;
   
   // Check each function type
-  if (functions & RIG_FUNC_FAGC) funcArray[index++] = Napi::String::New(env, "FAGC");
-  if (functions & RIG_FUNC_NB) funcArray[index++] = Napi::String::New(env, "NB");
-  if (functions & RIG_FUNC_COMP) funcArray[index++] = Napi::String::New(env, "COMP");
-  if (functions & RIG_FUNC_VOX) funcArray[index++] = Napi::String::New(env, "VOX");
-  if (functions & RIG_FUNC_TONE) funcArray[index++] = Napi::String::New(env, "TONE");
-  if (functions & RIG_FUNC_TSQL) funcArray[index++] = Napi::String::New(env, "TSQL");
-  if (functions & RIG_FUNC_SBKIN) funcArray[index++] = Napi::String::New(env, "SBKIN");
-  if (functions & RIG_FUNC_FBKIN) funcArray[index++] = Napi::String::New(env, "FBKIN");
-  if (functions & RIG_FUNC_ANF) funcArray[index++] = Napi::String::New(env, "ANF");
-  if (functions & RIG_FUNC_NR) funcArray[index++] = Napi::String::New(env, "NR");
-  if (functions & RIG_FUNC_AIP) funcArray[index++] = Napi::String::New(env, "AIP");
-  if (functions & RIG_FUNC_APF) funcArray[index++] = Napi::String::New(env, "APF");
-  if (functions & RIG_FUNC_TUNER) funcArray[index++] = Napi::String::New(env, "TUNER");
-  if (functions & RIG_FUNC_XIT) funcArray[index++] = Napi::String::New(env, "XIT");
-  if (functions & RIG_FUNC_RIT) funcArray[index++] = Napi::String::New(env, "RIT");
-  if (functions & RIG_FUNC_LOCK) funcArray[index++] = Napi::String::New(env, "LOCK");
-  if (functions & RIG_FUNC_MUTE) funcArray[index++] = Napi::String::New(env, "MUTE");
-  if (functions & RIG_FUNC_VSC) funcArray[index++] = Napi::String::New(env, "VSC");
-  if (functions & RIG_FUNC_REV) funcArray[index++] = Napi::String::New(env, "REV");
-  if (functions & RIG_FUNC_SQL) funcArray[index++] = Napi::String::New(env, "SQL");
-  if (functions & RIG_FUNC_ABM) funcArray[index++] = Napi::String::New(env, "ABM");
-  if (functions & RIG_FUNC_BC) funcArray[index++] = Napi::String::New(env, "BC");
-  if (functions & RIG_FUNC_MBC) funcArray[index++] = Napi::String::New(env, "MBC");
-  if (functions & RIG_FUNC_AFC) funcArray[index++] = Napi::String::New(env, "AFC");
-  if (functions & RIG_FUNC_SATMODE) funcArray[index++] = Napi::String::New(env, "SATMODE");
-  if (functions & RIG_FUNC_SCOPE) funcArray[index++] = Napi::String::New(env, "SCOPE");
-  if (functions & RIG_FUNC_RESUME) funcArray[index++] = Napi::String::New(env, "RESUME");
-  if (functions & RIG_FUNC_TBURST) funcArray[index++] = Napi::String::New(env, "TBURST");
+  if (functions & SHIM_RIG_FUNC_FAGC) funcArray[index++] = Napi::String::New(env, "FAGC");
+  if (functions & SHIM_RIG_FUNC_NB) funcArray[index++] = Napi::String::New(env, "NB");
+  if (functions & SHIM_RIG_FUNC_COMP) funcArray[index++] = Napi::String::New(env, "COMP");
+  if (functions & SHIM_RIG_FUNC_VOX) funcArray[index++] = Napi::String::New(env, "VOX");
+  if (functions & SHIM_RIG_FUNC_TONE) funcArray[index++] = Napi::String::New(env, "TONE");
+  if (functions & SHIM_RIG_FUNC_TSQL) funcArray[index++] = Napi::String::New(env, "TSQL");
+  if (functions & SHIM_RIG_FUNC_SBKIN) funcArray[index++] = Napi::String::New(env, "SBKIN");
+  if (functions & SHIM_RIG_FUNC_FBKIN) funcArray[index++] = Napi::String::New(env, "FBKIN");
+  if (functions & SHIM_RIG_FUNC_ANF) funcArray[index++] = Napi::String::New(env, "ANF");
+  if (functions & SHIM_RIG_FUNC_NR) funcArray[index++] = Napi::String::New(env, "NR");
+  if (functions & SHIM_RIG_FUNC_AIP) funcArray[index++] = Napi::String::New(env, "AIP");
+  if (functions & SHIM_RIG_FUNC_APF) funcArray[index++] = Napi::String::New(env, "APF");
+  if (functions & SHIM_RIG_FUNC_TUNER) funcArray[index++] = Napi::String::New(env, "TUNER");
+  if (functions & SHIM_RIG_FUNC_XIT) funcArray[index++] = Napi::String::New(env, "XIT");
+  if (functions & SHIM_RIG_FUNC_RIT) funcArray[index++] = Napi::String::New(env, "RIT");
+  if (functions & SHIM_RIG_FUNC_LOCK) funcArray[index++] = Napi::String::New(env, "LOCK");
+  if (functions & SHIM_RIG_FUNC_MUTE) funcArray[index++] = Napi::String::New(env, "MUTE");
+  if (functions & SHIM_RIG_FUNC_VSC) funcArray[index++] = Napi::String::New(env, "VSC");
+  if (functions & SHIM_RIG_FUNC_REV) funcArray[index++] = Napi::String::New(env, "REV");
+  if (functions & SHIM_RIG_FUNC_SQL) funcArray[index++] = Napi::String::New(env, "SQL");
+  if (functions & SHIM_RIG_FUNC_ABM) funcArray[index++] = Napi::String::New(env, "ABM");
+  if (functions & SHIM_RIG_FUNC_BC) funcArray[index++] = Napi::String::New(env, "BC");
+  if (functions & SHIM_RIG_FUNC_MBC) funcArray[index++] = Napi::String::New(env, "MBC");
+  if (functions & SHIM_RIG_FUNC_AFC) funcArray[index++] = Napi::String::New(env, "AFC");
+  if (functions & SHIM_RIG_FUNC_SATMODE) funcArray[index++] = Napi::String::New(env, "SATMODE");
+  if (functions & SHIM_RIG_FUNC_SCOPE) funcArray[index++] = Napi::String::New(env, "SCOPE");
+  if (functions & SHIM_RIG_FUNC_RESUME) funcArray[index++] = Napi::String::New(env, "RESUME");
+  if (functions & SHIM_RIG_FUNC_TBURST) funcArray[index++] = Napi::String::New(env, "TBURST");
   
   return funcArray;
 }
@@ -3250,16 +3235,16 @@ Napi::Value NodeHamLib::GetSupportedModes(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
 
   // Get mode list from rig state (populated during rig_open from rx/tx range lists)
-  rmode_t modes = my_rig->state.mode_list;
+  uint64_t modes = shim_rig_get_mode_list(my_rig);
   Napi::Array modeArray = Napi::Array::New(env);
   uint32_t index = 0;
 
   // Iterate through all possible mode bits (similar to rig_sprintf_mode)
-  for (unsigned int i = 0; i < HAMLIB_MAX_MODES; i++) {
-    rmode_t mode_bit = modes & (1ULL << i);
+  for (unsigned int i = 0; i < SHIM_HAMLIB_MAX_MODES; i++) {
+    uint64_t mode_bit = modes & (1ULL << i);
 
     if (mode_bit) {
-      const char* mode_str = rig_strrmode(mode_bit);
+      const char* mode_str = shim_rig_strrmode(mode_bit);
 
       // Skip empty or unknown modes
       if (mode_str && mode_str[0] != '\0') {
@@ -3285,7 +3270,7 @@ Napi::Value NodeHamLib::SetSplitFreq(const Napi::CallbackInfo & info) {
     return env.Null();
   }
   
-  freq_t tx_freq = info[0].As<Napi::Number>().DoubleValue();
+  double tx_freq = info[0].As<Napi::Number>().DoubleValue();
   
   // Basic frequency range validation
   if (tx_freq < 1000 || tx_freq > 10000000000) { // 1 kHz to 10 GHz reasonable range
@@ -3293,11 +3278,11 @@ Napi::Value NodeHamLib::SetSplitFreq(const Napi::CallbackInfo & info) {
     return env.Null();
   }
   
-  vfo_t vfo = RIG_VFO_CURR;
+  int vfo = SHIM_RIG_VFO_CURR;
   
   if (info.Length() >= 2 && info[1].IsString()) {
     // setSplitFreq(freq, vfo)
-    vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+    vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
   }
   
   SetSplitFreqAsyncWorker* asyncWorker = new SetSplitFreqAsyncWorker(env, this, tx_freq, vfo);
@@ -3313,13 +3298,13 @@ Napi::Value NodeHamLib::GetSplitFreq(const Napi::CallbackInfo & info) {
     return env.Null();
   }
   
-  vfo_t vfo = RIG_VFO_CURR;
+  int vfo = SHIM_RIG_VFO_CURR;
   
   if (info.Length() >= 1 && info[0].IsString()) {
     // getSplitFreq(vfo)
-    vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+    vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
   }
-  // Otherwise use default RIG_VFO_CURR for getSplitFreq()
+  // Otherwise use default SHIM_RIG_VFO_CURR for getSplitFreq()
   
   GetSplitFreqAsyncWorker* asyncWorker = new GetSplitFreqAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -3340,21 +3325,21 @@ Napi::Value NodeHamLib::SetSplitMode(const Napi::CallbackInfo & info) {
   }
   
   std::string modeStr = info[0].As<Napi::String>().Utf8Value();
-  rmode_t tx_mode = rig_parse_mode(modeStr.c_str());
+  int tx_mode = shim_rig_parse_mode(modeStr.c_str());
   
-  if (tx_mode == RIG_MODE_NONE) {
+  if (tx_mode == SHIM_RIG_MODE_NONE) {
     Napi::Error::New(env, "Invalid mode: " + modeStr).ThrowAsJavaScriptException();
     return env.Null();
   }
   
-  pbwidth_t tx_width = RIG_PASSBAND_NORMAL;
-  vfo_t vfo = RIG_VFO_CURR;
+  int tx_width = SHIM_RIG_PASSBAND_NORMAL;
+  int vfo = SHIM_RIG_VFO_CURR;
   
   // Parse parameters: setSplitMode(mode) | setSplitMode(mode, vfo) | setSplitMode(mode, width) | setSplitMode(mode, width, vfo)
   if (info.Length() == 2) {
     if (info[1].IsString()) {
       // setSplitMode(mode, vfo)
-      vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+      vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
     } else if (info[1].IsNumber()) {
       // setSplitMode(mode, width)
       tx_width = info[1].As<Napi::Number>().Int32Value();
@@ -3362,7 +3347,7 @@ Napi::Value NodeHamLib::SetSplitMode(const Napi::CallbackInfo & info) {
   } else if (info.Length() == 3 && info[1].IsNumber() && info[2].IsString()) {
     // setSplitMode(mode, width, vfo)
     tx_width = info[1].As<Napi::Number>().Int32Value();
-    vfo = parseVfoParameter(info, 2, RIG_VFO_CURR);
+    vfo = parseVfoParameter(info, 2, SHIM_RIG_VFO_CURR);
   }
   
   SetSplitModeAsyncWorker* asyncWorker = new SetSplitModeAsyncWorker(env, this, tx_mode, tx_width, vfo);
@@ -3378,13 +3363,13 @@ Napi::Value NodeHamLib::GetSplitMode(const Napi::CallbackInfo & info) {
     return env.Null();
   }
   
-  vfo_t vfo = RIG_VFO_CURR;
+  int vfo = SHIM_RIG_VFO_CURR;
   
   if (info.Length() >= 1 && info[0].IsString()) {
     // getSplitMode(vfo)
-    vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+    vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
   }
-  // Otherwise use default RIG_VFO_CURR for getSplitMode()
+  // Otherwise use default SHIM_RIG_VFO_CURR for getSplitMode()
   
   GetSplitModeAsyncWorker* asyncWorker = new GetSplitModeAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -3405,11 +3390,11 @@ Napi::Value NodeHamLib::SetSplit(const Napi::CallbackInfo & info) {
   }
   
   bool split_enabled = info[0].As<Napi::Boolean>().Value();
-  split_t split = split_enabled ? RIG_SPLIT_ON : RIG_SPLIT_OFF;
+  int split = split_enabled ? SHIM_RIG_SPLIT_ON : SHIM_RIG_SPLIT_OFF;
   
   // Default values
-  vfo_t rx_vfo = RIG_VFO_CURR;
-  vfo_t tx_vfo = RIG_VFO_B;  // Default TX VFO
+  int rx_vfo = SHIM_RIG_VFO_CURR;
+  int tx_vfo = SHIM_RIG_VFO_B;  // Default TX VFO
   
   // ⚠️  CRITICAL HISTORICAL ISSUE WARNING ⚠️
   // This Split API had a severe parameter order bug that caused AI to repeatedly
@@ -3430,9 +3415,9 @@ Napi::Value NodeHamLib::SetSplit(const Napi::CallbackInfo & info) {
     // setSplit(enable, rxVfo) - treating vfo as RX VFO for current VFO operation
     std::string vfoStr = info[1].As<Napi::String>().Utf8Value();
     if (vfoStr == "VFO-A") {
-      rx_vfo = RIG_VFO_A;
+      rx_vfo = SHIM_RIG_VFO_A;
     } else if (vfoStr == "VFO-B") {
-      rx_vfo = RIG_VFO_B;
+      rx_vfo = SHIM_RIG_VFO_B;
     }
   } else if (info.Length() == 3 && info[1].IsString() && info[2].IsString()) {
     // setSplit(enable, rxVfo, txVfo)
@@ -3443,15 +3428,15 @@ Napi::Value NodeHamLib::SetSplit(const Napi::CallbackInfo & info) {
     std::string txVfoStr = info[2].As<Napi::String>().Utf8Value();  // ✅ CORRECT: info[2] is txVfo
     
     if (rxVfoStr == "VFO-A") {
-      rx_vfo = RIG_VFO_A;
+      rx_vfo = SHIM_RIG_VFO_A;
     } else if (rxVfoStr == "VFO-B") {
-      rx_vfo = RIG_VFO_B;
+      rx_vfo = SHIM_RIG_VFO_B;
     }
     
     if (txVfoStr == "VFO-A") {
-      tx_vfo = RIG_VFO_A;
+      tx_vfo = SHIM_RIG_VFO_A;
     } else if (txVfoStr == "VFO-B") {
-      tx_vfo = RIG_VFO_B;
+      tx_vfo = SHIM_RIG_VFO_B;
     }
   }
   
@@ -3468,13 +3453,13 @@ Napi::Value NodeHamLib::GetSplit(const Napi::CallbackInfo & info) {
     return env.Null();
   }
   
-  vfo_t vfo = RIG_VFO_CURR;
+  int vfo = SHIM_RIG_VFO_CURR;
   
   if (info.Length() >= 1 && info[0].IsString()) {
     // getSplit(vfo)
-    vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+    vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
   }
-  // Otherwise use default RIG_VFO_CURR for getSplit()
+  // Otherwise use default SHIM_RIG_VFO_CURR for getSplit()
   
   GetSplitAsyncWorker* asyncWorker = new GetSplitAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -3497,33 +3482,33 @@ Napi::Value NodeHamLib::VfoOperation(const Napi::CallbackInfo & info) {
   
   std::string vfoOpStr = info[0].As<Napi::String>().Utf8Value();
   
-  vfo_op_t vfo_op;
+  int vfo_op;
   if (vfoOpStr == "CPY") {
-    vfo_op = RIG_OP_CPY;
+    vfo_op = SHIM_RIG_OP_CPY;
   } else if (vfoOpStr == "XCHG") {
-    vfo_op = RIG_OP_XCHG;
+    vfo_op = SHIM_RIG_OP_XCHG;
   } else if (vfoOpStr == "FROM_VFO") {
-    vfo_op = RIG_OP_FROM_VFO;
+    vfo_op = SHIM_RIG_OP_FROM_VFO;
   } else if (vfoOpStr == "TO_VFO") {
-    vfo_op = RIG_OP_TO_VFO;
+    vfo_op = SHIM_RIG_OP_TO_VFO;
   } else if (vfoOpStr == "MCL") {
-    vfo_op = RIG_OP_MCL;
+    vfo_op = SHIM_RIG_OP_MCL;
   } else if (vfoOpStr == "UP") {
-    vfo_op = RIG_OP_UP;
+    vfo_op = SHIM_RIG_OP_UP;
   } else if (vfoOpStr == "DOWN") {
-    vfo_op = RIG_OP_DOWN;
+    vfo_op = SHIM_RIG_OP_DOWN;
   } else if (vfoOpStr == "BAND_UP") {
-    vfo_op = RIG_OP_BAND_UP;
+    vfo_op = SHIM_RIG_OP_BAND_UP;
   } else if (vfoOpStr == "BAND_DOWN") {
-    vfo_op = RIG_OP_BAND_DOWN;
+    vfo_op = SHIM_RIG_OP_BAND_DOWN;
   } else if (vfoOpStr == "LEFT") {
-    vfo_op = RIG_OP_LEFT;
+    vfo_op = SHIM_RIG_OP_LEFT;
   } else if (vfoOpStr == "RIGHT") {
-    vfo_op = RIG_OP_RIGHT;
+    vfo_op = SHIM_RIG_OP_RIGHT;
   } else if (vfoOpStr == "TUNE") {
-    vfo_op = RIG_OP_TUNE;
+    vfo_op = SHIM_RIG_OP_TUNE;
   } else if (vfoOpStr == "TOGGLE") {
-    vfo_op = RIG_OP_TOGGLE;
+    vfo_op = SHIM_RIG_OP_TOGGLE;
   } else {
     Napi::TypeError::New(env, "Invalid VFO operation").ThrowAsJavaScriptException();
     return env.Null();
@@ -3548,17 +3533,17 @@ Napi::Value NodeHamLib::SetAntenna(const Napi::CallbackInfo & info) {
     return env.Null();
   }
   
-  ant_t antenna = info[0].As<Napi::Number>().Int32Value();
+  int antenna = info[0].As<Napi::Number>().Int32Value();
   
   // Support optional VFO parameter: setAntenna(antenna) or setAntenna(antenna, vfo)
-  vfo_t vfo = RIG_VFO_CURR;
+  int vfo = SHIM_RIG_VFO_CURR;
   if (info.Length() >= 2 && info[1].IsString()) {
-    vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+    vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
   }
   
   // Default option value (can be extended later if needed)
-  value_t option = {0};
-  
+  float option = 0.0f;
+
   SetAntennaAsyncWorker* asyncWorker = new SetAntennaAsyncWorker(env, this, antenna, vfo, option);
   asyncWorker->Queue();
   return asyncWorker->GetPromise();
@@ -3573,13 +3558,13 @@ Napi::Value NodeHamLib::GetAntenna(const Napi::CallbackInfo & info) {
   }
   
   // Support optional VFO parameter: getAntenna() or getAntenna(vfo)
-  vfo_t vfo = RIG_VFO_CURR;
+  int vfo = SHIM_RIG_VFO_CURR;
   if (info.Length() >= 1 && info[0].IsString()) {
-    vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+    vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
   }
   
-  // Default antenna query (RIG_ANT_CURR gets all antenna info)
-  ant_t antenna = RIG_ANT_CURR;
+  // Default antenna query (SHIM_RIG_ANT_CURR gets all antenna info)
+  int antenna = SHIM_RIG_ANT_CURR;
   
   GetAntennaAsyncWorker* asyncWorker = new GetAntennaAsyncWorker(env, this, vfo, antenna);
   asyncWorker->Queue();
@@ -3750,60 +3735,31 @@ bool NodeHamLib::isNetworkAddress(const char* path) {
 }
 
 // Static callback function for rig_list_foreach
-int NodeHamLib::rig_list_callback(const struct rig_caps *caps, void *data) {
+int NodeHamLib::rig_list_callback(const shim_rig_info_t *info, void *data) {
   RigListData *rig_data = static_cast<RigListData*>(data);
-  
+
   // Create rig info object
   Napi::Object rigInfo = Napi::Object::New(rig_data->env);
-  rigInfo.Set(Napi::String::New(rig_data->env, "rigModel"), 
-              Napi::Number::New(rig_data->env, caps->rig_model));
-  rigInfo.Set(Napi::String::New(rig_data->env, "modelName"), 
-              Napi::String::New(rig_data->env, caps->model_name ? caps->model_name : ""));
-  rigInfo.Set(Napi::String::New(rig_data->env, "mfgName"), 
-              Napi::String::New(rig_data->env, caps->mfg_name ? caps->mfg_name : ""));
-  rigInfo.Set(Napi::String::New(rig_data->env, "version"), 
-              Napi::String::New(rig_data->env, caps->version ? caps->version : ""));
-  rigInfo.Set(Napi::String::New(rig_data->env, "status"), 
-              Napi::String::New(rig_data->env, rig_strstatus(caps->status)));
-  
-  // Determine rig type string
-  const char* rigType = "Unknown";
-  switch (caps->rig_type & RIG_TYPE_MASK) {
-    case RIG_TYPE_TRANSCEIVER:
-      rigType = "Transceiver";
-      break;
-    case RIG_TYPE_HANDHELD:
-      rigType = "Handheld";
-      break;
-    case RIG_TYPE_MOBILE:
-      rigType = "Mobile";
-      break;
-    case RIG_TYPE_RECEIVER:
-      rigType = "Receiver";
-      break;
-    case RIG_TYPE_PCRECEIVER:
-      rigType = "PC Receiver";
-      break;
-    case RIG_TYPE_SCANNER:
-      rigType = "Scanner";
-      break;
-    case RIG_TYPE_TRUNKSCANNER:
-      rigType = "Trunk Scanner";
-      break;
-    case RIG_TYPE_COMPUTER:
-      rigType = "Computer";
-      break;
-    case RIG_TYPE_OTHER:
-      rigType = "Other";
-      break;
-  }
-  
-  rigInfo.Set(Napi::String::New(rig_data->env, "rigType"), 
+  rigInfo.Set(Napi::String::New(rig_data->env, "rigModel"),
+              Napi::Number::New(rig_data->env, info->rig_model));
+  rigInfo.Set(Napi::String::New(rig_data->env, "modelName"),
+              Napi::String::New(rig_data->env, info->model_name ? info->model_name : ""));
+  rigInfo.Set(Napi::String::New(rig_data->env, "mfgName"),
+              Napi::String::New(rig_data->env, info->mfg_name ? info->mfg_name : ""));
+  rigInfo.Set(Napi::String::New(rig_data->env, "version"),
+              Napi::String::New(rig_data->env, info->version ? info->version : ""));
+  rigInfo.Set(Napi::String::New(rig_data->env, "status"),
+              Napi::String::New(rig_data->env, shim_rig_strstatus(info->status)));
+
+  // Determine rig type string using shim helper
+  const char* rigType = shim_rig_type_str(info->rig_type);
+
+  rigInfo.Set(Napi::String::New(rig_data->env, "rigType"),
               Napi::String::New(rig_data->env, rigType));
-  
+
   // Add to list
   rig_data->rigList.push_back(rigInfo);
-  
+
   return 1; // Continue iteration (returning 0 would stop)
 }
 
@@ -3812,15 +3768,15 @@ Napi::Value NodeHamLib::GetSupportedRigs(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
   // Load all backends to ensure we get the complete list
-  rig_load_all_backends();
+  shim_rig_load_all_backends();
   
   // Prepare data structure for callback with proper initialization
   RigListData rigData{std::vector<Napi::Object>(), env};
   
   // Call hamlib function to iterate through all supported rigs
-  int result = rig_list_foreach(rig_list_callback, &rigData);
+  int result = shim_rig_list_foreach(rig_list_callback, &rigData);
   
-  if (result != RIG_OK) {
+  if (result != SHIM_RIG_OK) {
     Napi::Error::New(env, "Failed to retrieve supported rig list").ThrowAsJavaScriptException();
     return env.Null();
   }
@@ -3838,10 +3794,7 @@ Napi::Value NodeHamLib::GetSupportedRigs(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetHamlibVersion(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
 
-  // Reference to external hamlib_version2 variable
-  extern const char* hamlib_version2;
-
-  return Napi::String::New(env, hamlib_version2);
+  return Napi::String::New(env, shim_rig_get_version());
 }
 
 // Set Hamlib debug level
@@ -3862,7 +3815,7 @@ Napi::Value NodeHamLib::SetDebugLevel(const Napi::CallbackInfo& info) {
     return env.Undefined();
   }
 
-  rig_set_debug((enum rig_debug_level_e)level);
+  shim_rig_set_debug(level);
 
   return env.Undefined();
 }
@@ -4027,7 +3980,7 @@ Napi::Value NodeHamLib::GetSupportedSerialConfigs(const Napi::CallbackInfo& info
   pttTypeOptions[5u] = Napi::String::New(env, "GPIO");
   pttTypeOptions[6u] = Napi::String::New(env, "GPION");
   pttTypeOptions[7u] = Napi::String::New(env, "NONE");
-  configs.Set("ptt_type", pttTypeOptions);
+  configs.Set("intype", pttTypeOptions);
   
   // DCD type options
   Napi::Array dcdTypeOptions = Napi::Array::New(env, 9);
@@ -4040,7 +3993,7 @@ Napi::Value NodeHamLib::GetSupportedSerialConfigs(const Napi::CallbackInfo& info
   dcdTypeOptions[6u] = Napi::String::New(env, "GPIO");
   dcdTypeOptions[7u] = Napi::String::New(env, "GPION");
   dcdTypeOptions[8u] = Napi::String::New(env, "NONE");
-  configs.Set("dcd_type", dcdTypeOptions);
+  configs.Set("intype", dcdTypeOptions);
   
   return configs;
 }
@@ -4055,7 +4008,7 @@ Napi::Value NodeHamLib::SetPowerstat(const Napi::CallbackInfo& info) {
   }
   
   int powerStatus = info[0].As<Napi::Number>().Int32Value();
-  powerstat_t status = static_cast<powerstat_t>(powerStatus);
+  int status = static_cast<int>(powerStatus);
   
   SetPowerstatAsyncWorker* asyncWorker = new SetPowerstatAsyncWorker(env, this, status);
   asyncWorker->Queue();
@@ -4074,7 +4027,7 @@ Napi::Value NodeHamLib::GetPowerstat(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetPtt(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
-  vfo_t vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
   
   GetPttAsyncWorker* asyncWorker = new GetPttAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -4085,7 +4038,7 @@ Napi::Value NodeHamLib::GetPtt(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetDcd(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
-  vfo_t vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
   
   GetDcdAsyncWorker* asyncWorker = new GetDcdAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -4101,8 +4054,8 @@ Napi::Value NodeHamLib::SetTuningStep(const Napi::CallbackInfo& info) {
     return env.Null();
   }
   
-  shortfreq_t ts = info[0].As<Napi::Number>().Int32Value();
-  vfo_t vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+  int ts = info[0].As<Napi::Number>().Int32Value();
+  int vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
   
   SetTuningStepAsyncWorker* asyncWorker = new SetTuningStepAsyncWorker(env, this, vfo, ts);
   asyncWorker->Queue();
@@ -4112,7 +4065,7 @@ Napi::Value NodeHamLib::SetTuningStep(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetTuningStep(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
-  vfo_t vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
   
   GetTuningStepAsyncWorker* asyncWorker = new GetTuningStepAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -4129,20 +4082,20 @@ Napi::Value NodeHamLib::SetRepeaterShift(const Napi::CallbackInfo& info) {
   }
   
   std::string shiftStr = info[0].As<Napi::String>().Utf8Value();
-  rptr_shift_t shift = RIG_RPT_SHIFT_NONE;
+  int shift = SHIM_RIG_RPT_SHIFT_NONE;
   
   if (shiftStr == "NONE" || shiftStr == "none") {
-    shift = RIG_RPT_SHIFT_NONE;
+    shift = SHIM_RIG_RPT_SHIFT_NONE;
   } else if (shiftStr == "MINUS" || shiftStr == "minus" || shiftStr == "-") {
-    shift = RIG_RPT_SHIFT_MINUS;
+    shift = SHIM_RIG_RPT_SHIFT_MINUS;
   } else if (shiftStr == "PLUS" || shiftStr == "plus" || shiftStr == "+") {
-    shift = RIG_RPT_SHIFT_PLUS;
+    shift = SHIM_RIG_RPT_SHIFT_PLUS;
   } else {
     Napi::TypeError::New(env, "Invalid repeater shift (must be 'NONE', 'MINUS', or 'PLUS')").ThrowAsJavaScriptException();
     return env.Null();
   }
   
-  vfo_t vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+  int vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
   
   SetRepeaterShiftAsyncWorker* asyncWorker = new SetRepeaterShiftAsyncWorker(env, this, vfo, shift);
   asyncWorker->Queue();
@@ -4152,7 +4105,7 @@ Napi::Value NodeHamLib::SetRepeaterShift(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetRepeaterShift(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
-  vfo_t vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
   
   GetRepeaterShiftAsyncWorker* asyncWorker = new GetRepeaterShiftAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -4167,8 +4120,8 @@ Napi::Value NodeHamLib::SetRepeaterOffset(const Napi::CallbackInfo& info) {
     return env.Null();
   }
   
-  shortfreq_t offset = info[0].As<Napi::Number>().Int32Value();
-  vfo_t vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+  int offset = info[0].As<Napi::Number>().Int32Value();
+  int vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
   
   SetRepeaterOffsetAsyncWorker* asyncWorker = new SetRepeaterOffsetAsyncWorker(env, this, vfo, offset);
   asyncWorker->Queue();
@@ -4178,7 +4131,7 @@ Napi::Value NodeHamLib::SetRepeaterOffset(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetRepeaterOffset(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
-  vfo_t vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
   
   GetRepeaterOffsetAsyncWorker* asyncWorker = new GetRepeaterOffsetAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -4188,21 +4141,21 @@ Napi::Value NodeHamLib::GetRepeaterOffset(const Napi::CallbackInfo& info) {
 // CTCSS/DCS Tone Control AsyncWorker classes
 class SetCtcssToneAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetCtcssToneAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo, tone_t tone)
+    SetCtcssToneAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, unsigned int tone)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tone_(tone) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_set_ctcss_tone(hamlib_instance_->my_rig, vfo_, tone_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_set_ctcss_tone(hamlib_instance_->my_rig, vfo_, tone_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -4215,27 +4168,27 @@ public:
     }
     
 private:
-    vfo_t vfo_;
-    tone_t tone_;
+    int vfo_;
+    unsigned int tone_;
 };
 
 class GetCtcssToneAsyncWorker : public HamLibAsyncWorker {
 public:
-    GetCtcssToneAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
+    GetCtcssToneAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tone_(0) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_get_ctcss_tone(hamlib_instance_->my_rig, vfo_, &tone_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_get_ctcss_tone(hamlib_instance_->my_rig, vfo_, &tone_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, tone_));
@@ -4248,27 +4201,27 @@ public:
     }
     
 private:
-    vfo_t vfo_;
-    tone_t tone_;
+    int vfo_;
+    unsigned int tone_;
 };
 
 class SetDcsCodeAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetDcsCodeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo, tone_t code)
+    SetDcsCodeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, unsigned int code)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), code_(code) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_set_dcs_code(hamlib_instance_->my_rig, vfo_, code_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_set_dcs_code(hamlib_instance_->my_rig, vfo_, code_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -4281,27 +4234,27 @@ public:
     }
     
 private:
-    vfo_t vfo_;
-    tone_t code_;
+    int vfo_;
+    unsigned int code_;
 };
 
 class GetDcsCodeAsyncWorker : public HamLibAsyncWorker {
 public:
-    GetDcsCodeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
+    GetDcsCodeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), code_(0) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_get_dcs_code(hamlib_instance_->my_rig, vfo_, &code_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_get_dcs_code(hamlib_instance_->my_rig, vfo_, &code_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, code_));
@@ -4314,27 +4267,27 @@ public:
     }
     
 private:
-    vfo_t vfo_;
-    tone_t code_;
+    int vfo_;
+    unsigned int code_;
 };
 
 class SetCtcssSqlAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetCtcssSqlAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo, tone_t tone)
+    SetCtcssSqlAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, unsigned int tone)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tone_(tone) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_set_ctcss_sql(hamlib_instance_->my_rig, vfo_, tone_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_set_ctcss_sql(hamlib_instance_->my_rig, vfo_, tone_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -4347,27 +4300,27 @@ public:
     }
     
 private:
-    vfo_t vfo_;
-    tone_t tone_;
+    int vfo_;
+    unsigned int tone_;
 };
 
 class GetCtcssSqlAsyncWorker : public HamLibAsyncWorker {
 public:
-    GetCtcssSqlAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
+    GetCtcssSqlAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tone_(0) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_get_ctcss_sql(hamlib_instance_->my_rig, vfo_, &tone_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_get_ctcss_sql(hamlib_instance_->my_rig, vfo_, &tone_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, tone_));
@@ -4380,27 +4333,27 @@ public:
     }
     
 private:
-    vfo_t vfo_;
-    tone_t tone_;
+    int vfo_;
+    unsigned int tone_;
 };
 
 class SetDcsSqlAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetDcsSqlAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo, tone_t code)
+    SetDcsSqlAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, unsigned int code)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), code_(code) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_set_dcs_sql(hamlib_instance_->my_rig, vfo_, code_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_set_dcs_sql(hamlib_instance_->my_rig, vfo_, code_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -4413,27 +4366,27 @@ public:
     }
     
 private:
-    vfo_t vfo_;
-    tone_t code_;
+    int vfo_;
+    unsigned int code_;
 };
 
 class GetDcsSqlAsyncWorker : public HamLibAsyncWorker {
 public:
-    GetDcsSqlAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
+    GetDcsSqlAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), code_(0) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_get_dcs_sql(hamlib_instance_->my_rig, vfo_, &code_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_get_dcs_sql(hamlib_instance_->my_rig, vfo_, &code_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, code_));
@@ -4446,97 +4399,95 @@ public:
     }
     
 private:
-    vfo_t vfo_;
-    tone_t code_;
+    int vfo_;
+    unsigned int code_;
 };
 
 // Parameter Control AsyncWorker classes
 class SetParmAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetParmAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, setting_t parm, value_t value)
+    SetParmAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, uint64_t parm, float value)
         : HamLibAsyncWorker(env, hamlib_instance), parm_(parm), value_(value) {}
-    
+
     void Execute() override {
         CHECK_RIG_VALID();
-        
-        result_code_ = rig_set_parm(hamlib_instance_->my_rig, parm_, value_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+
+        result_code_ = shim_rig_set_parm_f(hamlib_instance_->my_rig, parm_, value_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
-    
+
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
         }
     }
-    
+
     void OnError(const Napi::Error& e) override {
         Napi::Env env = Env();
         deferred_.Reject(Napi::Error::New(env, error_message_).Value());
     }
-    
+
 private:
-    setting_t parm_;
-    value_t value_;
+    uint64_t parm_;
+    float value_;
 };
 
 class GetParmAsyncWorker : public HamLibAsyncWorker {
 public:
-    GetParmAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, setting_t parm)
-        : HamLibAsyncWorker(env, hamlib_instance), parm_(parm) {
-        value_.f = 0.0;
-    }
-    
+    GetParmAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, uint64_t parm)
+        : HamLibAsyncWorker(env, hamlib_instance), parm_(parm), value_(0.0f) {}
+
     void Execute() override {
         CHECK_RIG_VALID();
-        
-        result_code_ = rig_get_parm(hamlib_instance_->my_rig, parm_, &value_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+
+        result_code_ = shim_rig_get_parm_f(hamlib_instance_->my_rig, parm_, &value_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
-    
+
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
-            deferred_.Resolve(Napi::Number::New(env, value_.f));
+            deferred_.Resolve(Napi::Number::New(env, value_));
         }
     }
-    
+
     void OnError(const Napi::Error& e) override {
         Napi::Env env = Env();
         deferred_.Reject(Napi::Error::New(env, error_message_).Value());
     }
-    
+
 private:
-    setting_t parm_;
-    value_t value_;
+    uint64_t parm_;
+    float value_;
 };
 
 // DTMF Support AsyncWorker classes
 class SendDtmfAsyncWorker : public HamLibAsyncWorker {
 public:
-    SendDtmfAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo, const std::string& digits)
+    SendDtmfAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, const std::string& digits)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), digits_(digits) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_send_dtmf(hamlib_instance_->my_rig, vfo_, digits_.c_str());
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_send_dtmf(hamlib_instance_->my_rig, vfo_, digits_.c_str());
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -4549,13 +4500,13 @@ public:
     }
     
 private:
-    vfo_t vfo_;
+    int vfo_;
     std::string digits_;
 };
 
 class RecvDtmfAsyncWorker : public HamLibAsyncWorker {
 public:
-    RecvDtmfAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo, int maxLength)
+    RecvDtmfAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, int maxLength)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), max_length_(maxLength), length_(0) {
         digits_.resize(maxLength + 1, '\0');
     }
@@ -4565,15 +4516,15 @@ public:
         
         length_ = max_length_;
         // rig_recv_dtmf expects a mutable buffer (char*). Ensure non-const pointer.
-        result_code_ = rig_recv_dtmf(hamlib_instance_->my_rig, vfo_, &digits_[0], &length_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_recv_dtmf(hamlib_instance_->my_rig, vfo_, &digits_[0], &length_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             Napi::Object obj = Napi::Object::New(env);
@@ -4589,7 +4540,7 @@ public:
     }
     
 private:
-    vfo_t vfo_;
+    int vfo_;
     int max_length_;
     int length_;
     std::string digits_;
@@ -4598,21 +4549,21 @@ private:
 // Memory Channel Advanced Operations AsyncWorker classes
 class GetMemAsyncWorker : public HamLibAsyncWorker {
 public:
-    GetMemAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
+    GetMemAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), ch_(0) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_get_mem(hamlib_instance_->my_rig, vfo_, &ch_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_get_mem(hamlib_instance_->my_rig, vfo_, &ch_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, ch_));
@@ -4625,27 +4576,27 @@ public:
     }
     
 private:
-    vfo_t vfo_;
+    int vfo_;
     int ch_;
 };
 
 class SetBankAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetBankAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo, int bank)
+    SetBankAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, int bank)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), bank_(bank) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_set_bank(hamlib_instance_->my_rig, vfo_, bank_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_set_bank(hamlib_instance_->my_rig, vfo_, bank_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -4658,7 +4609,7 @@ public:
     }
     
 private:
-    vfo_t vfo_;
+    int vfo_;
     int bank_;
 };
 
@@ -4670,18 +4621,18 @@ public:
     void Execute() override {
         CHECK_RIG_VALID();
         
-        count_ = rig_mem_count(hamlib_instance_->my_rig);
+        count_ = shim_rig_mem_count(hamlib_instance_->my_rig);
         if (count_ < 0) {
             result_code_ = count_;
-            error_message_ = rigerror(result_code_);
+            error_message_ = shim_rigerror(result_code_);
         } else {
-            result_code_ = RIG_OK;
+            result_code_ = SHIM_RIG_OK;
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, count_));
@@ -4700,21 +4651,21 @@ private:
 // Morse Code Support AsyncWorker classes
 class SendMorseAsyncWorker : public HamLibAsyncWorker {
 public:
-    SendMorseAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo, const std::string& msg)
+    SendMorseAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, const std::string& msg)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), msg_(msg) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_send_morse(hamlib_instance_->my_rig, vfo_, msg_.c_str());
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_send_morse(hamlib_instance_->my_rig, vfo_, msg_.c_str());
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -4727,27 +4678,27 @@ public:
     }
     
 private:
-    vfo_t vfo_;
+    int vfo_;
     std::string msg_;
 };
 
 class StopMorseAsyncWorker : public HamLibAsyncWorker {
 public:
-    StopMorseAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
+    StopMorseAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_stop_morse(hamlib_instance_->my_rig, vfo_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_stop_morse(hamlib_instance_->my_rig, vfo_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -4760,26 +4711,26 @@ public:
     }
     
 private:
-    vfo_t vfo_;
+    int vfo_;
 };
 
 class WaitMorseAsyncWorker : public HamLibAsyncWorker {
 public:
-    WaitMorseAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
+    WaitMorseAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_wait_morse(hamlib_instance_->my_rig, vfo_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_wait_morse(hamlib_instance_->my_rig, vfo_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -4792,27 +4743,27 @@ public:
     }
     
 private:
-    vfo_t vfo_;
+    int vfo_;
 };
 
 // Voice Memory Support AsyncWorker classes
 class SendVoiceMemAsyncWorker : public HamLibAsyncWorker {
 public:
-    SendVoiceMemAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo, int ch)
+    SendVoiceMemAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, int ch)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), ch_(ch) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_send_voice_mem(hamlib_instance_->my_rig, vfo_, ch_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_send_voice_mem(hamlib_instance_->my_rig, vfo_, ch_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -4825,34 +4776,27 @@ public:
     }
     
 private:
-    vfo_t vfo_;
+    int vfo_;
     int ch_;
 };
 
 class StopVoiceMemAsyncWorker : public HamLibAsyncWorker {
 public:
-    StopVoiceMemAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
+    StopVoiceMemAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        #if HAVE_RIG_STOP_VOICE_MEM
-        result_code_ = rig_stop_voice_mem(hamlib_instance_->my_rig, vfo_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_stop_voice_mem(hamlib_instance_->my_rig, vfo_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
-        #else
-        // rig_stop_voice_mem function is not available in this hamlib version
-        // Return not implemented for compatibility with older hamlib versions
-        result_code_ = -RIG_ENIMPL;
-        error_message_ = "rig_stop_voice_mem not available in this hamlib version";
-        #endif
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -4865,36 +4809,29 @@ public:
     }
     
 private:
-    vfo_t vfo_;
+    int vfo_;
 };
 
 // Complex Split Frequency/Mode Operations AsyncWorker classes
 class SetSplitFreqModeAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetSplitFreqModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo, 
-                               freq_t tx_freq, rmode_t tx_mode, pbwidth_t tx_width)
+    SetSplitFreqModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, 
+                               double tx_freq, int tx_mode, int tx_width)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tx_freq_(tx_freq), 
           tx_mode_(tx_mode), tx_width_(tx_width) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        #if HAVE_RIG_SPLIT_FREQ_MODE
-        result_code_ = rig_set_split_freq_mode(hamlib_instance_->my_rig, vfo_, tx_freq_, tx_mode_, tx_width_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_set_split_freq_mode(hamlib_instance_->my_rig, vfo_, tx_freq_, tx_mode_, tx_width_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
-        #else
-        // rig_set_split_freq_mode function is not available in this hamlib version
-        // Fall back to using separate calls
-        result_code_ = -RIG_ENIMPL;
-        error_message_ = "rig_set_split_freq_mode not available - use setSplitFreq and setSplitMode separately";
-        #endif
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -4907,41 +4844,34 @@ public:
     }
     
 private:
-    vfo_t vfo_;
-    freq_t tx_freq_;
-    rmode_t tx_mode_;
-    pbwidth_t tx_width_;
+    int vfo_;
+    double tx_freq_;
+    int tx_mode_;
+    int tx_width_;
 };
 
 class GetSplitFreqModeAsyncWorker : public HamLibAsyncWorker {
 public:
-    GetSplitFreqModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, vfo_t vfo)
-        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tx_freq_(0), tx_mode_(RIG_MODE_NONE), tx_width_(0) {}
+    GetSplitFreqModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
+        : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tx_freq_(0), tx_mode_(SHIM_RIG_MODE_NONE), tx_width_(0) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        #if HAVE_RIG_SPLIT_FREQ_MODE
-        result_code_ = rig_get_split_freq_mode(hamlib_instance_->my_rig, vfo_, &tx_freq_, &tx_mode_, &tx_width_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_get_split_freq_mode(hamlib_instance_->my_rig, vfo_, &tx_freq_, &tx_mode_, &tx_width_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
-        #else
-        // rig_get_split_freq_mode function is not available in this hamlib version
-        // Fall back to using separate calls
-        result_code_ = -RIG_ENIMPL;
-        error_message_ = "rig_get_split_freq_mode not available - use getSplitFreq and getSplitMode separately";
-        #endif
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             Napi::Object obj = Napi::Object::New(env);
             obj.Set(Napi::String::New(env, "txFrequency"), Napi::Number::New(env, static_cast<double>(tx_freq_)));
-            obj.Set(Napi::String::New(env, "txMode"), Napi::String::New(env, rig_strrmode(tx_mode_)));
+            obj.Set(Napi::String::New(env, "txMode"), Napi::String::New(env, shim_rig_strrmode(tx_mode_)));
             obj.Set(Napi::String::New(env, "txWidth"), Napi::Number::New(env, static_cast<double>(tx_width_)));
             deferred_.Resolve(obj);
         }
@@ -4953,30 +4883,30 @@ public:
     }
     
 private:
-    vfo_t vfo_;
-    freq_t tx_freq_;
-    rmode_t tx_mode_;
-    pbwidth_t tx_width_;
+    int vfo_;
+    double tx_freq_;
+    int tx_mode_;
+    int tx_width_;
 };
 
 // Reset Function AsyncWorker class
 class ResetAsyncWorker : public HamLibAsyncWorker {
 public:
-    ResetAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, reset_t reset)
+    ResetAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int reset)
         : HamLibAsyncWorker(env, hamlib_instance), reset_(reset) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = rig_reset(hamlib_instance_->my_rig, reset_);
-        if (result_code_ != RIG_OK) {
-            error_message_ = rigerror(result_code_);
+        result_code_ = shim_rig_reset(hamlib_instance_->my_rig, reset_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
         }
     }
     
     void OnOK() override {
         Napi::Env env = Env();
-        if (result_code_ != RIG_OK && !error_message_.empty()) {
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
             deferred_.Reject(Napi::Error::New(env, error_message_).Value());
         } else {
             deferred_.Resolve(Napi::Number::New(env, result_code_));
@@ -4989,7 +4919,7 @@ public:
     }
     
 private:
-    reset_t reset_;
+    int reset_;
 };
 
 // CTCSS/DCS Tone Control Methods Implementation
@@ -5001,8 +4931,8 @@ Napi::Value NodeHamLib::SetCtcssTone(const Napi::CallbackInfo& info) {
     return env.Null();
   }
   
-  tone_t tone = static_cast<tone_t>(info[0].As<Napi::Number>().Uint32Value());
-  vfo_t vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+  unsigned int tone = static_cast<unsigned int>(info[0].As<Napi::Number>().Uint32Value());
+  int vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
   
   SetCtcssToneAsyncWorker* asyncWorker = new SetCtcssToneAsyncWorker(env, this, vfo, tone);
   asyncWorker->Queue();
@@ -5012,7 +4942,7 @@ Napi::Value NodeHamLib::SetCtcssTone(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetCtcssTone(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
-  vfo_t vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
   
   GetCtcssToneAsyncWorker* asyncWorker = new GetCtcssToneAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -5027,8 +4957,8 @@ Napi::Value NodeHamLib::SetDcsCode(const Napi::CallbackInfo& info) {
     return env.Null();
   }
   
-  tone_t code = static_cast<tone_t>(info[0].As<Napi::Number>().Uint32Value());
-  vfo_t vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+  unsigned int code = static_cast<unsigned int>(info[0].As<Napi::Number>().Uint32Value());
+  int vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
   
   SetDcsCodeAsyncWorker* asyncWorker = new SetDcsCodeAsyncWorker(env, this, vfo, code);
   asyncWorker->Queue();
@@ -5038,7 +4968,7 @@ Napi::Value NodeHamLib::SetDcsCode(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetDcsCode(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
-  vfo_t vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
   
   GetDcsCodeAsyncWorker* asyncWorker = new GetDcsCodeAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -5053,8 +4983,8 @@ Napi::Value NodeHamLib::SetCtcssSql(const Napi::CallbackInfo& info) {
     return env.Null();
   }
   
-  tone_t tone = static_cast<tone_t>(info[0].As<Napi::Number>().Uint32Value());
-  vfo_t vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+  unsigned int tone = static_cast<unsigned int>(info[0].As<Napi::Number>().Uint32Value());
+  int vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
   
   SetCtcssSqlAsyncWorker* asyncWorker = new SetCtcssSqlAsyncWorker(env, this, vfo, tone);
   asyncWorker->Queue();
@@ -5064,7 +4994,7 @@ Napi::Value NodeHamLib::SetCtcssSql(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetCtcssSql(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
-  vfo_t vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
   
   GetCtcssSqlAsyncWorker* asyncWorker = new GetCtcssSqlAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -5079,8 +5009,8 @@ Napi::Value NodeHamLib::SetDcsSql(const Napi::CallbackInfo& info) {
     return env.Null();
   }
   
-  tone_t code = static_cast<tone_t>(info[0].As<Napi::Number>().Uint32Value());
-  vfo_t vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+  unsigned int code = static_cast<unsigned int>(info[0].As<Napi::Number>().Uint32Value());
+  int vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
   
   SetDcsSqlAsyncWorker* asyncWorker = new SetDcsSqlAsyncWorker(env, this, vfo, code);
   asyncWorker->Queue();
@@ -5090,7 +5020,7 @@ Napi::Value NodeHamLib::SetDcsSql(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetDcsSql(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
-  vfo_t vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
   
   GetDcsSqlAsyncWorker* asyncWorker = new GetDcsSqlAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -5107,16 +5037,15 @@ Napi::Value NodeHamLib::SetParm(const Napi::CallbackInfo& info) {
   }
   
   std::string parm_str = info[0].As<Napi::String>().Utf8Value();
-  setting_t parm = rig_parse_parm(parm_str.c_str());
+  uint64_t parm = shim_rig_parse_parm(parm_str.c_str());
   
   if (parm == 0) {
     Napi::Error::New(env, "Invalid parameter name: " + parm_str).ThrowAsJavaScriptException();
     return env.Null();
   }
   
-  value_t value;
-  value.f = info[1].As<Napi::Number>().FloatValue();
-  
+  float value = info[1].As<Napi::Number>().FloatValue();
+
   SetParmAsyncWorker* asyncWorker = new SetParmAsyncWorker(env, this, parm, value);
   asyncWorker->Queue();
   return asyncWorker->GetPromise();
@@ -5131,7 +5060,7 @@ Napi::Value NodeHamLib::GetParm(const Napi::CallbackInfo& info) {
   }
   
   std::string parm_str = info[0].As<Napi::String>().Utf8Value();
-  setting_t parm = rig_parse_parm(parm_str.c_str());
+  uint64_t parm = shim_rig_parse_parm(parm_str.c_str());
   
   if (parm == 0) {
     Napi::Error::New(env, "Invalid parameter name: " + parm_str).ThrowAsJavaScriptException();
@@ -5153,7 +5082,7 @@ Napi::Value NodeHamLib::SendDtmf(const Napi::CallbackInfo& info) {
   }
   
   std::string digits = info[0].As<Napi::String>().Utf8Value();
-  vfo_t vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+  int vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
   
   SendDtmfAsyncWorker* asyncWorker = new SendDtmfAsyncWorker(env, this, vfo, digits);
   asyncWorker->Queue();
@@ -5168,7 +5097,7 @@ Napi::Value NodeHamLib::RecvDtmf(const Napi::CallbackInfo& info) {
     maxLength = info[0].As<Napi::Number>().Int32Value();
   }
   
-  vfo_t vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+  int vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
   
   RecvDtmfAsyncWorker* asyncWorker = new RecvDtmfAsyncWorker(env, this, vfo, maxLength);
   asyncWorker->Queue();
@@ -5179,7 +5108,7 @@ Napi::Value NodeHamLib::RecvDtmf(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetMem(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
-  vfo_t vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
   
   GetMemAsyncWorker* asyncWorker = new GetMemAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -5195,7 +5124,7 @@ Napi::Value NodeHamLib::SetBank(const Napi::CallbackInfo& info) {
   }
   
   int bank = info[0].As<Napi::Number>().Int32Value();
-  vfo_t vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+  int vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
   
   SetBankAsyncWorker* asyncWorker = new SetBankAsyncWorker(env, this, vfo, bank);
   asyncWorker->Queue();
@@ -5220,7 +5149,7 @@ Napi::Value NodeHamLib::SendMorse(const Napi::CallbackInfo& info) {
   }
   
   std::string msg = info[0].As<Napi::String>().Utf8Value();
-  vfo_t vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+  int vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
   
   SendMorseAsyncWorker* asyncWorker = new SendMorseAsyncWorker(env, this, vfo, msg);
   asyncWorker->Queue();
@@ -5230,7 +5159,7 @@ Napi::Value NodeHamLib::SendMorse(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::StopMorse(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
-  vfo_t vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
   
   StopMorseAsyncWorker* asyncWorker = new StopMorseAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -5240,7 +5169,7 @@ Napi::Value NodeHamLib::StopMorse(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::WaitMorse(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
-  vfo_t vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
   
   WaitMorseAsyncWorker* asyncWorker = new WaitMorseAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -5257,7 +5186,7 @@ Napi::Value NodeHamLib::SendVoiceMem(const Napi::CallbackInfo& info) {
   }
   
   int ch = info[0].As<Napi::Number>().Int32Value();
-  vfo_t vfo = parseVfoParameter(info, 1, RIG_VFO_CURR);
+  int vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
   
   SendVoiceMemAsyncWorker* asyncWorker = new SendVoiceMemAsyncWorker(env, this, vfo, ch);
   asyncWorker->Queue();
@@ -5267,7 +5196,7 @@ Napi::Value NodeHamLib::SendVoiceMem(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::StopVoiceMem(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
-  vfo_t vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
   
   StopVoiceMemAsyncWorker* asyncWorker = new StopVoiceMemAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -5283,7 +5212,7 @@ Napi::Value NodeHamLib::SetSplitFreqMode(const Napi::CallbackInfo& info) {
     return env.Null();
   }
   
-  freq_t tx_freq = static_cast<freq_t>(info[0].As<Napi::Number>().DoubleValue());
+  double tx_freq = static_cast<double>(info[0].As<Napi::Number>().DoubleValue());
   
   // Basic frequency range validation
   if (tx_freq < 1000 || tx_freq > 10000000000) { // 1 kHz to 10 GHz reasonable range
@@ -5292,11 +5221,11 @@ Napi::Value NodeHamLib::SetSplitFreqMode(const Napi::CallbackInfo& info) {
   }
   
   std::string mode_str = info[1].As<Napi::String>().Utf8Value();
-  pbwidth_t tx_width = static_cast<pbwidth_t>(info[2].As<Napi::Number>().DoubleValue());
-  vfo_t vfo = parseVfoParameter(info, 3, RIG_VFO_CURR);
+  int tx_width = static_cast<int>(info[2].As<Napi::Number>().DoubleValue());
+  int vfo = parseVfoParameter(info, 3, SHIM_RIG_VFO_CURR);
   
-  rmode_t tx_mode = rig_parse_mode(mode_str.c_str());
-  if (tx_mode == RIG_MODE_NONE) {
+  int tx_mode = shim_rig_parse_mode(mode_str.c_str());
+  if (tx_mode == SHIM_RIG_MODE_NONE) {
     Napi::Error::New(env, "Invalid mode: " + mode_str).ThrowAsJavaScriptException();
     return env.Null();
   }
@@ -5309,7 +5238,7 @@ Napi::Value NodeHamLib::SetSplitFreqMode(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetSplitFreqMode(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
-  vfo_t vfo = parseVfoParameter(info, 0, RIG_VFO_CURR);
+  int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
   
   GetSplitFreqModeAsyncWorker* asyncWorker = new GetSplitFreqModeAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -5331,7 +5260,7 @@ Napi::Value NodeHamLib::Power2mW(const Napi::CallbackInfo& info) {
   }
   
   float power = info[0].As<Napi::Number>().FloatValue();
-  freq_t freq = info[1].As<Napi::Number>().DoubleValue();
+  double freq = info[1].As<Napi::Number>().DoubleValue();
   std::string mode_str = info[2].As<Napi::String>().Utf8Value();
   
   // Validate power (0.0 to 1.0)
@@ -5347,8 +5276,8 @@ Napi::Value NodeHamLib::Power2mW(const Napi::CallbackInfo& info) {
   }
   
   // Parse mode string
-  rmode_t mode = rig_parse_mode(mode_str.c_str());
-  if (mode == RIG_MODE_NONE) {
+  int mode = shim_rig_parse_mode(mode_str.c_str());
+  if (mode == SHIM_RIG_MODE_NONE) {
     Napi::Error::New(env, "Invalid mode: " + mode_str).ThrowAsJavaScriptException();
     return env.Null();
   }
@@ -5373,7 +5302,7 @@ Napi::Value NodeHamLib::MW2Power(const Napi::CallbackInfo& info) {
   }
   
   unsigned int mwpower = info[0].As<Napi::Number>().Uint32Value();
-  freq_t freq = info[1].As<Napi::Number>().DoubleValue();
+  double freq = info[1].As<Napi::Number>().DoubleValue();
   std::string mode_str = info[2].As<Napi::String>().Utf8Value();
   
   // Validate milliwatts (reasonable range)
@@ -5389,8 +5318,8 @@ Napi::Value NodeHamLib::MW2Power(const Napi::CallbackInfo& info) {
   }
   
   // Parse mode string
-  rmode_t mode = rig_parse_mode(mode_str.c_str());
-  if (mode == RIG_MODE_NONE) {
+  int mode = shim_rig_parse_mode(mode_str.c_str());
+  if (mode == SHIM_RIG_MODE_NONE) {
     Napi::Error::New(env, "Invalid mode: " + mode_str).ThrowAsJavaScriptException();
     return env.Null();
   }
@@ -5404,20 +5333,20 @@ Napi::Value NodeHamLib::MW2Power(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::Reset(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
-  reset_t reset = RIG_RESET_SOFT; // Default to soft reset
+  int reset = SHIM_RIG_RESET_SOFT; // Default to soft reset
   
   if (info.Length() > 0 && info[0].IsString()) {
     std::string reset_str = info[0].As<Napi::String>().Utf8Value();
     if (reset_str == "NONE") {
-      reset = RIG_RESET_NONE;
+      reset = SHIM_RIG_RESET_NONE;
     } else if (reset_str == "SOFT") {
-      reset = RIG_RESET_SOFT;
+      reset = SHIM_RIG_RESET_SOFT;
     } else if (reset_str == "MCALL") {
-      reset = RIG_RESET_MCALL;
+      reset = SHIM_RIG_RESET_MCALL;
     } else if (reset_str == "MASTER") {
-      reset = RIG_RESET_MASTER;
+      reset = SHIM_RIG_RESET_MASTER;
     } else if (reset_str == "VFO") {
-      reset = RIG_RESET_VFO;
+      reset = SHIM_RIG_RESET_VFO;
     } else {
       Napi::Error::New(env, "Invalid reset type: " + reset_str + 
                       " (valid: NONE, SOFT, VFO, MCALL, MASTER)").ThrowAsJavaScriptException();

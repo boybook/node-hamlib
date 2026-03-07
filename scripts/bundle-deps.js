@@ -174,6 +174,19 @@ class WindowsBundler {
     fs.copyFileSync(dllPath, hamlibDest);
     logger.log(`Copied ${path.basename(dllPath)}`, 'success');
 
+    // Copy hamlib_shim.dll (built by build-shim.js)
+    const shimPaths = [
+      path.join(__dirname, '..', 'build', 'Release', 'hamlib_shim.dll'),
+      path.join(__dirname, '..', 'build', 'hamlib_shim.dll')
+    ];
+    for (const shimPath of shimPaths) {
+      if (exists(shimPath)) {
+        fs.copyFileSync(shimPath, path.join(this.targetDir, 'hamlib_shim.dll'));
+        logger.log('Copied hamlib_shim.dll', 'success');
+        break;
+      }
+    }
+
     // Get and copy dependencies
     const deps = this.getDependencies(dllPath);
     if (deps.length === 0) {

@@ -11,7 +11,6 @@ jobs:
   build:
     env:
       HAMLIB_VERSION: '4.6.5'
-      PTHREADS_SOURCEWARE_DIR: 'prebuilt-dll-2-9-1-release'
 
     strategy:
       matrix:
@@ -76,20 +75,12 @@ jobs:
         Write-Host "HAMLIB root: $root"
         "HAMLIB_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-    - name: Setup Windows pthread
+    - name: Setup MSYS2 MinGW (Windows)
       if: matrix.os == 'windows-latest'
-      shell: pwsh
-      run: |
-        $dir = $env:PTHREADS_SOURCEWARE_DIR
-        $base = "https://sourceware.org/pub/pthreads-win32/$dir"
-        $root = Join-Path $env:RUNNER_TEMP 'pthreads-root'
-        New-Item -ItemType Directory -Path (Join-Path $root 'lib/x64') -Force | Out-Null
-
-        foreach ($f in @('pthread.h','sched.h','semaphore.h')) {
-          Invoke-WebRequest -Uri "$base/include/$f" -OutFile (Join-Path $root $f)
-        }
-        Invoke-WebRequest -Uri "$base/lib/x64/pthreadVC2.lib" -OutFile (Join-Path $root 'lib/x64/pthreadVC2.lib')
-        "PTHREAD_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+        install: mingw-w64-x86_64-gcc
 
     - name: Setup MSVC (Windows)
       if: matrix.os == 'windows-latest'
@@ -97,44 +88,26 @@ jobs:
       with:
         arch: x64
 
-    - name: Fix Hamlib import library (Windows)
-      if: matrix.os == 'windows-latest'
-      shell: pwsh
-      run: |
-        $dllPath = Get-ChildItem -Path (Join-Path $env:HAMLIB_ROOT 'bin') -Filter 'libhamlib-*.dll' | Select-Object -First 1
-        $defPath = Join-Path $env:RUNNER_TEMP 'libhamlib-4.def'
-        $libPath = Join-Path $env:HAMLIB_ROOT 'lib/libhamlib-4.lib'
-
-        $exports = dumpbin /exports $dllPath.FullName
-        $defContent = "LIBRARY libhamlib-4.dll`nEXPORTS`n"
-        $inExports = $false
-        foreach ($line in $exports -split "`n") {
-          if ($line -match '^\s+ordinal\s+hint\s+RVA\s+name') { $inExports = $true; continue }
-          if ($inExports -and $line -match '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]+\s+(\S+)') {
-            $defContent += "  $($matches[1])`n"
-          }
-        }
-
-        Set-Content -Path $defPath -Value $defContent -Encoding ASCII
-        $libDir = Join-Path $env:HAMLIB_ROOT 'lib'
-        if (-not (Test-Path $libDir)) { New-Item -ItemType Directory -Path $libDir -Force | Out-Null }
-        lib /def:$defPath /out:$libPath /machine:x64
-
     - name: Install Node.js dependencies
       run: npm ci --ignore-scripts
 
-    - name: Build (Linux/macOS - unified)
-      if: matrix.os != 'windows-latest'
-      run: |
-        npm run build:all -- --minimal
-        npm run verify
-
-    - name: Build (Windows - staged)
+    - name: Build shim (Windows)
       if: matrix.os == 'windows-latest'
+      shell: msys2 {0}
       run: |
-        node scripts/run-prebuildify.js
-        npm run bundle
-        npm run verify
+        export PATH="/mingw64/bin:$PATH"
+        node scripts/build-shim.js --verbose
+
+    - name: Build shim (Unix)
+      if: matrix.os != 'windows-latest'
+      run: node scripts/build-shim.js --verbose
+
+    - name: Build native addon
+      run: npm run build:all -- --skip-hamlib --skip-shim --minimal
+
+    - name: Run tests
+      run: |
+        node test/test_loader.js
 
     - name: Upload prebuilds artifact
       uses: actions/upload-artifact@v4

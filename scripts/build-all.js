@@ -22,6 +22,7 @@ const logger = createLogger('Building node-hamlib');
 // Parse command line arguments
 const args = {
   skipHamlib: process.argv.includes('--skip-hamlib'),
+  skipShim: process.argv.includes('--skip-shim'),
   minimal: process.argv.includes('--minimal'),
   verifyOnly: process.argv.includes('--verify-only'),
   verbose: process.argv.includes('--verbose'),
@@ -64,6 +65,42 @@ function checkCommand(cmd) {
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Build the shim layer (all platforms)
+ */
+function buildShim() {
+  logger.startSpinner('Building shim layer...');
+
+  try {
+    const startTime = Date.now();
+    const shimScript = path.join(__dirname, 'build-shim.js');
+    const shimArgs = args.verbose ? ' --verbose' : '';
+    exec(`node ${shimScript}${shimArgs}`);
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+
+    logger.succeedSpinner(`Shim build complete (${duration}s)`);
+
+    // Verify shim output
+    if (process.platform === 'win32') {
+      const shimDll = path.join(__dirname, '..', 'build', 'hamlib_shim.dll');
+      const shimLib = path.join(__dirname, '..', 'build', 'hamlib_shim.lib');
+      if (!exists(shimDll) || !exists(shimLib)) {
+        throw new Error('Shim DLL or import library not found after build');
+      }
+      logger.log('Shim DLL and import library ready', 'success');
+    } else {
+      const shimA = path.join(__dirname, '..', 'build', 'libhamlib_shim.a');
+      if (!exists(shimA)) {
+        throw new Error('Shim static library not found after build');
+      }
+      logger.log('Shim static library ready', 'success');
+    }
+  } catch (e) {
+    logger.failSpinner('Shim build failed');
+    throw e;
   }
 }
 
@@ -144,18 +181,19 @@ async function setupHamlib() {
   }
 
   if (process.platform === 'win32') {
-    // Windows: Download precompiled Hamlib
+    // Windows: Verify HAMLIB_ROOT is set (needed by build-shim.js)
     logger.startSpinner('Checking for Hamlib installation...');
 
     if (process.env.HAMLIB_ROOT && exists(process.env.HAMLIB_ROOT)) {
-      logger.succeedSpinner('Using existing Hamlib installation');
+      logger.succeedSpinner(`Using Hamlib: ${process.env.HAMLIB_ROOT}`);
       return;
     }
 
     logger.failSpinner('Hamlib not found');
-    logger.warning('Windows users should set HAMLIB_ROOT or download Hamlib manually');
-    logger.info('Download from: https://github.com/Hamlib/Hamlib/releases');
-    throw new Error('HAMLIB_ROOT not set or Hamlib not found');
+    logger.warning('Please set HAMLIB_ROOT environment variable');
+    logger.info('Download from: https://github.com/Hamlib/Hamlib/releases/download/4.6.5/hamlib-w64-4.6.5.zip');
+    logger.info('Extract and set: HAMLIB_ROOT=C:\\path\\to\\hamlib-w64-4.6.5');
+    throw new Error('HAMLIB_ROOT not set');
   } else {
     // Linux/macOS: Build from source
     logger.startSpinner('Building Hamlib from source...');
@@ -204,34 +242,58 @@ async function setupHamlib() {
  * Step 3: Compile native addon
  */
 function compileNative() {
-  logger.startSpinner('Running node-gyp configure...');
+  if (process.platform === 'win32') {
+    // Windows: use prebuildify (handles configure + build with MSVC)
+    logger.startSpinner('Building with prebuildify...');
 
-  try {
-    exec('node-gyp configure');
-    logger.succeedSpinner('Configuration complete');
-  } catch (e) {
-    logger.failSpinner('Configuration failed');
-    throw e;
-  }
+    try {
+      const startTime = Date.now();
+      exec(`node ${path.join(__dirname, 'run-prebuildify.js')}`);
+      const duration = ((Date.now() - startTime) / 1000).toFixed(1);
 
-  logger.startSpinner('Compiling native addon...');
+      logger.succeedSpinner(`Build complete (${duration}s)`);
 
-  try {
-    const startTime = Date.now();
-    exec('node-gyp build');
-    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-
-    logger.succeedSpinner(`Compilation complete (${duration}s)`);
-
-    // Check if binary was created
-    const binaryPath = path.join(__dirname, '..', 'build', 'Release', 'hamlib.node');
-    if (exists(binaryPath)) {
-      const stats = fs.statSync(binaryPath);
-      logger.log(`Binary created: ${(stats.size / 1024).toFixed(1)} KB`, 'success');
+      // Check if binary was created
+      const binaryPath = path.join(__dirname, '..', 'prebuilds', 'win32-x64', 'node.napi.node');
+      if (exists(binaryPath)) {
+        const stats = fs.statSync(binaryPath);
+        logger.log(`Binary created: ${(stats.size / 1024).toFixed(1)} KB`, 'success');
+      }
+    } catch (e) {
+      logger.failSpinner('Build failed');
+      throw e;
     }
-  } catch (e) {
-    logger.failSpinner('Compilation failed');
-    throw e;
+  } else {
+    // Linux/macOS: use node-gyp
+    logger.startSpinner('Running node-gyp configure...');
+
+    try {
+      exec('node-gyp configure');
+      logger.succeedSpinner('Configuration complete');
+    } catch (e) {
+      logger.failSpinner('Configuration failed');
+      throw e;
+    }
+
+    logger.startSpinner('Compiling native addon...');
+
+    try {
+      const startTime = Date.now();
+      exec('node-gyp build');
+      const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+
+      logger.succeedSpinner(`Compilation complete (${duration}s)`);
+
+      // Check if binary was created
+      const binaryPath = path.join(__dirname, '..', 'build', 'Release', 'hamlib.node');
+      if (exists(binaryPath)) {
+        const stats = fs.statSync(binaryPath);
+        logger.log(`Binary created: ${(stats.size / 1024).toFixed(1)} KB`, 'success');
+      }
+    } catch (e) {
+      logger.failSpinner('Compilation failed');
+      throw e;
+    }
   }
 }
 
@@ -239,16 +301,17 @@ function compileNative() {
  * Step 4: Run prebuildify
  */
 function runPrebuildify() {
+  if (process.platform === 'win32') {
+    // Windows: already done in compileNative()
+    logger.log('Prebuild binary already generated', 'success');
+    return;
+  }
+
   logger.startSpinner('Generating prebuilt binary...');
 
   try {
-    if (process.platform === 'win32' && exists(path.join(__dirname, 'run-prebuildify.js'))) {
-      // Windows: use special wrapper
-      exec(`node ${path.join(__dirname, 'run-prebuildify.js')}`);
-    } else {
-      // Unix: direct prebuildify
-      exec('npx prebuildify --napi --strip');
-    }
+    // Unix: direct prebuildify
+    exec('npx prebuildify --napi --strip');
 
     logger.succeedSpinner('Prebuilt binary generated');
 
@@ -320,7 +383,7 @@ async function main() {
       await verifyBuild();
     } else {
       // Full build process
-      const totalSteps = args.skipVerify ? 5 : 6;
+      const totalSteps = args.skipVerify ? 6 : 7;
       let currentStep = 1;
 
       logger.step('Checking build tools', currentStep++, totalSteps);
@@ -328,6 +391,11 @@ async function main() {
 
       logger.step('Setting up Hamlib', currentStep++, totalSteps);
       await setupHamlib();
+
+      if (!args.skipShim) {
+        logger.step('Building shim layer', currentStep++, totalSteps);
+        buildShim();
+      }
 
       logger.step('Compiling native addon', currentStep++, totalSteps);
       compileNative();

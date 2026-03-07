@@ -1,0 +1,303 @@
+#!/usr/bin/env node
+
+/**
+ * build-shim.js - Build the Hamlib shim layer
+ *
+ * Linux/macOS: Compiles as static library (.a) linked into the addon
+ * Windows: Compiles as DLL (MinGW) for cross-compiler isolation
+ *
+ * Usage:
+ *   node scripts/build-shim.js [--verbose]
+ *
+ * Environment variables:
+ *   HAMLIB_ROOT    - Path to Hamlib installation (Windows)
+ *   HAMLIB_PREFIX  - Path to Hamlib installation (Linux/macOS)
+ *   MINGW_CC       - MinGW compiler path (Windows, defaults to gcc)
+ */
+
+const fs = require('fs');
+const path = require('path');
+const { execSync } = require('child_process');
+
+const verbose = process.argv.includes('--verbose');
+const projectRoot = path.join(__dirname, '..');
+const shimDir = path.join(projectRoot, 'src', 'shim');
+const buildDir = path.join(projectRoot, 'build');
+const isWindows = process.platform === 'win32';
+const isMac = process.platform === 'darwin';
+
+function log(msg) {
+  console.log(`[build-shim] ${msg}`);
+}
+
+function exec(cmd, options = {}) {
+  try {
+    const result = execSync(cmd, {
+      encoding: 'utf8',
+      stdio: verbose ? 'inherit' : 'pipe',
+      cwd: projectRoot,
+      ...options
+    });
+    return result;
+  } catch (err) {
+    console.error(`Command failed: ${cmd}`);
+    if (err.stderr) console.error(err.stderr);
+    throw err;
+  }
+}
+
+function ensureDir(dir) {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+}
+
+function findHamlibInclude() {
+  if (isWindows) {
+    const hamlibRoot = process.env.HAMLIB_ROOT;
+    if (hamlibRoot && fs.existsSync(path.join(hamlibRoot, 'include'))) {
+      return path.join(hamlibRoot, 'include');
+    }
+    // Try common paths
+    const paths = ['C:/hamlib/include', 'C:/Program Files/Hamlib/include'];
+    for (const p of paths) {
+      if (fs.existsSync(p)) return p;
+    }
+    throw new Error('Cannot find Hamlib include directory. Set HAMLIB_ROOT.');
+  }
+
+  const prefix = process.env.HAMLIB_PREFIX;
+  if (prefix && fs.existsSync(path.join(prefix, 'include'))) {
+    return path.join(prefix, 'include');
+  }
+
+  // Check common paths
+  const paths = isMac
+    ? ['/opt/homebrew/include', '/opt/homebrew/opt/hamlib/include', '/usr/local/include']
+    : ['/usr/local/include', '/usr/include'];
+
+  for (const p of paths) {
+    if (fs.existsSync(path.join(p, 'hamlib', 'rig.h'))) return p;
+  }
+  throw new Error('Cannot find Hamlib include directory. Set HAMLIB_PREFIX.');
+}
+
+function findHamlibLib() {
+  if (isWindows) {
+    const hamlibRoot = process.env.HAMLIB_ROOT;
+    if (hamlibRoot) {
+      // Check bin dir (where DLLs usually are on Windows)
+      if (fs.existsSync(path.join(hamlibRoot, 'bin', 'libhamlib-4.dll'))) {
+        return path.join(hamlibRoot, 'bin');
+      }
+      if (fs.existsSync(path.join(hamlibRoot, 'lib'))) {
+        return path.join(hamlibRoot, 'lib');
+      }
+    }
+    throw new Error('Cannot find Hamlib library directory. Set HAMLIB_ROOT.');
+  }
+
+  const prefix = process.env.HAMLIB_PREFIX;
+  if (prefix && fs.existsSync(path.join(prefix, 'lib'))) {
+    return path.join(prefix, 'lib');
+  }
+
+  const paths = isMac
+    ? ['/opt/homebrew/lib', '/opt/homebrew/opt/hamlib/lib', '/usr/local/lib']
+    : ['/usr/local/lib', '/usr/lib', '/usr/lib/x86_64-linux-gnu'];
+
+  for (const p of paths) {
+    if (fs.existsSync(p)) return p;
+  }
+  throw new Error('Cannot find Hamlib library directory. Set HAMLIB_PREFIX.');
+}
+
+function findMingwGcc() {
+  // Try MINGW_CC env var first
+  if (process.env.MINGW_CC) return process.env.MINGW_CC;
+
+  // Try common MinGW gcc locations on Windows
+  const candidates = [
+    'gcc',  // In PATH (e.g., from MSYS2)
+    'x86_64-w64-mingw32-gcc',
+    'C:/msys64/mingw64/bin/gcc.exe',
+    'C:/mingw64/bin/gcc.exe',
+  ];
+
+  for (const gcc of candidates) {
+    try {
+      execSync(`${gcc} --version`, { stdio: 'pipe', encoding: 'utf8' });
+      return gcc;
+    } catch { /* continue */ }
+  }
+  throw new Error('MinGW gcc not found. Install MSYS2/mingw-w64 or set MINGW_CC.');
+}
+
+function buildWindows() {
+  log('Building shim DLL for Windows (MinGW)...');
+
+  const gcc = findMingwGcc();
+  log(`Using MinGW compiler: ${gcc}`);
+
+  const includeDir = findHamlibInclude();
+  const libDir = findHamlibLib();
+  log(`Hamlib include: ${includeDir}`);
+  log(`Hamlib lib: ${libDir}`);
+
+  ensureDir(buildDir);
+
+  const shimSrc = path.join(shimDir, 'hamlib_shim.c').replace(/\\/g, '/');
+  const shimDll = path.join(buildDir, 'hamlib_shim.dll').replace(/\\/g, '/');
+  const shimDef = path.join(buildDir, 'hamlib_shim.def').replace(/\\/g, '/');
+
+  // Compile shim DLL with MinGW
+  const gccCmd = [
+    gcc,
+    '-shared', '-O2',
+    '-DHAMLIB_SHIM_BUILD',
+    `-I${includeDir.replace(/\\/g, '/')}`,
+    `-L${libDir.replace(/\\/g, '/')}`,
+    '-o', shimDll,
+    shimSrc,
+    '-lhamlib-4',
+    `-Wl,--output-def,${shimDef}`
+  ].join(' ');
+
+  log(`Compiling: ${gccCmd}`);
+  exec(gccCmd);
+
+  if (!fs.existsSync(shimDll.replace(/\//g, '\\'))) {
+    throw new Error('Failed to create hamlib_shim.dll');
+  }
+  log(`Created: ${shimDll}`);
+
+  // Generate MSVC import library from the DLL
+  generateMsvcImportLib(shimDll, shimDef);
+
+  // Copy shim DLL to Release dir if it exists
+  const releaseDir = path.join(buildDir, 'Release');
+  if (fs.existsSync(releaseDir)) {
+    fs.copyFileSync(
+      shimDll.replace(/\//g, '\\'),
+      path.join(releaseDir, 'hamlib_shim.dll')
+    );
+    log('Copied hamlib_shim.dll to build/Release/');
+  }
+}
+
+function findMsvcLibExe() {
+  // Search for lib.exe in Visual Studio installations
+  const vsRoots = [
+    'C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools',
+    'C:/Program Files/Microsoft Visual Studio/2022/Community',
+    'C:/Program Files/Microsoft Visual Studio/2022/Professional',
+    'C:/Program Files/Microsoft Visual Studio/2022/Enterprise',
+    'C:/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools',
+    'C:/Program Files (x86)/Microsoft Visual Studio/2019/Community',
+  ];
+
+  for (const vsRoot of vsRoots) {
+    const toolsDir = path.join(vsRoot, 'VC', 'Tools', 'MSVC');
+    if (!fs.existsSync(toolsDir)) continue;
+    const versions = fs.readdirSync(toolsDir).sort().reverse();
+    for (const ver of versions) {
+      const libExe = path.join(toolsDir, ver, 'bin', 'Hostx64', 'x64', 'lib.exe');
+      if (fs.existsSync(libExe)) return libExe;
+    }
+  }
+  return null;
+}
+
+function generateMsvcImportLib(dllPath, defPath) {
+  log('Generating MSVC import library...');
+
+  const libPath = path.join(buildDir, 'hamlib_shim.lib').replace(/\\/g, '/');
+
+  // Try using lib.exe (from MSVC) - search in VS installation
+  const libExe = findMsvcLibExe();
+  if (libExe) {
+    try {
+      const libCmd = `"${libExe}" /def:${defPath} /out:${libPath} /machine:x64`;
+      exec(libCmd);
+      log(`Created MSVC import lib: ${libPath}`);
+      return;
+    } catch (e) {
+      log(`lib.exe failed: ${e.message}, trying dlltool...`);
+    }
+  } else {
+    // Try lib.exe from PATH (e.g., in VS Developer Command Prompt)
+    try {
+      const libCmd = `lib /def:${defPath} /out:${libPath} /machine:x64`;
+      exec(libCmd);
+      log(`Created MSVC import lib: ${libPath}`);
+      return;
+    } catch {
+      log('lib.exe not found in PATH, trying dlltool...');
+    }
+  }
+
+  // Fallback: use dlltool (from MinGW)
+  try {
+    const dlltoolCmd = `dlltool -d ${defPath} -l ${libPath} -D hamlib_shim.dll`;
+    exec(dlltoolCmd);
+    log(`Created import lib via dlltool: ${libPath}`);
+  } catch {
+    log('WARNING: Could not generate import library. Linking may fail.');
+  }
+}
+
+function buildUnix() {
+  const platform = isMac ? 'macOS' : 'Linux';
+  log(`Building shim static library for ${platform}...`);
+
+  const cc = process.env.CC || 'gcc';
+  const includeDir = findHamlibInclude();
+  const libDir = findHamlibLib();
+  log(`Hamlib include: ${includeDir}`);
+  log(`Hamlib lib: ${libDir}`);
+
+  ensureDir(buildDir);
+
+  const shimSrc = path.join(shimDir, 'hamlib_shim.c');
+  const shimObj = path.join(buildDir, 'hamlib_shim.o');
+  const shimLib = path.join(buildDir, 'libhamlib_shim.a');
+
+  // Compile object file
+  const ccCmd = [
+    cc,
+    '-c', '-fPIC', '-O2',
+    '-DHAMLIB_SHIM_BUILD',
+    `-I${includeDir}`,
+    '-o', shimObj,
+    shimSrc
+  ].join(' ');
+
+  log(`Compiling: ${ccCmd}`);
+  exec(ccCmd);
+
+  // Create static library
+  const arCmd = `ar rcs ${shimLib} ${shimObj}`;
+  log(`Archiving: ${arCmd}`);
+  exec(arCmd);
+
+  if (!fs.existsSync(shimLib)) {
+    throw new Error('Failed to create libhamlib_shim.a');
+  }
+  log(`Created: ${shimLib}`);
+}
+
+// Main
+try {
+  log(`Platform: ${process.platform}, Arch: ${process.arch}`);
+
+  if (isWindows) {
+    buildWindows();
+  } else {
+    buildUnix();
+  }
+
+  log('Shim build completed successfully.');
+} catch (err) {
+  console.error(`[build-shim] ERROR: ${err.message}`);
+  process.exit(1);
+}
