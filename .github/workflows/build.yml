@@ -13,6 +13,7 @@ jobs:
       HAMLIB_VERSION: '4.6.5'
 
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
@@ -80,7 +81,8 @@ jobs:
       uses: msys2/setup-msys2@v2
       with:
         msystem: MINGW64
-        install: mingw-w64-x86_64-gcc
+        location: D:\msys2
+        install: mingw-w64-x86_64-gcc mingw-w64-x86_64-binutils
 
     - name: Setup MSVC (Windows)
       if: matrix.os == 'windows-latest'
@@ -93,9 +95,11 @@ jobs:
 
     - name: Build shim DLL (Windows)
       if: matrix.os == 'windows-latest'
-      shell: msys2 {0}
+      shell: pwsh
+      env:
+        MINGW_CC: D:\msys2\msys64\mingw64\bin\gcc.exe
       run: |
-        export PATH="/mingw64/bin:$PATH"
+        $env:Path = "D:\msys2\msys64\mingw64\bin;$env:Path"
         node scripts/build-shim.js --verbose
 
     - name: Build (Windows)
