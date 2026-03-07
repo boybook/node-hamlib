@@ -360,15 +360,11 @@ class LinuxBundler {
   }
 
   findHamlibSo() {
-    // Check HAMLIB_PREFIX
+    // Check HAMLIB_PREFIX - scan lib dir for any libhamlib.so*
     if (process.env.HAMLIB_PREFIX) {
-      const paths = [
-        path.join(process.env.HAMLIB_PREFIX, 'lib/libhamlib.so.4'),
-        path.join(process.env.HAMLIB_PREFIX, 'lib/libhamlib.so')
-      ];
-      for (const p of paths) {
-        if (exists(p)) return p;
-      }
+      const libDir = path.join(process.env.HAMLIB_PREFIX, 'lib');
+      const found = this.findHamlibInDir(libDir);
+      if (found) return found;
     }
 
     // Try ldconfig
@@ -383,18 +379,39 @@ class LinuxBundler {
     }
 
     // Common paths
-    const commonPaths = [
-      '/usr/lib64/libhamlib.so.4',
-      '/usr/lib/libhamlib.so.4',
-      '/usr/local/lib/libhamlib.so.4',
-      '/usr/lib/x86_64-linux-gnu/libhamlib.so.4',
-      '/usr/lib/aarch64-linux-gnu/libhamlib.so.4'
+    const commonDirs = [
+      '/usr/lib64',
+      '/usr/lib',
+      '/usr/local/lib',
+      '/usr/lib/x86_64-linux-gnu',
+      '/usr/lib/aarch64-linux-gnu'
     ];
 
-    for (const p of commonPaths) {
-      if (exists(p)) return p;
+    for (const dir of commonDirs) {
+      const found = this.findHamlibInDir(dir);
+      if (found) return found;
     }
 
+    return null;
+  }
+
+  findHamlibInDir(dir) {
+    try {
+      const files = fs.readdirSync(dir);
+      // Prefer versioned .so (e.g., libhamlib.so.5, libhamlib.so.4), then unversioned
+      const versioned = files
+        .filter(f => /^libhamlib\.so\.\d+$/.test(f))
+        .sort()
+        .reverse();
+      if (versioned.length > 0) {
+        return path.join(dir, versioned[0]);
+      }
+      if (files.includes('libhamlib.so')) {
+        return path.join(dir, 'libhamlib.so');
+      }
+    } catch {
+      // Directory doesn't exist or not readable
+    }
     return null;
   }
 
@@ -427,10 +444,29 @@ class LinuxBundler {
 
     logger.log(`Found libhamlib: ${path.basename(hamlibLib)}`, 'success');
 
-    // Copy libhamlib.so
-    const hamlibDest = path.join(this.targetDir, path.basename(hamlibLib));
-    fs.copyFileSync(hamlibLib, hamlibDest);
-    logger.log(`Copied ${path.basename(hamlibLib)}`, 'success');
+    // Copy all libhamlib.so* files (soname variants) from the same directory
+    const hamlibDir = path.dirname(hamlibLib);
+    try {
+      const allFiles = fs.readdirSync(hamlibDir);
+      const hamlibFiles = allFiles.filter(f => /^libhamlib\.so/.test(f));
+      for (const hf of hamlibFiles) {
+        const src = path.join(hamlibDir, hf);
+        const dest = path.join(this.targetDir, hf);
+        try {
+          // Resolve symlinks to copy actual file content
+          const realSrc = fs.realpathSync(src);
+          fs.copyFileSync(realSrc, dest);
+          logger.log(`Copied ${hf}`, 'success');
+        } catch (e) {
+          logger.log(`Failed to copy ${hf}: ${e.message}`, 'warning');
+        }
+      }
+    } catch {
+      // Fallback: just copy the found file
+      const hamlibDest = path.join(this.targetDir, path.basename(hamlibLib));
+      fs.copyFileSync(hamlibLib, hamlibDest);
+      logger.log(`Copied ${path.basename(hamlibLib)}`, 'success');
+    }
 
     // Get dependencies
     try {
