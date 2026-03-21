@@ -71,9 +71,10 @@ typedef void* hamlib_shim_handle_t;
 /* Passband constants */
 #define SHIM_RIG_PASSBAND_NORMAL  0
 
-/* Port types */
-#define SHIM_RIG_PORT_SERIAL   0
-#define SHIM_RIG_PORT_NETWORK  4
+/* Port types (must match hamlib rig_port_e enum) */
+#define SHIM_RIG_PORT_NONE     0
+#define SHIM_RIG_PORT_SERIAL   1
+#define SHIM_RIG_PORT_NETWORK  2
 
 /* Scan types */
 #define SHIM_RIG_SCAN_STOP   0
