@@ -2191,19 +2191,17 @@ NodeHamLib::NodeHamLib(const Napi::CallbackInfo & info): ObjectWrap(info) {
     return;
   }
 
-  // Set default port path if not provided
-  strncpy(port_path, "/dev/ttyUSB0", SHIM_HAMLIB_FILPATHLEN - 1);
-  port_path[SHIM_HAMLIB_FILPATHLEN - 1] = '\0';
-
   // Check if port path is provided as second argument
-  if (info.Length() >= 2) {
-    if (info[1].IsString()) {
-      std::string portStr = info[1].As<Napi::String>().Utf8Value();
+  bool has_port = false;
+  port_path[0] = '\0';
+
+  if (info.Length() >= 2 && info[1].IsString()) {
+    std::string portStr = info[1].As<Napi::String>().Utf8Value();
+    if (!portStr.empty()) {
       strncpy(port_path, portStr.c_str(), SHIM_HAMLIB_FILPATHLEN - 1);
       port_path[SHIM_HAMLIB_FILPATHLEN - 1] = '\0';
+      has_port = true;
     }
-    // Note: Debug level is now controlled globally via HamLib.setDebugLevel()
-    // and set to RIG_DEBUG_NONE by default in addon initialization
   }
   //unsigned int myrig_model;
   //   hamlib_port_t myport;
@@ -2242,13 +2240,16 @@ NodeHamLib::NodeHamLib(const Napi::CallbackInfo & info): ObjectWrap(info) {
     Napi::TypeError::New(env, errorMsg).ThrowAsJavaScriptException();
   }
   
-  // Set port path and type based on connection type
-  shim_rig_set_port_path(my_rig, port_path);
+  // Only set port path and type when user explicitly provided a port.
+  // Otherwise, let rig_init() defaults take effect (e.g., dummy rig uses RIG_PORT_NONE).
+  if (has_port) {
+    shim_rig_set_port_path(my_rig, port_path);
 
-  if (is_network_rig) {
-    shim_rig_set_port_type(my_rig, SHIM_RIG_PORT_NETWORK);
-  } else {
-    shim_rig_set_port_type(my_rig, SHIM_RIG_PORT_SERIAL);
+    if (is_network_rig) {
+      shim_rig_set_port_type(my_rig, SHIM_RIG_PORT_NETWORK);
+    } else {
+      shim_rig_set_port_type(my_rig, SHIM_RIG_PORT_SERIAL);
+    }
   }
 
   // this->freq_emit_cb = [info](double freq) {
