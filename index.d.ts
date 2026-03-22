@@ -542,9 +542,10 @@ declare class HamLib {
   /**
    * Get radio level
    * @param levelType Level type ('AF', 'RF', 'SQL', 'STRENGTH', etc.)
+   * @param vfo Optional VFO ('VFO-A', 'VFO-B', 'currVFO'). Defaults to currVFO.
    * @returns Level value
    */
-  getLevel(levelType: LevelType): Promise<number>;
+  getLevel(levelType: LevelType, vfo?: string): Promise<number>;
 
   /**
    * Get list of supported level types

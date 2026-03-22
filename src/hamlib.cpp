@@ -280,7 +280,7 @@ public:
     void Execute() override {
         CHECK_RIG_VALID();
 
-        result_code_ = shim_rig_set_level_f(hamlib_instance_->my_rig, SHIM_RIG_VFO_NONE, level_type_, value_);
+        result_code_ = shim_rig_set_level_f(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, level_type_, value_);
         if (result_code_ != SHIM_RIG_OK) {
             error_message_ = shim_rigerror(result_code_);
         }
@@ -307,15 +307,13 @@ private:
 
 class GetLevelAsyncWorker : public HamLibAsyncWorker {
 public:
-    GetLevelAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, uint64_t level_type)
-        : HamLibAsyncWorker(env, hamlib_instance), level_type_(level_type), value_(0.0f) {}
+    GetLevelAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, uint64_t level_type, int vfo = SHIM_RIG_VFO_CURR)
+        : HamLibAsyncWorker(env, hamlib_instance), level_type_(level_type), vfo_(vfo), value_(0.0f) {}
 
     void Execute() override {
         CHECK_RIG_VALID();
 
-        // Use RIG_VFO_NONE to avoid unnecessary VFO switching that fails on
-        // ICOM rigs (e.g. IC-705) where icom_set_vfo returns "unsupported VFO"
-        result_code_ = shim_rig_get_level_f(hamlib_instance_->my_rig, SHIM_RIG_VFO_NONE, level_type_, &value_);
+        result_code_ = shim_rig_get_level_f(hamlib_instance_->my_rig, vfo_, level_type_, &value_);
         if (result_code_ != SHIM_RIG_OK) {
             error_message_ = shim_rigerror(result_code_);
         }
@@ -337,6 +335,7 @@ public:
 
 private:
     uint64_t level_type_;
+    int vfo_;
     float value_;
 };
 
@@ -2974,9 +2973,20 @@ Napi::Value NodeHamLib::GetLevel(const Napi::CallbackInfo & info) {
     return env.Null();
   }
   
-  GetLevelAsyncWorker* worker = new GetLevelAsyncWorker(env, this, levelType);
+  // Optional second parameter: VFO string ('VFO-A', 'VFO-B', 'currVFO')
+  int vfo = SHIM_RIG_VFO_CURR;
+  if (info.Length() >= 2 && info[1].IsString()) {
+    std::string vfoStr = info[1].As<Napi::String>().Utf8Value();
+    if (vfoStr == "VFO-A") {
+      vfo = SHIM_RIG_VFO_A;
+    } else if (vfoStr == "VFO-B") {
+      vfo = SHIM_RIG_VFO_B;
+    }
+  }
+
+  GetLevelAsyncWorker* worker = new GetLevelAsyncWorker(env, this, levelType, vfo);
   worker->Queue();
-  
+
   return worker->GetPromise();
 }
 

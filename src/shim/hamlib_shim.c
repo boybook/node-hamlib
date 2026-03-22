@@ -345,10 +345,27 @@ SHIM_API int shim_rig_set_level_i(hamlib_shim_handle_t h, int vfo, uint64_t leve
     return rig_set_level((RIG*)h, (vfo_t)vfo, (setting_t)level, val);
 }
 
+/*
+ * get_level with automatic fallback:
+ * 1. Try standard rig_get_level() (with VFO handling, locking, caching)
+ * 2. If it fails with RIG_EINVAL (-1), fall back to direct backend call
+ *    to bypass VFO switching issues (e.g. ICOM serial rigs where
+ *    icom_set_vfo fails with "unsupported VFO")
+ */
+static int shim_get_level_with_fallback(hamlib_shim_handle_t h, int vfo, uint64_t level, value_t* val) {
+    RIG* rig = (RIG*)h;
+    int ret = rig_get_level(rig, (vfo_t)vfo, (setting_t)level, val);
+    if (ret == -1 && rig->caps->get_level) {
+        /* RIG_EINVAL: VFO switching failed, try direct backend call */
+        ret = rig->caps->get_level(rig, (vfo_t)vfo, (setting_t)level, val);
+    }
+    return ret;
+}
+
 SHIM_API int shim_rig_get_level_f(hamlib_shim_handle_t h, int vfo, uint64_t level, float* value) {
     value_t val;
     val.f = 0.0f;
-    int ret = rig_get_level((RIG*)h, (vfo_t)vfo, (setting_t)level, &val);
+    int ret = shim_get_level_with_fallback(h, vfo, level, &val);
     if (value) *value = val.f;
     return ret;
 }
@@ -356,7 +373,7 @@ SHIM_API int shim_rig_get_level_f(hamlib_shim_handle_t h, int vfo, uint64_t leve
 SHIM_API int shim_rig_get_level_i(hamlib_shim_handle_t h, int vfo, uint64_t level, int* value) {
     value_t val;
     val.i = 0;
-    int ret = rig_get_level((RIG*)h, (vfo_t)vfo, (setting_t)level, &val);
+    int ret = shim_get_level_with_fallback(h, vfo, level, &val);
     if (value) *value = val.i;
     return ret;
 }
