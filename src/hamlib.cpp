@@ -280,7 +280,7 @@ public:
     void Execute() override {
         CHECK_RIG_VALID();
 
-        result_code_ = shim_rig_set_level_f(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, level_type_, value_);
+        result_code_ = shim_rig_set_level_f(hamlib_instance_->my_rig, SHIM_RIG_VFO_NONE, level_type_, value_);
         if (result_code_ != SHIM_RIG_OK) {
             error_message_ = shim_rigerror(result_code_);
         }
@@ -313,7 +313,9 @@ public:
     void Execute() override {
         CHECK_RIG_VALID();
 
-        result_code_ = shim_rig_get_level_f(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, level_type_, &value_);
+        // Use RIG_VFO_NONE to avoid unnecessary VFO switching that fails on
+        // ICOM rigs (e.g. IC-705) where icom_set_vfo returns "unsupported VFO"
+        result_code_ = shim_rig_get_level_f(hamlib_instance_->my_rig, SHIM_RIG_VFO_NONE, level_type_, &value_);
         if (result_code_ != SHIM_RIG_OK) {
             error_message_ = shim_rigerror(result_code_);
         }
