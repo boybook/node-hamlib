@@ -182,15 +182,24 @@ typedef void* hamlib_shim_handle_t;
 #define SHIM_RIG_LEVEL_METER        (1ULL << 20)
 #define SHIM_RIG_LEVEL_VOXGAIN      (1ULL << 21)
 #define SHIM_RIG_LEVEL_ANTIVOX      (1ULL << 22)
-#define SHIM_RIG_LEVEL_STRENGTH     (1ULL << 26)
-#define SHIM_RIG_LEVEL_RAWSTR       (1ULL << 28)
-#define SHIM_RIG_LEVEL_SWR          (1ULL << 29)
-#define SHIM_RIG_LEVEL_ALC          (1ULL << 30)
-#define SHIM_RIG_LEVEL_RFPOWER_METER (1ULL << 33)
-#define SHIM_RIG_LEVEL_COMP_METER   (1ULL << 34)
-#define SHIM_RIG_LEVEL_VD_METER     (1ULL << 35)
-#define SHIM_RIG_LEVEL_ID_METER     (1ULL << 36)
-#define SHIM_RIG_LEVEL_TEMP_METER   (1ULL << 42)
+#define SHIM_RIG_LEVEL_SLOPE_LOW    (1ULL << 23)
+#define SHIM_RIG_LEVEL_SLOPE_HIGH   (1ULL << 24)
+#define SHIM_RIG_LEVEL_BKIN_DLYMS   (1ULL << 25)
+#define SHIM_RIG_LEVEL_RAWSTR       (1ULL << 26)
+/* bit 27 reserved (was SQLSTAT, deprecated) */
+#define SHIM_RIG_LEVEL_SWR          (1ULL << 28)
+#define SHIM_RIG_LEVEL_ALC          (1ULL << 29)
+#define SHIM_RIG_LEVEL_STRENGTH     (1ULL << 30)
+/* bit 31 reserved */
+#define SHIM_RIG_LEVEL_RFPOWER_METER (1ULL << 32)
+#define SHIM_RIG_LEVEL_COMP_METER   (1ULL << 33)
+#define SHIM_RIG_LEVEL_VD_METER     (1ULL << 34)
+#define SHIM_RIG_LEVEL_ID_METER     (1ULL << 35)
+#define SHIM_RIG_LEVEL_NOTCHF_RAW   (1ULL << 36)
+#define SHIM_RIG_LEVEL_MONITOR_GAIN (1ULL << 37)
+#define SHIM_RIG_LEVEL_NB           (1ULL << 38)
+#define SHIM_RIG_LEVEL_RFPOWER_METER_WATTS (1ULL << 39)
+#define SHIM_RIG_LEVEL_TEMP_METER   (1ULL << 48)
 
 /* ===== Function constants (bit positions for setting_t / uint64_t) ===== */
 #define SHIM_RIG_FUNC_FAGC    (1ULL << 0)
@@ -383,6 +392,8 @@ SHIM_API int shim_rig_set_level_f(hamlib_shim_handle_t h, int vfo, uint64_t leve
 SHIM_API int shim_rig_set_level_i(hamlib_shim_handle_t h, int vfo, uint64_t level, int value);
 SHIM_API int shim_rig_get_level_f(hamlib_shim_handle_t h, int vfo, uint64_t level, float* value);
 SHIM_API int shim_rig_get_level_i(hamlib_shim_handle_t h, int vfo, uint64_t level, int* value);
+/* Auto-detect int/float level type, returns value as double */
+SHIM_API int shim_rig_get_level_auto(hamlib_shim_handle_t h, int vfo, uint64_t level, double* value);
 
 /* ===== Function control ===== */
 

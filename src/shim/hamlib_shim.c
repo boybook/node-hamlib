@@ -346,35 +346,60 @@ SHIM_API int shim_rig_set_level_i(hamlib_shim_handle_t h, int vfo, uint64_t leve
 }
 
 /*
- * get_level with automatic fallback:
- * 1. Try standard rig_get_level() (with VFO handling, locking, caching)
- * 2. If it fails with RIG_EINVAL (-1), fall back to direct backend call
- *    to bypass VFO switching issues (e.g. ICOM serial rigs where
- *    icom_set_vfo fails with "unsupported VFO")
+ * Ensure RIG_TARGETABLE_LEVEL is set so rig_get_level() skips VFO
+ * switching but still performs calibration and type conversion.
+ * This fixes ICOM serial rigs where icom_set_vfo fails with
+ * "unsupported VFO" during get_level calls.
+ *
+ * RIG_TARGETABLE_LEVEL = (1<<5) tells Hamlib: "this rig can read
+ * levels without needing to switch VFO first".
  */
-static int shim_get_level_with_fallback(hamlib_shim_handle_t h, int vfo, uint64_t level, value_t* val) {
+#ifndef RIG_TARGETABLE_LEVEL
+#define RIG_TARGETABLE_LEVEL (1<<5)
+#endif
+
+static void shim_ensure_targetable_level(hamlib_shim_handle_t h) {
     RIG* rig = (RIG*)h;
-    int ret = rig_get_level(rig, (vfo_t)vfo, (setting_t)level, val);
-    if (ret == -1 && rig->caps->get_level) {
-        /* RIG_EINVAL: VFO switching failed, try direct backend call */
-        ret = rig->caps->get_level(rig, (vfo_t)vfo, (setting_t)level, val);
+    if (rig && rig->caps && !(rig->caps->targetable_vfo & RIG_TARGETABLE_LEVEL)) {
+        rig->caps->targetable_vfo |= RIG_TARGETABLE_LEVEL;
     }
-    return ret;
 }
 
 SHIM_API int shim_rig_get_level_f(hamlib_shim_handle_t h, int vfo, uint64_t level, float* value) {
+    shim_ensure_targetable_level(h);
     value_t val;
     val.f = 0.0f;
-    int ret = shim_get_level_with_fallback(h, vfo, level, &val);
+    int ret = rig_get_level((RIG*)h, (vfo_t)vfo, (setting_t)level, &val);
     if (value) *value = val.f;
     return ret;
 }
 
 SHIM_API int shim_rig_get_level_i(hamlib_shim_handle_t h, int vfo, uint64_t level, int* value) {
+    shim_ensure_targetable_level(h);
     value_t val;
     val.i = 0;
-    int ret = shim_get_level_with_fallback(h, vfo, level, &val);
+    int ret = rig_get_level((RIG*)h, (vfo_t)vfo, (setting_t)level, &val);
     if (value) *value = val.i;
+    return ret;
+}
+
+/*
+ * Auto-detect int/float level type using RIG_LEVEL_IS_FLOAT macro.
+ * Returns the value as double regardless of the underlying type.
+ * This avoids the common bug where STRENGTH (int) is read as float.
+ */
+SHIM_API int shim_rig_get_level_auto(hamlib_shim_handle_t h, int vfo, uint64_t level, double* value) {
+    shim_ensure_targetable_level(h);
+    value_t val;
+    memset(&val, 0, sizeof(val));
+    int ret = rig_get_level((RIG*)h, (vfo_t)vfo, (setting_t)level, &val);
+    if (value) {
+        if (RIG_LEVEL_IS_FLOAT((setting_t)level)) {
+            *value = (double)val.f;
+        } else {
+            *value = (double)val.i;
+        }
+    }
     return ret;
 }
 

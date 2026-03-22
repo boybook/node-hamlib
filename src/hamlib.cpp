@@ -308,12 +308,14 @@ private:
 class GetLevelAsyncWorker : public HamLibAsyncWorker {
 public:
     GetLevelAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, uint64_t level_type, int vfo = SHIM_RIG_VFO_CURR)
-        : HamLibAsyncWorker(env, hamlib_instance), level_type_(level_type), vfo_(vfo), value_(0.0f) {}
+        : HamLibAsyncWorker(env, hamlib_instance), level_type_(level_type), vfo_(vfo), value_(0.0) {}
 
     void Execute() override {
         CHECK_RIG_VALID();
 
-        result_code_ = shim_rig_get_level_f(hamlib_instance_->my_rig, vfo_, level_type_, &value_);
+        // Use auto-detect to handle int levels (STRENGTH, RAWSTR) and
+        // float levels (SWR, ALC, RFPOWER_METER, etc.) correctly
+        result_code_ = shim_rig_get_level_auto(hamlib_instance_->my_rig, vfo_, level_type_, &value_);
         if (result_code_ != SHIM_RIG_OK) {
             error_message_ = shim_rigerror(result_code_);
         }
@@ -336,7 +338,7 @@ public:
 private:
     uint64_t level_type_;
     int vfo_;
-    float value_;
+    double value_;
 };
 
 class SetFunctionAsyncWorker : public HamLibAsyncWorker {
