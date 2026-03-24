@@ -2962,6 +2962,8 @@ Napi::Value NodeHamLib::GetLevel(const Napi::CallbackInfo & info) {
     levelType = SHIM_RIG_LEVEL_RAWSTR;
   } else if (levelTypeStr == "RFPOWER_METER") {
     levelType = SHIM_RIG_LEVEL_RFPOWER_METER;
+  } else if (levelTypeStr == "RFPOWER_METER_WATTS") {
+    levelType = SHIM_RIG_LEVEL_RFPOWER_METER_WATTS;
   } else if (levelTypeStr == "COMP_METER") {
     levelType = SHIM_RIG_LEVEL_COMP_METER;
   } else if (levelTypeStr == "VD_METER") {
@@ -3026,6 +3028,7 @@ Napi::Value NodeHamLib::GetSupportedLevels(const Napi::CallbackInfo & info) {
   if (levels & SHIM_RIG_LEVEL_SWR) levelArray[index++] = Napi::String::New(env, "SWR");
   if (levels & SHIM_RIG_LEVEL_ALC) levelArray[index++] = Napi::String::New(env, "ALC");
   if (levels & SHIM_RIG_LEVEL_RFPOWER_METER) levelArray[index++] = Napi::String::New(env, "RFPOWER_METER");
+  if (levels & SHIM_RIG_LEVEL_RFPOWER_METER_WATTS) levelArray[index++] = Napi::String::New(env, "RFPOWER_METER_WATTS");
   if (levels & SHIM_RIG_LEVEL_COMP_METER) levelArray[index++] = Napi::String::New(env, "COMP_METER");
   if (levels & SHIM_RIG_LEVEL_VD_METER) levelArray[index++] = Napi::String::New(env, "VD_METER");
   if (levels & SHIM_RIG_LEVEL_ID_METER) levelArray[index++] = Napi::String::New(env, "ID_METER");
