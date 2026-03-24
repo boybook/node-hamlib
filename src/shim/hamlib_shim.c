@@ -405,11 +405,32 @@ SHIM_API int shim_rig_get_level_auto(hamlib_shim_handle_t h, int vfo, uint64_t l
 
 /* ===== Function control ===== */
 
+/*
+ * Ensure RIG_TARGETABLE_FUNC is set so rig_get_func()/rig_set_func()
+ * skip VFO switching. Same fix as RIG_TARGETABLE_LEVEL for ICOM serial
+ * rigs where icom_set_vfo fails with "unsupported VFO".
+ *
+ * RIG_TARGETABLE_FUNC = (1<<4) tells Hamlib: "this rig can get/set
+ * functions without needing to switch VFO first".
+ */
+#ifndef RIG_TARGETABLE_FUNC
+#define RIG_TARGETABLE_FUNC (1<<4)
+#endif
+
+static void shim_ensure_targetable_func(hamlib_shim_handle_t h) {
+    RIG* rig = (RIG*)h;
+    if (rig && rig->caps && !(rig->caps->targetable_vfo & RIG_TARGETABLE_FUNC)) {
+        rig->caps->targetable_vfo |= RIG_TARGETABLE_FUNC;
+    }
+}
+
 SHIM_API int shim_rig_set_func(hamlib_shim_handle_t h, int vfo, uint64_t func, int enable) {
+    shim_ensure_targetable_func(h);
     return rig_set_func((RIG*)h, (vfo_t)vfo, (setting_t)func, enable);
 }
 
 SHIM_API int shim_rig_get_func(hamlib_shim_handle_t h, int vfo, uint64_t func, int* state) {
+    shim_ensure_targetable_func(h);
     int s = 0;
     int ret = rig_get_func((RIG*)h, (vfo_t)vfo, (setting_t)func, &s);
     if (state) *state = s;
@@ -612,8 +633,20 @@ SHIM_API int shim_rig_scan(hamlib_shim_handle_t h, int vfo, int scan_type, int c
 
 /* ===== VFO operations ===== */
 
+/*
+ * vfo_op with fallback for rigs with VFO switching issues.
+ * There is no RIG_TARGETABLE for vfo_op, so we use the same
+ * fallback pattern as the old getLevel fix: try standard call
+ * first, then direct backend call if RIG_EINVAL (-1).
+ */
 SHIM_API int shim_rig_vfo_op(hamlib_shim_handle_t h, int vfo, int op) {
-    return rig_vfo_op((RIG*)h, (vfo_t)vfo, (vfo_op_t)op);
+    RIG* rig = (RIG*)h;
+    int ret = rig_vfo_op(rig, (vfo_t)vfo, (vfo_op_t)op);
+    if (ret == -1 && rig->caps->vfo_op) {
+        /* RIG_EINVAL: VFO switching failed, try direct backend call */
+        ret = rig->caps->vfo_op(rig, (vfo_t)vfo, (vfo_op_t)op);
+    }
+    return ret;
 }
 
 /* ===== Antenna control ===== */
