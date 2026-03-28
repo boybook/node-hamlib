@@ -4,6 +4,9 @@
 #include <vector>
 #include <memory>
 #include <algorithm>
+#include <chrono>
+#include <cstdio>
+#include <exception>
 
 // 安全宏 - 检查RIG指针有效性，防止空指针解引用和已销毁对象访问
 #define CHECK_RIG_VALID() \
@@ -45,10 +48,13 @@ public:
         } else {
             shim_rig_set_freq_callback(hamlib_instance_->my_rig, NodeHamLib::freq_change_cb, hamlib_instance_);
             auto ppt_cb = +[](void* handle, int vfo, int ptt, void* arg) -> int {
-                printf("PPT pushed!");
+                (void)handle;
+                (void)vfo;
+                (void)ptt;
+                (void)arg;
                 return 0;
             };
-            int cb_result = shim_rig_set_ptt_callback(hamlib_instance_->my_rig, ppt_cb, NULL);
+            shim_rig_set_ptt_callback(hamlib_instance_->my_rig, ppt_cb, NULL);
             shim_rig_set_trn(hamlib_instance_->my_rig, SHIM_RIG_TRN_POLL);
             hamlib_instance_->rig_is_open = true;
         }
@@ -2170,7 +2176,7 @@ private:
 
 // Helper function to parse VFO parameter from JavaScript
 int parseVfoParameter(const Napi::CallbackInfo& info, int index, int defaultVfo = SHIM_RIG_VFO_CURR) {
-    if (info.Length() > index && info[index].IsString()) {
+    if (info.Length() > static_cast<size_t>(index) && info[index].IsString()) {
         std::string vfoStr = info[index].As<Napi::String>().Utf8Value();
         if (vfoStr == "VFO-A") {
             return SHIM_RIG_VFO_A;
@@ -2268,6 +2274,8 @@ NodeHamLib::NodeHamLib(const Napi::CallbackInfo & info): ObjectWrap(info) {
 
 // 析构函数 - 确保资源正确清理
 NodeHamLib::~NodeHamLib() {
+  StopSpectrumStreamInternal();
+
   // 如果rig指针存在，执行清理
   if (my_rig) {
     // 如果rig是打开状态，先关闭
@@ -2281,10 +2289,70 @@ NodeHamLib::~NodeHamLib() {
   }
 }
 
+int NodeHamLib::spectrum_line_cb(void* handle, const shim_spectrum_line_t* line, void* arg) {
+  (void)handle;
+  NodeHamLib* instance = static_cast<NodeHamLib*>(arg);
+  if (!instance || !line) {
+    return 0;
+  }
+  instance->EmitSpectrumLine(*line);
+  return 0;
+}
+
+void NodeHamLib::EmitSpectrumLine(const shim_spectrum_line_t& line) {
+  if (!spectrum_tsfn_) {
+    return;
+  }
+
+  auto* line_copy = new shim_spectrum_line_t(line);
+  napi_status status = spectrum_tsfn_.BlockingCall(
+    line_copy,
+    [](Napi::Env env, Napi::Function callback, shim_spectrum_line_t* data) {
+      Napi::Object lineObject = Napi::Object::New(env);
+      lineObject.Set("scopeId", Napi::Number::New(env, data->id));
+      lineObject.Set("dataLevelMin", Napi::Number::New(env, data->data_level_min));
+      lineObject.Set("dataLevelMax", Napi::Number::New(env, data->data_level_max));
+      lineObject.Set("signalStrengthMin", Napi::Number::New(env, data->signal_strength_min));
+      lineObject.Set("signalStrengthMax", Napi::Number::New(env, data->signal_strength_max));
+      lineObject.Set("mode", Napi::Number::New(env, data->spectrum_mode));
+      lineObject.Set("centerFreq", Napi::Number::New(env, data->center_freq));
+      lineObject.Set("spanHz", Napi::Number::New(env, data->span_freq));
+      lineObject.Set("lowEdgeFreq", Napi::Number::New(env, data->low_edge_freq));
+      lineObject.Set("highEdgeFreq", Napi::Number::New(env, data->high_edge_freq));
+      lineObject.Set("dataLength", Napi::Number::New(env, data->data_length));
+      lineObject.Set("timestamp", Napi::Number::New(env, static_cast<double>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count())));
+      lineObject.Set("data", Napi::Buffer<unsigned char>::Copy(env, data->data, static_cast<size_t>(data->data_length)));
+      callback.Call({ lineObject });
+      delete data;
+    });
+
+  if (status != napi_ok) {
+    delete line_copy;
+    return;
+  }
+}
+
+void NodeHamLib::StopSpectrumStreamInternal() {
+  std::lock_guard<std::mutex> lock(spectrum_mutex_);
+  if (spectrum_stream_running_) {
+    shim_rig_set_spectrum_callback(my_rig, nullptr, nullptr);
+    spectrum_stream_running_ = false;
+  }
+  if (spectrum_tsfn_) {
+    spectrum_tsfn_.Release();
+    spectrum_tsfn_ = Napi::ThreadSafeFunction();
+  }
+}
+
 int NodeHamLib::freq_change_cb(void *handle, int vfo, double freq, void* arg) {
+      (void)handle;
+      (void)vfo;
+      (void)freq;
       auto instance = static_cast<NodeHamLib*>(arg);
-      printf("Rig changed freq to %0.7f Hz\n", freq);
-      Napi::Env env = instance->m_currentInfo->Env();
+      if (!instance) {
+        return 0;
+      }
       //Napi::Function emit = instance->m_currentInfo[0].Get("emit").As<Napi::Function>();
 			// Napi::Function emit = instance->m_currentInfo[0]->This().As<Napi::Object>().Get("emit").As<Napi::Function>();
       //emit.Call(instance->m_currentInfo->This(), { Napi::String::New(env, "frequency_change"), Napi::Number::New(env, freq) });
@@ -2293,7 +2361,6 @@ int NodeHamLib::freq_change_cb(void *handle, int vfo, double freq, void* arg) {
         //auto fn = global.Get("process").As<Napi::Object>().Get("emit").As<Napi::Function>();
         //fn.Call({Napi::Number::New(env, freq)});
         return 0;
-  return 0;
 }
 
 Napi::Value NodeHamLib::Open(const Napi::CallbackInfo & info) {
@@ -2565,6 +2632,8 @@ Napi::Value NodeHamLib::Close(const Napi::CallbackInfo & info) {
       .ThrowAsJavaScriptException();
     return env.Null();
   }
+
+  StopSpectrumStreamInternal();
   
   CloseAsyncWorker* worker = new CloseAsyncWorker(env, this);
   worker->Queue();
@@ -2574,6 +2643,8 @@ Napi::Value NodeHamLib::Close(const Napi::CallbackInfo & info) {
 
 Napi::Value NodeHamLib::Destroy(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
+
+  StopSpectrumStreamInternal();
   
   DestroyAsyncWorker* worker = new DestroyAsyncWorker(env, this);
   worker->Queue();
@@ -2912,6 +2983,22 @@ Napi::Value NodeHamLib::SetLevel(const Napi::CallbackInfo & info) {
     levelType = SHIM_RIG_LEVEL_VOXDELAY;
   } else if (levelTypeStr == "ANTIVOX") {
     levelType = SHIM_RIG_LEVEL_ANTIVOX;
+  } else if (levelTypeStr == "SPECTRUM_MODE") {
+    levelType = SHIM_RIG_LEVEL_SPECTRUM_MODE;
+  } else if (levelTypeStr == "SPECTRUM_SPAN") {
+    levelType = SHIM_RIG_LEVEL_SPECTRUM_SPAN;
+  } else if (levelTypeStr == "SPECTRUM_EDGE_LOW") {
+    levelType = SHIM_RIG_LEVEL_SPECTRUM_EDGE_LOW;
+  } else if (levelTypeStr == "SPECTRUM_EDGE_HIGH") {
+    levelType = SHIM_RIG_LEVEL_SPECTRUM_EDGE_HIGH;
+  } else if (levelTypeStr == "SPECTRUM_SPEED") {
+    levelType = SHIM_RIG_LEVEL_SPECTRUM_SPEED;
+  } else if (levelTypeStr == "SPECTRUM_REF") {
+    levelType = SHIM_RIG_LEVEL_SPECTRUM_REF;
+  } else if (levelTypeStr == "SPECTRUM_AVG") {
+    levelType = SHIM_RIG_LEVEL_SPECTRUM_AVG;
+  } else if (levelTypeStr == "SPECTRUM_ATT") {
+    levelType = SHIM_RIG_LEVEL_SPECTRUM_ATT;
   } else {
     Napi::TypeError::New(env, "Invalid level type").ThrowAsJavaScriptException();
     return env.Null();
@@ -2972,6 +3059,50 @@ Napi::Value NodeHamLib::GetLevel(const Napi::CallbackInfo & info) {
     levelType = SHIM_RIG_LEVEL_ID_METER;
   } else if (levelTypeStr == "TEMP_METER") {
     levelType = SHIM_RIG_LEVEL_TEMP_METER;
+  } else if (levelTypeStr == "NR") {
+    levelType = SHIM_RIG_LEVEL_NR;
+  } else if (levelTypeStr == "AF") {
+    levelType = SHIM_RIG_LEVEL_AF;
+  } else if (levelTypeStr == "RF") {
+    levelType = SHIM_RIG_LEVEL_RF;
+  } else if (levelTypeStr == "SQL") {
+    levelType = SHIM_RIG_LEVEL_SQL;
+  } else if (levelTypeStr == "RFPOWER") {
+    levelType = SHIM_RIG_LEVEL_RFPOWER;
+  } else if (levelTypeStr == "MICGAIN") {
+    levelType = SHIM_RIG_LEVEL_MICGAIN;
+  } else if (levelTypeStr == "VOXDELAY") {
+    levelType = SHIM_RIG_LEVEL_VOXDELAY;
+  } else if (levelTypeStr == "PBT_IN") {
+    levelType = SHIM_RIG_LEVEL_PBT_IN;
+  } else if (levelTypeStr == "PBT_OUT") {
+    levelType = SHIM_RIG_LEVEL_PBT_OUT;
+  } else if (levelTypeStr == "CWPITCH") {
+    levelType = SHIM_RIG_LEVEL_CWPITCH;
+  } else if (levelTypeStr == "COMP") {
+    levelType = SHIM_RIG_LEVEL_COMP;
+  } else if (levelTypeStr == "AGC") {
+    levelType = SHIM_RIG_LEVEL_AGC;
+  } else if (levelTypeStr == "VOXGAIN") {
+    levelType = SHIM_RIG_LEVEL_VOXGAIN;
+  } else if (levelTypeStr == "ANTIVOX") {
+    levelType = SHIM_RIG_LEVEL_ANTIVOX;
+  } else if (levelTypeStr == "SPECTRUM_MODE") {
+    levelType = SHIM_RIG_LEVEL_SPECTRUM_MODE;
+  } else if (levelTypeStr == "SPECTRUM_SPAN") {
+    levelType = SHIM_RIG_LEVEL_SPECTRUM_SPAN;
+  } else if (levelTypeStr == "SPECTRUM_EDGE_LOW") {
+    levelType = SHIM_RIG_LEVEL_SPECTRUM_EDGE_LOW;
+  } else if (levelTypeStr == "SPECTRUM_EDGE_HIGH") {
+    levelType = SHIM_RIG_LEVEL_SPECTRUM_EDGE_HIGH;
+  } else if (levelTypeStr == "SPECTRUM_SPEED") {
+    levelType = SHIM_RIG_LEVEL_SPECTRUM_SPEED;
+  } else if (levelTypeStr == "SPECTRUM_REF") {
+    levelType = SHIM_RIG_LEVEL_SPECTRUM_REF;
+  } else if (levelTypeStr == "SPECTRUM_AVG") {
+    levelType = SHIM_RIG_LEVEL_SPECTRUM_AVG;
+  } else if (levelTypeStr == "SPECTRUM_ATT") {
+    levelType = SHIM_RIG_LEVEL_SPECTRUM_ATT;
   } else {
     Napi::TypeError::New(env, "Invalid level type").ThrowAsJavaScriptException();
     return env.Null();
@@ -3032,6 +3163,14 @@ Napi::Value NodeHamLib::GetSupportedLevels(const Napi::CallbackInfo & info) {
   if (levels & SHIM_RIG_LEVEL_COMP_METER) levelArray[index++] = Napi::String::New(env, "COMP_METER");
   if (levels & SHIM_RIG_LEVEL_VD_METER) levelArray[index++] = Napi::String::New(env, "VD_METER");
   if (levels & SHIM_RIG_LEVEL_ID_METER) levelArray[index++] = Napi::String::New(env, "ID_METER");
+  if (levels & SHIM_RIG_LEVEL_SPECTRUM_MODE) levelArray[index++] = Napi::String::New(env, "SPECTRUM_MODE");
+  if (levels & SHIM_RIG_LEVEL_SPECTRUM_SPAN) levelArray[index++] = Napi::String::New(env, "SPECTRUM_SPAN");
+  if (levels & SHIM_RIG_LEVEL_SPECTRUM_EDGE_LOW) levelArray[index++] = Napi::String::New(env, "SPECTRUM_EDGE_LOW");
+  if (levels & SHIM_RIG_LEVEL_SPECTRUM_EDGE_HIGH) levelArray[index++] = Napi::String::New(env, "SPECTRUM_EDGE_HIGH");
+  if (levels & SHIM_RIG_LEVEL_SPECTRUM_SPEED) levelArray[index++] = Napi::String::New(env, "SPECTRUM_SPEED");
+  if (levels & SHIM_RIG_LEVEL_SPECTRUM_REF) levelArray[index++] = Napi::String::New(env, "SPECTRUM_REF");
+  if (levels & SHIM_RIG_LEVEL_SPECTRUM_AVG) levelArray[index++] = Napi::String::New(env, "SPECTRUM_AVG");
+  if (levels & SHIM_RIG_LEVEL_SPECTRUM_ATT) levelArray[index++] = Napi::String::New(env, "SPECTRUM_ATT");
   if (levels & SHIM_RIG_LEVEL_TEMP_METER) levelArray[index++] = Napi::String::New(env, "TEMP_METER");
   
   return levelArray;
@@ -3112,6 +3251,12 @@ Napi::Value NodeHamLib::SetFunction(const Napi::CallbackInfo & info) {
     funcType = SHIM_RIG_FUNC_RESUME;
   } else if (funcTypeStr == "TBURST") {
     funcType = SHIM_RIG_FUNC_TBURST;
+  } else if (funcTypeStr == "TRANSCEIVE") {
+    funcType = SHIM_RIG_FUNC_TRANSCEIVE;
+  } else if (funcTypeStr == "SPECTRUM") {
+    funcType = SHIM_RIG_FUNC_SPECTRUM;
+  } else if (funcTypeStr == "SPECTRUM_HOLD") {
+    funcType = SHIM_RIG_FUNC_SPECTRUM_HOLD;
   } else {
     Napi::TypeError::New(env, "Invalid function type").ThrowAsJavaScriptException();
     return env.Null();
@@ -3196,6 +3341,12 @@ Napi::Value NodeHamLib::GetFunction(const Napi::CallbackInfo & info) {
     funcType = SHIM_RIG_FUNC_RESUME;
   } else if (funcTypeStr == "TBURST") {
     funcType = SHIM_RIG_FUNC_TBURST;
+  } else if (funcTypeStr == "TRANSCEIVE") {
+    funcType = SHIM_RIG_FUNC_TRANSCEIVE;
+  } else if (funcTypeStr == "SPECTRUM") {
+    funcType = SHIM_RIG_FUNC_SPECTRUM;
+  } else if (funcTypeStr == "SPECTRUM_HOLD") {
+    funcType = SHIM_RIG_FUNC_SPECTRUM_HOLD;
   } else {
     Napi::TypeError::New(env, "Invalid function type").ThrowAsJavaScriptException();
     return env.Null();
@@ -3244,6 +3395,9 @@ Napi::Value NodeHamLib::GetSupportedFunctions(const Napi::CallbackInfo & info) {
   if (functions & SHIM_RIG_FUNC_SCOPE) funcArray[index++] = Napi::String::New(env, "SCOPE");
   if (functions & SHIM_RIG_FUNC_RESUME) funcArray[index++] = Napi::String::New(env, "RESUME");
   if (functions & SHIM_RIG_FUNC_TBURST) funcArray[index++] = Napi::String::New(env, "TBURST");
+  if (functions & SHIM_RIG_FUNC_TRANSCEIVE) funcArray[index++] = Napi::String::New(env, "TRANSCEIVE");
+  if (functions & SHIM_RIG_FUNC_SPECTRUM) funcArray[index++] = Napi::String::New(env, "SPECTRUM");
+  if (functions & SHIM_RIG_FUNC_SPECTRUM_HOLD) funcArray[index++] = Napi::String::New(env, "SPECTRUM_HOLD");
   
   return funcArray;
 }
@@ -3730,9 +3884,12 @@ Napi::Function NodeHamLib::GetClass(Napi::Env env) {
       // VFO Info (Hamlib >= 4.7.0)
       NodeHamLib::InstanceMethod("getVfoInfo", & NodeHamLib::GetVfoInfo),
 
-      // Rig Info / Raw / Conf (async)
+      // Rig Info / Spectrum / Conf (async)
       NodeHamLib::InstanceMethod("getInfo", & NodeHamLib::GetInfo),
       NodeHamLib::InstanceMethod("sendRaw", & NodeHamLib::SendRaw),
+      NodeHamLib::InstanceMethod("getSpectrumCapabilities", & NodeHamLib::GetSpectrumCapabilities),
+      NodeHamLib::InstanceMethod("startSpectrumStream", & NodeHamLib::StartSpectrumStream),
+      NodeHamLib::InstanceMethod("stopSpectrumStream", & NodeHamLib::StopSpectrumStream),
       NodeHamLib::InstanceMethod("setConf", & NodeHamLib::SetConf),
       NodeHamLib::InstanceMethod("getConf", & NodeHamLib::GetConf),
 
@@ -5807,6 +5964,55 @@ Napi::Value NodeHamLib::SendRaw(const Napi::CallbackInfo& info) {
   SendRawAsyncWorker* asyncWorker = new SendRawAsyncWorker(env, this, std::move(send_data), replyMaxLen, std::move(terminator), has_terminator);
   asyncWorker->Queue();
   return asyncWorker->GetPromise();
+}
+
+Napi::Value NodeHamLib::GetSpectrumCapabilities(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  Napi::Object result = Napi::Object::New(env);
+
+  result.Set("asyncDataSupported", env.Undefined());
+  result.Set("scopes", Napi::Array::New(env));
+  result.Set("modes", Napi::Array::New(env));
+  result.Set("spans", Napi::Array::New(env));
+  result.Set("avgModes", Napi::Array::New(env));
+
+  return result;
+}
+
+Napi::Value NodeHamLib::StartSpectrumStream(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  if (info.Length() < 1 || !info[0].IsFunction()) {
+    Napi::TypeError::New(env, "Expected (callback: Function)").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+
+  std::lock_guard<std::mutex> lock(spectrum_mutex_);
+  if (spectrum_stream_running_) {
+    Napi::Error::New(env, "Spectrum stream is already running").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+
+  Napi::Function callback = info[0].As<Napi::Function>();
+  spectrum_tsfn_ = Napi::ThreadSafeFunction::New(env, callback, "HamLibSpectrumStream", 0, 1);
+  int ret = shim_rig_set_spectrum_callback(my_rig, &NodeHamLib::spectrum_line_cb, this);
+  if (ret != SHIM_RIG_OK) {
+    spectrum_tsfn_.Release();
+    spectrum_tsfn_ = Napi::ThreadSafeFunction();
+    Napi::Error::New(env, shim_rigerror(ret)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  spectrum_stream_running_ = true;
+  return Napi::Boolean::New(env, true);
+}
+
+Napi::Value NodeHamLib::StopSpectrumStream(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  StopSpectrumStreamInternal();
+  return Napi::Boolean::New(env, true);
 }
 
 // ===== SetConf (async) =====

@@ -8,7 +8,7 @@
  *   node scripts/build-hamlib.js [options]
  *
  * Options:
- *   --prefix=<path>   Custom installation path (default: ./hamlib-build for CI, /usr/local for manual)
+  *   --prefix=<path>   Custom installation path (default: ./hamlib-build for CI, /usr/local for manual)
  *   --minimal         Minimal build, reduces dependencies and build time
  *   --help            Show help information
  */
@@ -70,8 +70,7 @@ Usage:
 
 Options:
   --prefix=<path>   Custom installation path
-                    Default: ./hamlib-build (CI environment)
-                             /usr/local (manual build, requires sudo)
+                    Default: ./hamlib-build
 
   --minimal         Minimal build, disables unnecessary features
                     Reduces dependencies and build time
@@ -82,7 +81,7 @@ Examples:
   # CI environment (auto-detected)
   node scripts/build-hamlib.js --minimal
 
-  # Install to user directory (no sudo required)
+  # Install to project-local directory (no sudo required)
   node scripts/build-hamlib.js --prefix=$HOME/local/hamlib
 
   # Install to system path (requires sudo)
@@ -303,7 +302,7 @@ async function main() {
       prefix = path.resolve(process.cwd(), 'hamlib-build');
       logger.log(`CI environment, using local path: ${prefix}`, 'info');
     } else {
-      prefix = '/usr/local';
+      prefix = path.resolve(process.cwd(), 'hamlib-build');
       logger.log(`Default installation path: ${prefix}`, 'info');
     }
   }

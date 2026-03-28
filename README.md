@@ -1,4 +1,4 @@
-# node-hamlib
+# hamlib
 
 Control amateur radio transceivers from Node.js using the [Hamlib](https://hamlib.github.io/) library.
 
@@ -8,6 +8,7 @@ Control amateur radio transceivers from Node.js using the [Hamlib](https://hamli
 - **Full Async/Promise API** - Non-blocking operations with async/await support  
 - **Comprehensive Serial Control** - 13 parameters for complete serial port configuration
 - **Multiple Connections** - Serial ports, network (rigctld), direct control
+- **Official Spectrum Streaming** - Wraps Hamlib's official spectrum callback API with Promise helpers and typed events
 - **TypeScript Ready** - Complete type definitions included
 - **Cross-platform** - Windows, Linux, macOS
 
@@ -15,7 +16,7 @@ Control amateur radio transceivers from Node.js using the [Hamlib](https://hamli
 
 ### Option 1: NPM Installation (Recommended)
 ```bash
-npm install node-hamlib
+npm install hamlib
 ```
 
 The package will automatically use precompiled binaries if available for your platform, otherwise it will build from source.
@@ -24,9 +25,9 @@ The package will automatically use precompiled binaries if available for your pl
 
 For faster installation or offline environments, you can manually install precompiled binaries:
 
-1. **Download Prebuilds**: Go to [Releases](../../releases) and download `node-hamlib-prebuilds.zip`
+1. **Download Prebuilds**: Go to [Releases](../../releases) and download `hamlib-prebuilds.zip`
 2. **Extract**: Unzip to your project's `node_modules/hamlib/prebuilds/` directory
-3. **Install**: Run `npm install node-hamlib --ignore-scripts`
+3. **Install**: Run `npm install hamlib --ignore-scripts`
 
 **Supported Prebuilt Platforms:**
 - ✅ Linux x64
@@ -37,7 +38,7 @@ For faster installation or offline environments, you can manually install precom
 ## Quick Start
 
 ```javascript
-const { HamLib } = require('node-hamlib');
+const { HamLib } = require('hamlib');
 
 async function main() {
   // Create rig instance (model 1035 = FT-991A)
@@ -144,6 +145,76 @@ await rig.vfoOperation('CPY');       // Copy VFO A to B
 await rig.vfoOperation('TOGGLE');    // Toggle VFO A/B
 ```
 
+### Raw CI-V Request/Reply
+
+```javascript
+const reply = await rig.sendRaw(
+  Buffer.from([0xfe, 0xfe, 0xa4, 0xe0, 0x03, 0xfd]),
+  64,
+  Buffer.from([0xfd])
+);
+```
+
+Notes:
+- `sendRaw()` is request/response oriented.
+- Continuous spectrum streaming now uses Hamlib's official spectrum callback APIs instead of a raw serial byte subscription.
+- For Icom rigs, start managed spectrum only after `open()`. The built-in helper now follows the validated sequence: register callback, best-effort enable async, configure spectrum, enable `SPECTRUM`, then enable `TRANSCEIVE`.
+
+### Official Spectrum Streaming
+
+```javascript
+const { HamLib } = require('hamlib');
+
+async function monitorSpectrum() {
+  const rig = new HamLib(3085, '/dev/tty.usbmodem11201');
+
+  await rig.setSerialConfig('rate', '9600');
+  await rig.setSerialConfig('data_bits', '8');
+  await rig.setSerialConfig('stop_bits', '1');
+  await rig.setSerialConfig('serial_parity', 'None');
+  await rig.open();
+
+  const support = await rig.getSpectrumSupportSummary();
+  if (!support.supported) {
+    throw new Error('Official Hamlib spectrum streaming is not supported by this rig/backend');
+  }
+
+  rig.on('spectrumLine', (line) => {
+    console.log({
+      centerFreq: line.centerFreq,
+      spanHz: line.spanHz,
+      bins: line.dataLength,
+    });
+  });
+
+  await rig.startManagedSpectrum({
+    hold: false,
+    spanHz: 10000,
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 15000));
+
+  await rig.stopManagedSpectrum();
+  await rig.close();
+}
+```
+
+Spectrum API summary:
+
+- `getSpectrumCapabilities()` returns conservative backend metadata exposed by the native addon.
+- `getSpectrumSupportSummary()` returns a product-oriented summary of whether official spectrum streaming is usable on the current rig/backend.
+- `configureSpectrum()` applies supported `SPECTRUM_*` levels and optional `SPECTRUM_HOLD`.
+- `startSpectrumStream(callback?)` registers the official Hamlib spectrum callback only.
+- `stopSpectrumStream()` unregisters the official spectrum callback.
+- `startManagedSpectrum(config?)` runs the validated startup sequence for Icom/Hamlib async spectrum.
+- `stopManagedSpectrum()` runs the symmetric shutdown sequence and unregisters the callback.
+
+Emitted events:
+
+- `spectrumLine` carries a single `SpectrumLine` object with frequency edges, mode, and raw bin payload.
+- `spectrumStateChanged` emits `{ active: boolean }` when managed spectrum starts or stops.
+- `spectrumError` is reserved for asynchronous streaming failures.
+
 ### Power and Status
 
 ```javascript
@@ -220,7 +291,7 @@ const parity = await rig.getSerialConfig('serial_parity');
 ## Complete Example
 
 ```javascript
-const { HamLib } = require('node-hamlib');
+const { HamLib } = require('hamlib');
 
 async function repeaterOperation() {
   const rig = new HamLib(1035, '/dev/ttyUSB0');

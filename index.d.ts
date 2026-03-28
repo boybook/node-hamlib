@@ -1,3 +1,5 @@
+import { EventEmitter } from 'events';
+
 /**
  * Connection information interface
  */
@@ -152,6 +154,63 @@ interface MemoryChannelInfo {
   ctcssTone?: number;
 }
 
+interface SpectrumScopeInfo {
+  id: number;
+  name: string;
+}
+
+interface SpectrumModeInfo {
+  id: number;
+  name: string;
+}
+
+interface SpectrumAverageModeInfo {
+  id: number;
+  name: string;
+}
+
+interface SpectrumLine {
+  scopeId: number;
+  dataLevelMin: number;
+  dataLevelMax: number;
+  signalStrengthMin: number;
+  signalStrengthMax: number;
+  mode: number;
+  centerFreq: number;
+  spanHz: number;
+  lowEdgeFreq: number;
+  highEdgeFreq: number;
+  dataLength: number;
+  data: Buffer;
+  timestamp: number;
+}
+
+interface SpectrumCapabilities {
+  asyncDataSupported?: boolean;
+  scopes: SpectrumScopeInfo[];
+  modes: SpectrumModeInfo[];
+  spans: number[];
+  avgModes: SpectrumAverageModeInfo[];
+}
+
+interface SpectrumSupportSummary extends SpectrumCapabilities {
+  supported: boolean;
+  asyncDataSupported: boolean;
+  hasSpectrumFunction: boolean;
+  hasSpectrumHoldFunction: boolean;
+  hasTransceiveFunction: boolean;
+  configurableLevels: string[];
+}
+
+interface SpectrumConfig {
+  hold?: boolean;
+  mode?: number;
+  spanHz?: number;
+  speed?: number;
+  referenceLevel?: number;
+  averageMode?: number;
+}
+
 /**
  * Split mode info interface
  */
@@ -179,7 +238,9 @@ type LevelType = 'AF' | 'RF' | 'SQL' | 'RFPOWER' | 'MICGAIN' | 'IF' | 'APF' | 'N
                  'PBT_IN' | 'PBT_OUT' | 'CWPITCH' | 'KEYSPD' | 'NOTCHF' | 'COMP' | 
                  'AGC' | 'BKINDL' | 'BALANCE' | 'VOXGAIN' | 'VOXDELAY' | 'ANTIVOX' |
                  'STRENGTH' | 'RAWSTR' | 'SWR' | 'ALC' | 'RFPOWER_METER' | 'RFPOWER_METER_WATTS' |
-                 'COMP_METER' | 'VD_METER' | 'ID_METER' | 'TEMP_METER' | string;
+                 'COMP_METER' | 'VD_METER' | 'ID_METER' | 'TEMP_METER' |
+                 'SPECTRUM_MODE' | 'SPECTRUM_SPAN' | 'SPECTRUM_EDGE_LOW' | 'SPECTRUM_EDGE_HIGH' |
+                 'SPECTRUM_SPEED' | 'SPECTRUM_REF' | 'SPECTRUM_AVG' | 'SPECTRUM_ATT' | string;
 
 /**
  * Function type
@@ -187,7 +248,8 @@ type LevelType = 'AF' | 'RF' | 'SQL' | 'RFPOWER' | 'MICGAIN' | 'IF' | 'APF' | 'N
 type FunctionType = 'FAGC' | 'NB' | 'COMP' | 'VOX' | 'TONE' | 'TSQL' | 'SBKIN' | 
                     'FBKIN' | 'ANF' | 'NR' | 'AIP' | 'APF' | 'TUNER' | 'XIT' | 
                     'RIT' | 'LOCK' | 'MUTE' | 'VSC' | 'REV' | 'SQL' | 'ABM' | 
-                    'BC' | 'MBC' | 'AFC' | 'SATMODE' | 'SCOPE' | 'RESUME' | 
+                    'BC' | 'MBC' | 'AFC' | 'SATMODE' | 'SCOPE' | 'RESUME' | 'TRANSCEIVE' |
+                    'SPECTRUM' | 'SPECTRUM_HOLD' |
                     'TBURST' | string;
 
 /**
@@ -278,7 +340,7 @@ interface SerialConfigOptions {
 /**
  * HamLib class - for controlling amateur radio devices
  */
-declare class HamLib {
+declare class HamLib extends EventEmitter {
   /**
    * Constructor
    * @param model Radio model number (execute rigctl -l to find your device model number)
@@ -1193,7 +1255,7 @@ declare class HamLib {
    */
   reset(resetType?: 'NONE' | 'SOFT' | 'VFO' | 'MCALL' | 'MASTER'): Promise<number>;
 
-  // ===== Rig Info / Raw / Conf (async) =====
+  // ===== Rig Info / Spectrum / Conf (async) =====
 
   /**
    * Get rig identification info (model, firmware version, etc.)
@@ -1209,6 +1271,62 @@ declare class HamLib {
    * @returns Reply data as Buffer
    */
   sendRaw(data: Buffer, replyMaxLen: number, terminator?: Buffer): Promise<Buffer>;
+
+  /**
+   * Get official Hamlib spectrum metadata exposed by the backend.
+   */
+  getSpectrumCapabilities(): Promise<SpectrumCapabilities>;
+
+  /**
+   * Summarize whether official Hamlib spectrum streaming is usable.
+   */
+  getSpectrumSupportSummary(): Promise<SpectrumSupportSummary>;
+
+  /**
+   * Apply spectrum-related settings using official Hamlib level/function APIs.
+   */
+  configureSpectrum(config?: SpectrumConfig): Promise<SpectrumSupportSummary>;
+
+  /**
+   * Start receiving official Hamlib spectrum line events.
+   */
+  startSpectrumStream(callback?: (line: SpectrumLine) => void): Promise<boolean>;
+
+  /**
+   * Stop receiving official Hamlib spectrum line events.
+   */
+  stopSpectrumStream(): Promise<boolean>;
+
+  /**
+   * High-level managed spectrum startup.
+   */
+  startManagedSpectrum(config?: SpectrumConfig): Promise<boolean>;
+
+  /**
+   * High-level managed spectrum shutdown.
+   */
+  stopManagedSpectrum(): Promise<boolean>;
+
+  /**
+   * Listen for official spectrum line events.
+   */
+  on(event: 'spectrumLine', listener: (line: SpectrumLine) => void): this;
+  once(event: 'spectrumLine', listener: (line: SpectrumLine) => void): this;
+  off(event: 'spectrumLine', listener: (line: SpectrumLine) => void): this;
+
+  /**
+   * Listen for managed spectrum state changes.
+   */
+  on(event: 'spectrumStateChanged', listener: (state: { active: boolean }) => void): this;
+  once(event: 'spectrumStateChanged', listener: (state: { active: boolean }) => void): this;
+  off(event: 'spectrumStateChanged', listener: (state: { active: boolean }) => void): this;
+
+  /**
+   * Listen for asynchronous spectrum errors.
+   */
+  on(event: 'spectrumError', listener: (error: Error) => void): this;
+  once(event: 'spectrumError', listener: (error: Error) => void): this;
+  off(event: 'spectrumError', listener: (error: Error) => void): this;
 
   /**
    * Set a backend configuration parameter
@@ -1409,7 +1527,7 @@ interface VfoInfo {
 }
 
 /**
- * node-hamlib module export object
+ * hamlib module export object
  */
 declare const nodeHamlib: {
   HamLib: typeof HamLib;
@@ -1420,6 +1538,8 @@ export { ConnectionInfo, ModeInfo, SupportedRigInfo, AntennaInfo, VFO, RadioMode
          MemoryChannelInfo, SplitModeInfo, SplitStatusInfo, LevelType, FunctionType,
          ScanType, VfoOperationType, SerialConfigParam, SerialBaudRate, SerialParity,
          SerialHandshake, SerialControlState, PttType, DcdType, SerialConfigOptions,
+         SpectrumScopeInfo, SpectrumModeInfo, SpectrumAverageModeInfo, SpectrumLine,
+         SpectrumCapabilities, SpectrumSupportSummary, SpectrumConfig,
          ClockInfo, VfoInfo, HamLib };
 
 // Support both CommonJS and ES module exports

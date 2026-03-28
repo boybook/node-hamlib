@@ -75,6 +75,11 @@ function findMsys2Prefix() {
 }
 
 function findHamlibInclude() {
+  const localPrefix = path.join(projectRoot, 'hamlib-build');
+  if (fs.existsSync(path.join(localPrefix, 'include', 'hamlib', 'rig.h'))) {
+    return path.join(localPrefix, 'include');
+  }
+
   if (isWindows) {
     const hamlibRoot = process.env.HAMLIB_ROOT;
     if (hamlibRoot && fs.existsSync(path.join(hamlibRoot, 'include'))) {
@@ -108,6 +113,13 @@ function findHamlibInclude() {
 }
 
 function findHamlibLib() {
+  const localPrefix = path.join(projectRoot, 'hamlib-build');
+  if (fs.existsSync(path.join(localPrefix, 'lib', 'libhamlib.4.dylib')) ||
+      fs.existsSync(path.join(localPrefix, 'lib', 'libhamlib.so')) ||
+      fs.existsSync(path.join(localPrefix, 'lib', 'libhamlib.a'))) {
+    return path.join(localPrefix, 'lib');
+  }
+
   if (isWindows) {
     const hamlibRoot = process.env.HAMLIB_ROOT;
     if (hamlibRoot) {

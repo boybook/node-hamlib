@@ -4,6 +4,10 @@
 #include "shim/hamlib_shim.h"
 #include <memory>
 #include <string>
+#include <atomic>
+#include <mutex>
+#include <vector>
+#include <cstdint>
 
 // Forward declaration
 class NodeHamLib;
@@ -173,6 +177,9 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
   // Rig Info / Raw / Conf (async)
   Napi::Value GetInfo(const Napi::CallbackInfo&);
   Napi::Value SendRaw(const Napi::CallbackInfo&);
+  Napi::Value GetSpectrumCapabilities(const Napi::CallbackInfo&);
+  Napi::Value StartSpectrumStream(const Napi::CallbackInfo&);
+  Napi::Value StopSpectrumStream(const Napi::CallbackInfo&);
   Napi::Value SetConf(const Napi::CallbackInfo&);
   Napi::Value GetConf(const Napi::CallbackInfo&);
 
@@ -217,6 +224,7 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
 
   // Frequency change callback (uses basic C types via shim)
   static int freq_change_cb(void* handle, int vfo, double freq, void* arg);
+  static int spectrum_line_cb(void* handle, const shim_spectrum_line_t* line, void* arg);
 
  public:
   hamlib_shim_handle_t my_rig;  // Opaque handle instead of RIG*
@@ -234,4 +242,10 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
 
   // Static callback helper for shim_rig_list_foreach
   static int rig_list_callback(const shim_rig_info_t* info, void* data);
+
+  void EmitSpectrumLine(const shim_spectrum_line_t& line);
+  void StopSpectrumStreamInternal();
+  std::atomic<bool> spectrum_stream_running_{false};
+  Napi::ThreadSafeFunction spectrum_tsfn_;
+  std::mutex spectrum_mutex_;
 };

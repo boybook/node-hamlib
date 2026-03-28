@@ -199,6 +199,14 @@ typedef void* hamlib_shim_handle_t;
 #define SHIM_RIG_LEVEL_MONITOR_GAIN (1ULL << 37)
 #define SHIM_RIG_LEVEL_NB           (1ULL << 38)
 #define SHIM_RIG_LEVEL_RFPOWER_METER_WATTS (1ULL << 39)
+#define SHIM_RIG_LEVEL_SPECTRUM_MODE (1ULL << 40)
+#define SHIM_RIG_LEVEL_SPECTRUM_SPAN (1ULL << 41)
+#define SHIM_RIG_LEVEL_SPECTRUM_EDGE_LOW (1ULL << 42)
+#define SHIM_RIG_LEVEL_SPECTRUM_EDGE_HIGH (1ULL << 43)
+#define SHIM_RIG_LEVEL_SPECTRUM_SPEED (1ULL << 44)
+#define SHIM_RIG_LEVEL_SPECTRUM_REF (1ULL << 45)
+#define SHIM_RIG_LEVEL_SPECTRUM_AVG (1ULL << 46)
+#define SHIM_RIG_LEVEL_SPECTRUM_ATT (1ULL << 47)
 #define SHIM_RIG_LEVEL_TEMP_METER   (1ULL << 48)
 
 /* ===== Function constants (bit positions for setting_t / uint64_t) ===== */
@@ -234,6 +242,12 @@ typedef void* hamlib_shim_handle_t;
 #define SHIM_RIG_FUNC_TBURST  (1ULL << 29)
 #define SHIM_RIG_FUNC_TUNER   (1ULL << 30)
 #define SHIM_RIG_FUNC_XIT     (1ULL << 31)
+#define SHIM_RIG_FUNC_TRANSCEIVE (1ULL << 42)
+#define SHIM_RIG_FUNC_SPECTRUM (1ULL << 43)
+#define SHIM_RIG_FUNC_SPECTRUM_HOLD (1ULL << 44)
+#define SHIM_RIG_FUNC_SEND_MORSE (1ULL << 45)
+#define SHIM_RIG_FUNC_SEND_VOICE_MEM (1ULL << 46)
+#define SHIM_RIG_FUNC_OVF_STATUS (1ULL << 47)
 
 /* ===== VFO operation constants ===== */
 #define SHIM_RIG_OP_CPY       (1<<0)
@@ -279,6 +293,31 @@ typedef struct {
     int rig_type;
 } shim_rig_info_t;
 
+typedef struct {
+    int id;
+    char name[64];
+} shim_spectrum_scope_t;
+
+typedef struct {
+    int id;
+    char name[64];
+} shim_spectrum_avg_mode_t;
+
+typedef struct {
+    int id;
+    int data_level_min;
+    int data_level_max;
+    double signal_strength_min;
+    double signal_strength_max;
+    int spectrum_mode;
+    double center_freq;
+    double span_freq;
+    double low_edge_freq;
+    double high_edge_freq;
+    int data_length;
+    unsigned char data[2048];
+} shim_spectrum_line_t;
+
 /* ===== Callback types ===== */
 
 /* Frequency change callback: (handle, vfo, freq, arg) -> int */
@@ -286,6 +325,9 @@ typedef int (*shim_freq_cb_t)(void* handle, int vfo, double freq, void* arg);
 
 /* PTT change callback: (handle, vfo, ptt, arg) -> int */
 typedef int (*shim_ptt_cb_t)(void* handle, int vfo, int ptt, void* arg);
+
+/* Spectrum line callback: (handle, line, arg) -> int */
+typedef int (*shim_spectrum_cb_t)(void* handle, const shim_spectrum_line_t* line, void* arg);
 
 /* Rig list callback: (info, data) -> int */
 typedef int (*shim_rig_list_cb_t)(const shim_rig_info_t* info, void* data);
@@ -510,6 +552,7 @@ SHIM_API int shim_rig_reset(hamlib_shim_handle_t h, int reset_type);
 
 SHIM_API int shim_rig_set_freq_callback(hamlib_shim_handle_t h, shim_freq_cb_t cb, void* arg);
 SHIM_API int shim_rig_set_ptt_callback(hamlib_shim_handle_t h, shim_ptt_cb_t cb, void* arg);
+SHIM_API int shim_rig_set_spectrum_callback(hamlib_shim_handle_t h, shim_spectrum_cb_t cb, void* arg);
 SHIM_API int shim_rig_set_trn(hamlib_shim_handle_t h, int trn);
 
 /* ===== Capability queries (replaces direct caps-> access) ===== */
@@ -519,6 +562,16 @@ SHIM_API uint64_t shim_rig_get_caps_has_get_level(hamlib_shim_handle_t h);
 SHIM_API uint64_t shim_rig_get_caps_has_set_level(hamlib_shim_handle_t h);
 SHIM_API uint64_t shim_rig_get_caps_has_get_func(hamlib_shim_handle_t h);
 SHIM_API uint64_t shim_rig_get_caps_has_set_func(hamlib_shim_handle_t h);
+SHIM_API int shim_rig_is_async_data_supported(hamlib_shim_handle_t h);
+SHIM_API int shim_rig_get_caps_spectrum_scope_count(hamlib_shim_handle_t h);
+SHIM_API int shim_rig_get_caps_spectrum_scope(hamlib_shim_handle_t h, int index, shim_spectrum_scope_t* out);
+SHIM_API int shim_rig_get_caps_spectrum_mode_count(hamlib_shim_handle_t h);
+SHIM_API int shim_rig_get_caps_spectrum_mode(hamlib_shim_handle_t h, int index, int* out);
+SHIM_API int shim_rig_get_caps_spectrum_span_count(hamlib_shim_handle_t h);
+SHIM_API int shim_rig_get_caps_spectrum_span(hamlib_shim_handle_t h, int index, double* out);
+SHIM_API int shim_rig_get_caps_spectrum_avg_mode_count(hamlib_shim_handle_t h);
+SHIM_API int shim_rig_get_caps_spectrum_avg_mode(hamlib_shim_handle_t h, int index, shim_spectrum_avg_mode_t* out);
+SHIM_API const char* shim_rig_str_spectrum_mode(int mode);
 
 /* Format mode bitmask to string list */
 SHIM_API int shim_rig_sprintf_mode(uint64_t modes, char* buf, int buflen);

@@ -24,24 +24,28 @@
         # Linux configuration
         ["OS==\"linux\"", {
           "include_dirs": [
+            "<(module_root_dir)/hamlib-build/include",
             "<!@(node -e \"if(process.env.HAMLIB_PREFIX) console.log(process.env.HAMLIB_PREFIX + '/include')\")",
             "/usr/include",
             "/usr/local/include"
           ],
           "libraries": [
             "<(module_root_dir)/shim-build/libhamlib_shim.a",
+            "-L<(module_root_dir)/hamlib-build/lib",
             "<!@(node -e \"if(process.env.HAMLIB_PREFIX) console.log('-L' + process.env.HAMLIB_PREFIX + '/lib')\")",
             "-L/usr/lib",
             "-L/usr/local/lib",
             "-lhamlib"
           ],
           "ldflags": [
-            "-Wl,-rpath,\\$ORIGIN"
+            "-Wl,-rpath,\\$ORIGIN",
+            "-Wl,-rpath,<(module_root_dir)/hamlib-build/lib"
           ]
         }],
         # macOS configuration
         ["OS==\"mac\"", {
           "include_dirs": [
+            "<(module_root_dir)/hamlib-build/include",
             "<!@(node -e \"if(process.env.HAMLIB_PREFIX) console.log(process.env.HAMLIB_PREFIX + '/include')\")",
             "/usr/local/include",
             "/usr/local/opt/hamlib/include",
@@ -52,6 +56,7 @@
           ],
           "libraries": [
             "<(module_root_dir)/shim-build/libhamlib_shim.a",
+            "-L<(module_root_dir)/hamlib-build/lib",
             "<!@(node -e \"if(process.env.HAMLIB_PREFIX) console.log('-L' + process.env.HAMLIB_PREFIX + '/lib')\")",
             "-L/usr/local/lib",
             "-L/usr/local/opt/hamlib/lib",
@@ -67,7 +72,8 @@
             "MACOSX_DEPLOYMENT_TARGET": "10.15"
           },
           "ldflags": [
-            "-Wl,-rpath,@loader_path"
+            "-Wl,-rpath,@loader_path",
+            "-Wl,-rpath,<(module_root_dir)/hamlib-build/lib"
           ]
         }],
         # Windows configuration

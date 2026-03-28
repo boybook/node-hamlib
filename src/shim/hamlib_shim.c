@@ -837,9 +837,15 @@ struct shim_ptt_cb_adapter {
     void* user_arg;
 };
 
+struct shim_spectrum_cb_adapter {
+    shim_spectrum_cb_t user_cb;
+    void* user_arg;
+};
+
 /* We store adapters statically (one per rig handle - simplified) */
 static struct shim_freq_cb_adapter freq_cb_adapter = {NULL, NULL};
 static struct shim_ptt_cb_adapter ptt_cb_adapter = {NULL, NULL};
+static struct shim_spectrum_cb_adapter spectrum_cb_adapter = {NULL, NULL};
 
 static int shim_freq_cb_thunk(RIG *rig, vfo_t vfo, freq_t freq, rig_ptr_t arg) {
     struct shim_freq_cb_adapter *adapter = (struct shim_freq_cb_adapter*)arg;
@@ -857,6 +863,33 @@ static int shim_ptt_cb_thunk(RIG *rig, vfo_t vfo, ptt_t ptt, rig_ptr_t arg) {
     return 0;
 }
 
+static int shim_spectrum_cb_thunk(RIG *rig, struct rig_spectrum_line *line, rig_ptr_t arg) {
+    struct shim_spectrum_cb_adapter *adapter = (struct shim_spectrum_cb_adapter*)arg;
+    shim_spectrum_line_t safe_line;
+
+    if (!adapter || !adapter->user_cb || !line) {
+        return 0;
+    }
+
+    memset(&safe_line, 0, sizeof(safe_line));
+    safe_line.id = line->id;
+    safe_line.data_level_min = line->data_level_min;
+    safe_line.data_level_max = line->data_level_max;
+    safe_line.signal_strength_min = line->signal_strength_min;
+    safe_line.signal_strength_max = line->signal_strength_max;
+    safe_line.spectrum_mode = (int)line->spectrum_mode;
+    safe_line.center_freq = (double)line->center_freq;
+    safe_line.span_freq = (double)line->span_freq;
+    safe_line.low_edge_freq = (double)line->low_edge_freq;
+    safe_line.high_edge_freq = (double)line->high_edge_freq;
+    safe_line.data_length = (int)((line->spectrum_data_length > sizeof(safe_line.data)) ? sizeof(safe_line.data) : line->spectrum_data_length);
+    if (safe_line.data_length > 0 && line->spectrum_data) {
+        memcpy(safe_line.data, line->spectrum_data, (size_t)safe_line.data_length);
+    }
+
+    return adapter->user_cb((void*)rig, &safe_line, adapter->user_arg);
+}
+
 SHIM_API int shim_rig_set_freq_callback(hamlib_shim_handle_t h, shim_freq_cb_t cb, void* arg) {
     freq_cb_adapter.user_cb = cb;
     freq_cb_adapter.user_arg = arg;
@@ -867,6 +900,12 @@ SHIM_API int shim_rig_set_ptt_callback(hamlib_shim_handle_t h, shim_ptt_cb_t cb,
     ptt_cb_adapter.user_cb = cb;
     ptt_cb_adapter.user_arg = arg;
     return rig_set_ptt_callback((RIG*)h, shim_ptt_cb_thunk, &ptt_cb_adapter);
+}
+
+SHIM_API int shim_rig_set_spectrum_callback(hamlib_shim_handle_t h, shim_spectrum_cb_t cb, void* arg) {
+    spectrum_cb_adapter.user_cb = cb;
+    spectrum_cb_adapter.user_arg = arg;
+    return rig_set_spectrum_callback((RIG*)h, cb ? shim_spectrum_cb_thunk : NULL, cb ? &spectrum_cb_adapter : NULL);
 }
 
 /* rig_set_trn: deprecated in Hamlib 4.7.0, may be removed in future versions. */
@@ -906,6 +945,92 @@ SHIM_API uint64_t shim_rig_get_caps_has_get_func(hamlib_shim_handle_t h) {
 SHIM_API uint64_t shim_rig_get_caps_has_set_func(hamlib_shim_handle_t h) {
     RIG* rig = (RIG*)h;
     return (uint64_t)(rig->caps->has_set_func);
+}
+
+SHIM_API int shim_rig_is_async_data_supported(hamlib_shim_handle_t h) {
+    RIG* rig = (RIG*)h;
+    if (!rig || !rig->caps) return 0;
+    return rig->caps->async_data_supported ? 1 : 0;
+}
+
+SHIM_API int shim_rig_get_caps_spectrum_scope_count(hamlib_shim_handle_t h) {
+    int count = 0;
+    RIG* rig = (RIG*)h;
+    if (!rig || !rig->caps) return 0;
+    while (count < HAMLIB_MAX_SPECTRUM_SCOPES && rig->caps->spectrum_scopes[count].name) {
+        count++;
+    }
+    return count;
+}
+
+SHIM_API int shim_rig_get_caps_spectrum_scope(hamlib_shim_handle_t h, int index, shim_spectrum_scope_t* out) {
+    RIG* rig = (RIG*)h;
+    if (!rig || !rig->caps || !out || index < 0 || index >= HAMLIB_MAX_SPECTRUM_SCOPES) return -RIG_EINVAL;
+    if (!rig->caps->spectrum_scopes[index].name) return -RIG_ENAVAIL;
+    memset(out, 0, sizeof(*out));
+    out->id = rig->caps->spectrum_scopes[index].id;
+    strncpy(out->name, rig->caps->spectrum_scopes[index].name, sizeof(out->name) - 1);
+    return RIG_OK;
+}
+
+SHIM_API int shim_rig_get_caps_spectrum_mode_count(hamlib_shim_handle_t h) {
+    int count = 0;
+    RIG* rig = (RIG*)h;
+    if (!rig || !rig->caps) return 0;
+    while (count < HAMLIB_MAX_SPECTRUM_MODES && rig->caps->spectrum_modes[count] != RIG_SPECTRUM_MODE_NONE) {
+        count++;
+    }
+    return count;
+}
+
+SHIM_API int shim_rig_get_caps_spectrum_mode(hamlib_shim_handle_t h, int index, int* out) {
+    RIG* rig = (RIG*)h;
+    if (!rig || !rig->caps || !out || index < 0 || index >= HAMLIB_MAX_SPECTRUM_MODES) return -RIG_EINVAL;
+    if (rig->caps->spectrum_modes[index] == RIG_SPECTRUM_MODE_NONE) return -RIG_ENAVAIL;
+    *out = (int)rig->caps->spectrum_modes[index];
+    return RIG_OK;
+}
+
+SHIM_API int shim_rig_get_caps_spectrum_span_count(hamlib_shim_handle_t h) {
+    int count = 0;
+    RIG* rig = (RIG*)h;
+    if (!rig || !rig->caps) return 0;
+    while (count < HAMLIB_MAX_SPECTRUM_SPANS && rig->caps->spectrum_spans[count] != 0) {
+        count++;
+    }
+    return count;
+}
+
+SHIM_API int shim_rig_get_caps_spectrum_span(hamlib_shim_handle_t h, int index, double* out) {
+    RIG* rig = (RIG*)h;
+    if (!rig || !rig->caps || !out || index < 0 || index >= HAMLIB_MAX_SPECTRUM_SPANS) return -RIG_EINVAL;
+    if (rig->caps->spectrum_spans[index] == 0) return -RIG_ENAVAIL;
+    *out = (double)rig->caps->spectrum_spans[index];
+    return RIG_OK;
+}
+
+SHIM_API int shim_rig_get_caps_spectrum_avg_mode_count(hamlib_shim_handle_t h) {
+    int count = 0;
+    RIG* rig = (RIG*)h;
+    if (!rig || !rig->caps) return 0;
+    while (count < HAMLIB_MAX_SPECTRUM_AVG_MODES && rig->caps->spectrum_avg_modes[count].name) {
+        count++;
+    }
+    return count;
+}
+
+SHIM_API int shim_rig_get_caps_spectrum_avg_mode(hamlib_shim_handle_t h, int index, shim_spectrum_avg_mode_t* out) {
+    RIG* rig = (RIG*)h;
+    if (!rig || !rig->caps || !out || index < 0 || index >= HAMLIB_MAX_SPECTRUM_AVG_MODES) return -RIG_EINVAL;
+    if (!rig->caps->spectrum_avg_modes[index].name) return -RIG_ENAVAIL;
+    memset(out, 0, sizeof(*out));
+    out->id = rig->caps->spectrum_avg_modes[index].id;
+    strncpy(out->name, rig->caps->spectrum_avg_modes[index].name, sizeof(out->name) - 1);
+    return RIG_OK;
+}
+
+SHIM_API const char* shim_rig_str_spectrum_mode(int mode) {
+    return rig_strspectrummode((enum rig_spectrum_mode_e)mode);
 }
 
 SHIM_API int shim_rig_sprintf_mode(uint64_t modes, char* buf, int buflen) {
