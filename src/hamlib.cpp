@@ -2938,12 +2938,21 @@ Napi::Value NodeHamLib::SetLevel(const Napi::CallbackInfo & info) {
   }
   
   if (info.Length() < 2 || !info[0].IsString() || !info[1].IsNumber()) {
-    Napi::TypeError::New(env, "Expected (levelType: string, value: number)").ThrowAsJavaScriptException();
+    Napi::TypeError::New(env, "Expected (levelType: string, value: number, vfo?: string)").ThrowAsJavaScriptException();
     return env.Null();
   }
   
   std::string levelTypeStr = info[0].As<Napi::String>().Utf8Value();
   double levelValue = info[1].As<Napi::Number>().DoubleValue();
+  int vfo = SHIM_RIG_VFO_CURR;
+  if (info.Length() >= 3 && info[2].IsString()) {
+    std::string vfoStr = info[2].As<Napi::String>().Utf8Value();
+    if (vfoStr == "VFO-A") {
+      vfo = SHIM_RIG_VFO_A;
+    } else if (vfoStr == "VFO-B") {
+      vfo = SHIM_RIG_VFO_B;
+    }
+  }
   
   // Map level type strings to hamlib constants
   uint64_t levelType;
@@ -3021,8 +3030,8 @@ Napi::Value NodeHamLib::SetLevel(const Napi::CallbackInfo & info) {
   if (isSpectrumLevel) {
     Napi::Promise::Deferred deferred = Napi::Promise::Deferred::New(env);
     int result = shim_rig_level_is_float(levelType)
-      ? shim_rig_set_level_f(my_rig, SHIM_RIG_VFO_CURR, levelType, static_cast<float>(levelValue))
-      : shim_rig_set_level_i(my_rig, SHIM_RIG_VFO_CURR, levelType, static_cast<int>(levelValue));
+      ? shim_rig_set_level_f(my_rig, vfo, levelType, static_cast<float>(levelValue))
+      : shim_rig_set_level_i(my_rig, vfo, levelType, static_cast<int>(levelValue));
 
     if (result != SHIM_RIG_OK) {
       deferred.Reject(Napi::Error::New(env, shim_rigerror(result)).Value());

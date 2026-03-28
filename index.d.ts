@@ -622,7 +622,7 @@ declare class HamLib extends EventEmitter {
    * @param levelType Level type ('AF', 'RF', 'SQL', 'RFPOWER', etc.)
    * @param value Level value (0.0-1.0 typically)
    */
-  setLevel(levelType: LevelType, value: number): Promise<number>;
+  setLevel(levelType: LevelType, value: number, vfo?: string): Promise<number>;
 
   /**
    * Get radio level
