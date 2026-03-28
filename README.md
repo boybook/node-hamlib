@@ -204,10 +204,28 @@ Spectrum API summary:
 - `getSpectrumCapabilities()` returns conservative backend metadata exposed by the native addon.
 - `getSpectrumSupportSummary()` returns a product-oriented summary of whether official spectrum streaming is usable on the current rig/backend.
 - `configureSpectrum()` applies supported `SPECTRUM_*` levels and optional `SPECTRUM_HOLD`.
+- `getSpectrumDisplayState()` returns a normalized display state with `mode/span/fixed edges/edge slot`.
+- `configureSpectrumDisplay()` applies a normalized display config and reads back the resulting state.
+- `getSpectrumEdgeSlot()` / `setSpectrumEdgeSlot()` expose backend edge-slot control when available.
+- `getSpectrumFixedEdges()` / `setSpectrumFixedEdges()` expose direct fixed-range control using `SPECTRUM_EDGE_LOW/HIGH`.
 - `startSpectrumStream(callback?)` registers the official Hamlib spectrum callback only.
 - `stopSpectrumStream()` unregisters the official spectrum callback.
 - `startManagedSpectrum(config?)` runs the validated startup sequence for Icom/Hamlib async spectrum.
 - `stopManagedSpectrum()` runs the symmetric shutdown sequence and unregisters the callback.
+
+Fixed-range example:
+
+```javascript
+await rig.configureSpectrumDisplay({
+  mode: 'fixed',
+  edgeSlot: 1,
+  edgeLowHz: 14074000,
+  edgeHighHz: 14077000,
+});
+
+const displayState = await rig.getSpectrumDisplayState();
+console.log(displayState);
+```
 
 Emitted events:
 

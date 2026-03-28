@@ -128,6 +128,8 @@ try {
   console.log('\n🆕 补齐 API 方法存在性测试:');
   const newApiMethods = [
     'getInfo', 'sendRaw', 'getSpectrumCapabilities', 'getSpectrumSupportSummary', 'configureSpectrum',
+    'getSpectrumDisplayState', 'configureSpectrumDisplay', 'getSpectrumEdgeSlot', 'setSpectrumEdgeSlot',
+    'getSpectrumSupportedEdgeSlots', 'getSpectrumFixedEdges', 'setSpectrumFixedEdges',
     'startSpectrumStream', 'stopSpectrumStream', 'startManagedSpectrum', 'stopManagedSpectrum', 'setConf', 'getConf',
     'getPassbandNormal', 'getPassbandNarrow', 'getPassbandWide',
     'getResolution',

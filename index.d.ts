@@ -200,15 +200,38 @@ interface SpectrumSupportSummary extends SpectrumCapabilities {
   hasSpectrumHoldFunction: boolean;
   hasTransceiveFunction: boolean;
   configurableLevels: string[];
+  supportsFixedEdges: boolean;
+  supportsEdgeSlotSelection: boolean;
+  supportedEdgeSlots: number[];
 }
+
+type SpectrumDisplayMode = 'center' | 'fixed' | 'scroll-center' | 'scroll-fixed';
 
 interface SpectrumConfig {
   hold?: boolean;
-  mode?: number;
+  mode?: number | SpectrumDisplayMode;
   spanHz?: number;
+  edgeSlot?: number;
+  edgeLowHz?: number;
+  edgeHighHz?: number;
   speed?: number;
   referenceLevel?: number;
   averageMode?: number;
+}
+
+interface SpectrumDisplayState {
+  mode: SpectrumDisplayMode | null;
+  modeId: number | null;
+  modeName: string | null;
+  spanHz: number | null;
+  edgeSlot: number | null;
+  edgeLowHz: number | null;
+  edgeHighHz: number | null;
+  supportedModes: SpectrumModeInfo[];
+  supportedSpans: number[];
+  supportedEdgeSlots: number[];
+  supportsFixedEdges: boolean;
+  supportsEdgeSlotSelection: boolean;
 }
 
 /**
@@ -1286,6 +1309,41 @@ declare class HamLib extends EventEmitter {
    * Apply spectrum-related settings using official Hamlib level/function APIs.
    */
   configureSpectrum(config?: SpectrumConfig): Promise<SpectrumSupportSummary>;
+
+  /**
+   * Get the current spectrum edge slot if exposed by the backend.
+   */
+  getSpectrumEdgeSlot(): Promise<number>;
+
+  /**
+   * Set the current spectrum edge slot if exposed by the backend.
+   */
+  setSpectrumEdgeSlot(slot: number): Promise<number>;
+
+  /**
+   * Get supported spectrum edge slots.
+   */
+  getSpectrumSupportedEdgeSlots(): Promise<number[]>;
+
+  /**
+   * Read current fixed spectrum edges.
+   */
+  getSpectrumFixedEdges(): Promise<{lowHz: number, highHz: number}>;
+
+  /**
+   * Set current fixed spectrum edges.
+   */
+  setSpectrumFixedEdges(range: {lowHz: number, highHz: number}): Promise<{lowHz: number, highHz: number}>;
+
+  /**
+   * Get a normalized spectrum display state for application use.
+   */
+  getSpectrumDisplayState(): Promise<SpectrumDisplayState>;
+
+  /**
+   * Configure spectrum display state using a normalized application-facing shape.
+   */
+  configureSpectrumDisplay(config?: SpectrumConfig): Promise<SpectrumDisplayState>;
 
   /**
    * Start receiving official Hamlib spectrum line events.
