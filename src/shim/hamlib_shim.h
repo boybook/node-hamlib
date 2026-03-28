@@ -434,6 +434,7 @@ SHIM_API int shim_rig_set_level_f(hamlib_shim_handle_t h, int vfo, uint64_t leve
 SHIM_API int shim_rig_set_level_i(hamlib_shim_handle_t h, int vfo, uint64_t level, int value);
 SHIM_API int shim_rig_get_level_f(hamlib_shim_handle_t h, int vfo, uint64_t level, float* value);
 SHIM_API int shim_rig_get_level_i(hamlib_shim_handle_t h, int vfo, uint64_t level, int* value);
+SHIM_API int shim_rig_level_is_float(uint64_t level);
 /* Auto-detect int/float level type, returns value as double */
 SHIM_API int shim_rig_get_level_auto(hamlib_shim_handle_t h, int vfo, uint64_t level, double* value);
 

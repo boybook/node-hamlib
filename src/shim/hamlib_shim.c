@@ -333,14 +333,20 @@ SHIM_API int shim_rig_get_strength(hamlib_shim_handle_t h, int vfo, int* strengt
 
 /* ===== Level control ===== */
 
+static void shim_ensure_targetable_level(hamlib_shim_handle_t h);
+
 SHIM_API int shim_rig_set_level_f(hamlib_shim_handle_t h, int vfo, uint64_t level, float value) {
+    shim_ensure_targetable_level(h);
     value_t val;
+    memset(&val, 0, sizeof(val));
     val.f = value;
     return rig_set_level((RIG*)h, (vfo_t)vfo, (setting_t)level, val);
 }
 
 SHIM_API int shim_rig_set_level_i(hamlib_shim_handle_t h, int vfo, uint64_t level, int value) {
+    shim_ensure_targetable_level(h);
     value_t val;
+    memset(&val, 0, sizeof(val));
     val.i = value;
     return rig_set_level((RIG*)h, (vfo_t)vfo, (setting_t)level, val);
 }
@@ -381,6 +387,10 @@ SHIM_API int shim_rig_get_level_i(hamlib_shim_handle_t h, int vfo, uint64_t leve
     int ret = rig_get_level((RIG*)h, (vfo_t)vfo, (setting_t)level, &val);
     if (value) *value = val.i;
     return ret;
+}
+
+SHIM_API int shim_rig_level_is_float(uint64_t level) {
+    return RIG_LEVEL_IS_FLOAT((setting_t)level) ? 1 : 0;
 }
 
 /*

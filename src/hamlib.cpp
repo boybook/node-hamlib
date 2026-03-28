@@ -286,7 +286,11 @@ public:
     void Execute() override {
         CHECK_RIG_VALID();
 
-        result_code_ = shim_rig_set_level_f(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, level_type_, value_);
+        if (shim_rig_level_is_float(level_type_)) {
+            result_code_ = shim_rig_set_level_f(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, level_type_, value_);
+        } else {
+            result_code_ = shim_rig_set_level_i(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, level_type_, static_cast<int>(value_));
+        }
         if (result_code_ != SHIM_RIG_OK) {
             error_message_ = shim_rigerror(result_code_);
         }
@@ -3004,11 +3008,33 @@ Napi::Value NodeHamLib::SetLevel(const Napi::CallbackInfo & info) {
     return env.Null();
   }
   
-  float val = static_cast<float>(levelValue);
+  const bool isSpectrumLevel =
+    levelType == SHIM_RIG_LEVEL_SPECTRUM_MODE
+    || levelType == SHIM_RIG_LEVEL_SPECTRUM_SPAN
+    || levelType == SHIM_RIG_LEVEL_SPECTRUM_EDGE_LOW
+    || levelType == SHIM_RIG_LEVEL_SPECTRUM_EDGE_HIGH
+    || levelType == SHIM_RIG_LEVEL_SPECTRUM_SPEED
+    || levelType == SHIM_RIG_LEVEL_SPECTRUM_REF
+    || levelType == SHIM_RIG_LEVEL_SPECTRUM_AVG
+    || levelType == SHIM_RIG_LEVEL_SPECTRUM_ATT;
 
+  if (isSpectrumLevel) {
+    Napi::Promise::Deferred deferred = Napi::Promise::Deferred::New(env);
+    int result = shim_rig_level_is_float(levelType)
+      ? shim_rig_set_level_f(my_rig, SHIM_RIG_VFO_CURR, levelType, static_cast<float>(levelValue))
+      : shim_rig_set_level_i(my_rig, SHIM_RIG_VFO_CURR, levelType, static_cast<int>(levelValue));
+
+    if (result != SHIM_RIG_OK) {
+      deferred.Reject(Napi::Error::New(env, shim_rigerror(result)).Value());
+    } else {
+      deferred.Resolve(Napi::Number::New(env, result));
+    }
+    return deferred.Promise();
+  }
+
+  float val = static_cast<float>(levelValue);
   SetLevelAsyncWorker* worker = new SetLevelAsyncWorker(env, this, levelType, val);
   worker->Queue();
-  
   return worker->GetPromise();
 }
 
@@ -5970,11 +5996,60 @@ Napi::Value NodeHamLib::GetSpectrumCapabilities(const Napi::CallbackInfo& info) 
   Napi::Env env = info.Env();
   Napi::Object result = Napi::Object::New(env);
 
-  result.Set("asyncDataSupported", env.Undefined());
-  result.Set("scopes", Napi::Array::New(env));
-  result.Set("modes", Napi::Array::New(env));
-  result.Set("spans", Napi::Array::New(env));
-  result.Set("avgModes", Napi::Array::New(env));
+  result.Set("asyncDataSupported", Napi::Boolean::New(env, shim_rig_is_async_data_supported(my_rig) != 0));
+
+  Napi::Array scopes = Napi::Array::New(env);
+  int scopeCount = shim_rig_get_caps_spectrum_scope_count(my_rig);
+  for (int i = 0; i < scopeCount; ++i) {
+    shim_spectrum_scope_t scope{};
+    if (shim_rig_get_caps_spectrum_scope(my_rig, i, &scope) != SHIM_RIG_OK) {
+      continue;
+    }
+    Napi::Object scopeObject = Napi::Object::New(env);
+    scopeObject.Set("id", Napi::Number::New(env, scope.id));
+    scopeObject.Set("name", Napi::String::New(env, scope.name));
+    scopes.Set(i, scopeObject);
+  }
+  result.Set("scopes", scopes);
+
+  Napi::Array modes = Napi::Array::New(env);
+  int modeCount = shim_rig_get_caps_spectrum_mode_count(my_rig);
+  for (int i = 0; i < modeCount; ++i) {
+    int modeId = 0;
+    if (shim_rig_get_caps_spectrum_mode(my_rig, i, &modeId) != SHIM_RIG_OK) {
+      continue;
+    }
+    Napi::Object modeObject = Napi::Object::New(env);
+    modeObject.Set("id", Napi::Number::New(env, modeId));
+    modeObject.Set("name", Napi::String::New(env, shim_rig_str_spectrum_mode(modeId)));
+    modes.Set(i, modeObject);
+  }
+  result.Set("modes", modes);
+
+  Napi::Array spans = Napi::Array::New(env);
+  int spanCount = shim_rig_get_caps_spectrum_span_count(my_rig);
+  for (int i = 0; i < spanCount; ++i) {
+    double spanHz = 0;
+    if (shim_rig_get_caps_spectrum_span(my_rig, i, &spanHz) != SHIM_RIG_OK) {
+      continue;
+    }
+    spans.Set(i, Napi::Number::New(env, spanHz));
+  }
+  result.Set("spans", spans);
+
+  Napi::Array avgModes = Napi::Array::New(env);
+  int avgModeCount = shim_rig_get_caps_spectrum_avg_mode_count(my_rig);
+  for (int i = 0; i < avgModeCount; ++i) {
+    shim_spectrum_avg_mode_t avgMode{};
+    if (shim_rig_get_caps_spectrum_avg_mode(my_rig, i, &avgMode) != SHIM_RIG_OK) {
+      continue;
+    }
+    Napi::Object avgModeObject = Napi::Object::New(env);
+    avgModeObject.Set("id", Napi::Number::New(env, avgMode.id));
+    avgModeObject.Set("name", Napi::String::New(env, avgMode.name));
+    avgModes.Set(i, avgModeObject);
+  }
+  result.Set("avgModes", avgModes);
 
   return result;
 }
