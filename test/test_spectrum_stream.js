@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const { HamLib } = require('../index.js');
+const { SpectrumController } = require('../lib/spectrum.js');
 
 function parseArgs(argv) {
   const options = {
@@ -9,6 +10,8 @@ function parseArgs(argv) {
     rate: null,
     durationMs: 15000,
     settleMs: 5000,
+    firstLineTimeoutMs: 30000,
+    pumpIntervalMs: 200,
     mode: null,
     spanHz: null,
     speed: null,
@@ -35,6 +38,12 @@ function parseArgs(argv) {
         break;
       case 'settle-ms':
         options.settleMs = Number(value);
+        break;
+      case 'first-line-timeout-ms':
+        options.firstLineTimeoutMs = Number(value);
+        break;
+      case 'pump-interval-ms':
+        options.pumpIntervalMs = Number(value);
         break;
       case 'mode':
         options.mode = Number(value);
@@ -76,6 +85,8 @@ Options:
   --rate=<baudRate>              Optional serial rate, e.g. 115200
   --duration-ms=<ms>            Test duration after stream starts, default 15000
   --settle-ms=<ms>              Extra wait before declaring timeout, default 5000
+  --first-line-timeout-ms=<ms>  Maximum wait for the first spectrum line, default 30000
+  --pump-interval-ms=<ms>       Managed helper pump interval, 0 disables, default 200
   --mode=<id>                   Optional SPECTRUM_MODE level value
   --span-hz=<hz>                Optional SPECTRUM_SPAN level value
   --speed=<id>                  Optional SPECTRUM_SPEED level value
@@ -109,16 +120,30 @@ function summarizeLine(line) {
   };
 }
 
+function waitForResult(promise, timeoutMs, fallbackValue) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => setTimeout(() => resolve(fallbackValue), timeoutMs)),
+  ]);
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const rig = new HamLib(options.model, options.port);
+  const spectrum = new SpectrumController(rig);
   const startedAt = Date.now();
   const metrics = {
     lines: 0,
     bytes: 0,
+    openAtMs: null,
+    managedStartAtMs: null,
     firstLineAtMs: null,
     lastLine: null,
   };
+  let resolveFirstLine;
+  const firstLinePromise = new Promise((resolve) => {
+    resolveFirstLine = resolve;
+  });
 
   const config = {};
   if (Number.isFinite(options.mode)) config.mode = options.mode;
@@ -126,6 +151,7 @@ async function main() {
   if (Number.isFinite(options.speed)) config.speed = options.speed;
   if (Number.isFinite(options.referenceLevel)) config.referenceLevel = options.referenceLevel;
   if (Number.isFinite(options.averageMode)) config.averageMode = options.averageMode;
+  if (Number.isFinite(options.pumpIntervalMs)) config.pumpIntervalMs = options.pumpIntervalMs;
 
   const onSpectrumLine = (line) => {
     metrics.lines += 1;
@@ -133,6 +159,7 @@ async function main() {
     metrics.lastLine = summarizeLine(line);
     if (metrics.firstLineAtMs === null) {
       metrics.firstLineAtMs = Date.now() - startedAt;
+      resolveFirstLine(true);
       log('first spectrumLine received', {
         firstLineAtMs: metrics.firstLineAtMs,
         summary: metrics.lastLine,
@@ -145,9 +172,9 @@ async function main() {
     }
   };
 
-  rig.on('spectrumLine', onSpectrumLine);
-  rig.on('spectrumStateChanged', (state) => log('spectrumStateChanged', state));
-  rig.on('spectrumError', (error) => log('spectrumError', error));
+  spectrum.on('spectrumLine', onSpectrumLine);
+  spectrum.on('spectrumStateChanged', (state) => log('spectrumStateChanged', state));
+  spectrum.on('spectrumError', (error) => log('spectrumError', error));
 
   let exitCode = 0;
 
@@ -156,6 +183,7 @@ async function main() {
       model: options.model,
       port: options.port,
       rate: options.rate ?? '(default)',
+      pumpIntervalMs: options.pumpIntervalMs,
     });
     if (options.rate) {
       await rig.setSerialConfig('rate', options.rate);
@@ -163,9 +191,10 @@ async function main() {
     }
 
     await rig.open();
+    metrics.openAtMs = Date.now() - startedAt;
     log('rig opened', rig.getConnectionInfo());
 
-    const summary = await rig.getSpectrumSupportSummary();
+    const summary = await spectrum.getSpectrumSupportSummary();
     log('spectrum support summary', summary);
 
     if (!summary.supported) {
@@ -173,22 +202,36 @@ async function main() {
     }
 
     log('starting managed spectrum', Object.keys(config).length > 0 ? config : { config: '(default)' });
-    await rig.startManagedSpectrum(config);
+    await spectrum.startManagedSpectrum(config);
+    metrics.managedStartAtMs = Date.now() - startedAt;
 
-    await new Promise((resolve) => setTimeout(resolve, options.durationMs));
-    if (metrics.lines === 0 && options.settleMs > 0) {
-      log('no spectrumLine yet, waiting settle window', { settleMs: options.settleMs });
-      await new Promise((resolve) => setTimeout(resolve, options.settleMs));
+    let firstLineReceived = await waitForResult(firstLinePromise, options.firstLineTimeoutMs, false);
+
+    if (!firstLineReceived && metrics.lines === 0) {
+      const graceMs = 2000;
+      log('first-line timeout elapsed, waiting grace window', { graceMs });
+      firstLineReceived = await waitForResult(firstLinePromise, graceMs, false);
     }
 
-    if (metrics.lines === 0) {
+    if (!firstLineReceived) {
       exitCode = 2;
-      log('no spectrumLine received during test window', { durationMs: options.durationMs });
+      log('no spectrumLine received before first-line timeout', {
+        firstLineTimeoutMs: options.firstLineTimeoutMs,
+        durationMs: options.durationMs,
+        settleMs: options.settleMs,
+      });
     } else {
+      const observationEndsAt = startedAt + options.durationMs;
+      const remainingObservationMs = observationEndsAt - Date.now();
+      if (remainingObservationMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, remainingObservationMs));
+      }
       log('spectrum test completed with data', {
         durationMs: options.durationMs,
         lines: metrics.lines,
         bytes: metrics.bytes,
+        openAtMs: metrics.openAtMs,
+        managedStartAtMs: metrics.managedStartAtMs,
         firstLineAtMs: metrics.firstLineAtMs,
         lastLine: metrics.lastLine,
       });
@@ -201,7 +244,7 @@ async function main() {
     });
   } finally {
     try {
-      await rig.stopManagedSpectrum();
+      await spectrum.stopManagedSpectrum();
       log('managed spectrum stopped');
     } catch (error) {
       log('stopManagedSpectrum failed during cleanup', { message: error.message });

@@ -4,6 +4,7 @@
  */
 
 const { HamLib } = require('../index.js');
+const { SpectrumController } = require('../lib/spectrum.js');
 
 console.log('🧪 测试node-hamlib模块加载和基础功能...\n');
 
@@ -86,6 +87,8 @@ try {
   console.log('\n🔧 实例化测试:');
   const testRig = new HamLib(1035, '/dev/null');
   test('HamLib实例创建成功', () => testRig && typeof testRig === 'object');
+  const spectrumController = new SpectrumController(testRig);
+  test('SpectrumController实例创建成功', () => spectrumController && typeof spectrumController === 'object');
   
   // 4. 基础方法存在性测试
   console.log('\n🔍 基础方法存在性测试:');
@@ -127,10 +130,8 @@ try {
   // 新增 API 方法存在性测试
   console.log('\n🆕 补齐 API 方法存在性测试:');
   const newApiMethods = [
-    'getInfo', 'sendRaw', 'getSpectrumCapabilities', 'getSpectrumSupportSummary', 'configureSpectrum',
-    'getSpectrumDisplayState', 'configureSpectrumDisplay', 'getSpectrumEdgeSlot', 'setSpectrumEdgeSlot',
-    'getSpectrumSupportedEdgeSlots', 'getSpectrumFixedEdges', 'setSpectrumFixedEdges',
-    'startSpectrumStream', 'stopSpectrumStream', 'startManagedSpectrum', 'stopManagedSpectrum', 'setConf', 'getConf',
+    'getInfo', 'sendRaw', 'getSpectrumCapabilities',
+    'startSpectrumStream', 'stopSpectrumStream', 'setConf', 'getConf',
     'getPassbandNormal', 'getPassbandNarrow', 'getPassbandWide',
     'getResolution',
     'getSupportedParms', 'getSupportedVfoOps', 'getSupportedScanTypes'
@@ -138,6 +139,34 @@ try {
 
   newApiMethods.forEach(method => {
     test(`新增方法 ${method} 存在`, () => typeof testRig[method] === 'function');
+  });
+
+  console.log('\n🆕 SpectrumController 方法存在性测试:');
+  const spectrumMethods = [
+    'getSpectrumSupportSummary', 'configureSpectrum',
+    'getSpectrumDisplayState', 'configureSpectrumDisplay',
+    'getSpectrumEdgeSlot', 'setSpectrumEdgeSlot',
+    'getSpectrumSupportedEdgeSlots',
+    'getSpectrumFixedEdges', 'setSpectrumFixedEdges',
+    'startManagedSpectrum', 'stopManagedSpectrum'
+  ];
+
+  spectrumMethods.forEach(method => {
+    test(`SpectrumController 方法 ${method} 存在`, () => typeof spectrumController[method] === 'function');
+  });
+
+  console.log('\n🧹 主入口纯桥接边界测试:');
+  const removedSpectrumMethods = [
+    'getSpectrumSupportSummary', 'configureSpectrum',
+    'getSpectrumDisplayState', 'configureSpectrumDisplay',
+    'getSpectrumEdgeSlot', 'setSpectrumEdgeSlot',
+    'getSpectrumSupportedEdgeSlots',
+    'getSpectrumFixedEdges', 'setSpectrumFixedEdges',
+    'startManagedSpectrum', 'stopManagedSpectrum'
+  ];
+
+  removedSpectrumMethods.forEach(method => {
+    test(`HamLib 主入口不再暴露 ${method}`, () => typeof testRig[method] === 'undefined');
   });
 
   // 新增静态方法测试
@@ -170,9 +199,9 @@ try {
 
   const totalMethods = instanceMethods.length + staticMethods.length;
 
-  test('实例方法数量不少于108个', () => instanceMethods.length >= 108);
+  test('实例方法数量不少于97个', () => instanceMethods.length >= 97);
   test(`静态方法数量正确 (6个)`, () => staticMethods.length === 6);
-  test('总方法数量不少于114个', () => totalMethods >= 114);
+  test('总方法数量不少于103个', () => totalMethods >= 103);
 
   console.log(`   📊 实例方法: ${instanceMethods.length}个`);
   console.log(`   📊 静态方法: ${staticMethods.length}个`);

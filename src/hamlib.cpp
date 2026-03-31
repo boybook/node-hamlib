@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdio>
 #include <exception>
+#include <limits>
 
 // 安全宏 - 检查RIG指针有效性，防止空指针解引用和已销毁对象访问
 #define CHECK_RIG_VALID() \
@@ -15,6 +16,21 @@
       result_code_ = SHIM_RIG_EINVAL; \
       error_message_ = "RIG is not initialized or has been destroyed"; \
       return; \
+    } \
+  } while(0)
+
+#define RETURN_NULL_IF_INVALID_VFO(vfo) \
+  do { \
+    if ((vfo) == kInvalidVfoParameter) { \
+      return env.Null(); \
+    } \
+  } while(0)
+
+#define RETURN_NULL_IF_RIG_HANDLE_INVALID() \
+  do { \
+    if (!my_rig) { \
+      Napi::Error::New(env, "RIG is not initialized or has been destroyed").ThrowAsJavaScriptException(); \
+      return env.Null(); \
     } \
   } while(0)
 
@@ -28,6 +44,25 @@ using namespace Napi;
 
 Napi::FunctionReference NodeHamLib::constructor;
 Napi::ThreadSafeFunction tsfn;
+
+constexpr int kInvalidVfoParameter = std::numeric_limits<int>::min();
+
+static std::string publicVfoToken(int vfo) {
+  const char* rawToken = shim_rig_strvfo(vfo);
+  if (!rawToken || !*rawToken) {
+    return "UNKNOWN";
+  }
+  return rawToken;
+}
+
+static int parseVfoString(Napi::Env env, const std::string& vfoToken) {
+  int vfo = shim_rig_parse_vfo(vfoToken.c_str());
+  if (vfo == SHIM_RIG_VFO_NONE) {
+    Napi::TypeError::New(env, "Invalid Hamlib VFO token: " + vfoToken).ThrowAsJavaScriptException();
+    return kInvalidVfoParameter;
+  }
+  return vfo;
+}
 
 // Base AsyncWorker implementation with Promise support
 HamLibAsyncWorker::HamLibAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
@@ -280,16 +315,16 @@ private:
 
 class SetLevelAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetLevelAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, uint64_t level_type, float value)
-        : HamLibAsyncWorker(env, hamlib_instance), level_type_(level_type), value_(value) {}
+    SetLevelAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, uint64_t level_type, float value, int vfo)
+        : HamLibAsyncWorker(env, hamlib_instance), level_type_(level_type), value_(value), vfo_(vfo) {}
 
     void Execute() override {
         CHECK_RIG_VALID();
 
         if (shim_rig_level_is_float(level_type_)) {
-            result_code_ = shim_rig_set_level_f(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, level_type_, value_);
+            result_code_ = shim_rig_set_level_f(hamlib_instance_->my_rig, vfo_, level_type_, value_);
         } else {
-            result_code_ = shim_rig_set_level_i(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, level_type_, static_cast<int>(value_));
+            result_code_ = shim_rig_set_level_i(hamlib_instance_->my_rig, vfo_, level_type_, static_cast<int>(value_));
         }
         if (result_code_ != SHIM_RIG_OK) {
             error_message_ = shim_rigerror(result_code_);
@@ -313,6 +348,7 @@ public:
 private:
     uint64_t level_type_;
     float value_;
+    int vfo_;
 };
 
 class GetLevelAsyncWorker : public HamLibAsyncWorker {
@@ -807,7 +843,7 @@ private:
 class GetSplitAsyncWorker : public HamLibAsyncWorker {
 public:
     GetSplitAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo = SHIM_RIG_VFO_CURR)
-        : HamLibAsyncWorker(env, hamlib_instance), split_(SHIM_RIG_SPLIT_OFF), tx_vfo_(SHIM_RIG_VFO_B), vfo_(vfo) {}
+        : HamLibAsyncWorker(env, hamlib_instance), split_(SHIM_RIG_SPLIT_OFF), tx_vfo_(SHIM_RIG_VFO_CURR), vfo_(vfo) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
@@ -825,12 +861,7 @@ public:
         } else {
             Napi::Object obj = Napi::Object::New(env);
             obj.Set(Napi::String::New(env, "enabled"), Napi::Boolean::New(env, split_ == SHIM_RIG_SPLIT_ON));
-            
-            const char* vfo_str = "VFO-B";
-            if (tx_vfo_ == SHIM_RIG_VFO_A) {
-                vfo_str = "VFO-A";
-            }
-            obj.Set(Napi::String::New(env, "txVfo"), Napi::String::New(env, vfo_str));
+            obj.Set(Napi::String::New(env, "txVfo"), Napi::String::New(env, publicVfoToken(tx_vfo_)));
             
             deferred_.Resolve(obj);
         }
@@ -919,17 +950,7 @@ public:
             return;
         }
         
-        const char* vfo_str = "VFO-CURR";  // 默认值
-        if (vfo_ == SHIM_RIG_VFO_A) {
-            vfo_str = "VFO-A";
-        } else if (vfo_ == SHIM_RIG_VFO_B) {
-            vfo_str = "VFO-B";
-        } else if (vfo_ == SHIM_RIG_VFO_CURR) {
-            vfo_str = "VFO-CURR";
-        } else if (vfo_ == SHIM_RIG_VFO_MEM) {
-            vfo_str = "VFO-MEM";
-        }
-        deferred_.Resolve(Napi::String::New(env, vfo_str));
+        deferred_.Resolve(Napi::String::New(env, publicVfoToken(vfo_)));
     }
     
     void OnError(const Napi::Error& e) override {
@@ -2180,15 +2201,16 @@ private:
 
 // Helper function to parse VFO parameter from JavaScript
 int parseVfoParameter(const Napi::CallbackInfo& info, int index, int defaultVfo = SHIM_RIG_VFO_CURR) {
-    if (info.Length() > static_cast<size_t>(index) && info[index].IsString()) {
-        std::string vfoStr = info[index].As<Napi::String>().Utf8Value();
-        if (vfoStr == "VFO-A") {
-            return SHIM_RIG_VFO_A;
-        } else if (vfoStr == "VFO-B") {
-            return SHIM_RIG_VFO_B;
-        }
+    if (info.Length() <= static_cast<size_t>(index) || info[index].IsUndefined() || info[index].IsNull()) {
+        return defaultVfo;
     }
-    return defaultVfo;
+    if (!info[index].IsString()) {
+        Napi::TypeError::New(info.Env(), "VFO must be specified as a Hamlib VFO token string")
+          .ThrowAsJavaScriptException();
+        return kInvalidVfoParameter;
+    }
+    std::string vfoStr = info[index].As<Napi::String>().Utf8Value();
+    return parseVfoString(info.Env(), vfoStr);
 }
 
 NodeHamLib::NodeHamLib(const Napi::CallbackInfo & info): ObjectWrap(info) {
@@ -2339,10 +2361,10 @@ void NodeHamLib::EmitSpectrumLine(const shim_spectrum_line_t& line) {
 
 void NodeHamLib::StopSpectrumStreamInternal() {
   std::lock_guard<std::mutex> lock(spectrum_mutex_);
-  if (spectrum_stream_running_) {
+  if (spectrum_stream_running_ && my_rig) {
     shim_rig_set_spectrum_callback(my_rig, nullptr, nullptr);
-    spectrum_stream_running_ = false;
   }
+  spectrum_stream_running_ = false;
   if (spectrum_tsfn_) {
     spectrum_tsfn_.Release();
     spectrum_tsfn_ = Napi::ThreadSafeFunction();
@@ -2392,23 +2414,13 @@ Napi::Value NodeHamLib::SetVFO(const Napi::CallbackInfo & info) {
   }
   
   if (!info[0].IsString()) {
-    Napi::TypeError::New(env, "Must specify VFO-A or VFO-B as a string")
+    Napi::TypeError::New(env, "Must specify a Hamlib VFO token as a string")
       .ThrowAsJavaScriptException();
     return env.Null();
   }
   
-  std::string name = info[0].As<Napi::String>().Utf8Value();
-  int vfo;
-  
-  if (name == "VFO-A") {
-    vfo = SHIM_RIG_VFO_A;
-  } else if (name == "VFO-B") {
-    vfo = SHIM_RIG_VFO_B;
-  } else {
-    Napi::TypeError::New(env, "Invalid VFO name")
-      .ThrowAsJavaScriptException();
-    return env.Null();
-  }
+  int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   SetVfoAsyncWorker* worker = new SetVfoAsyncWorker(env, this, vfo);
   worker->Queue();
@@ -2448,13 +2460,9 @@ Napi::Value NodeHamLib::SetFrequency(const Napi::CallbackInfo & info) {
   // Support optional VFO parameter
   int vfo = SHIM_RIG_VFO_CURR;
   
-  if (info.Length() >= 2 && info[1].IsString()) {
-    std::string vfostr = info[1].As<Napi::String>().Utf8Value();
-    if (vfostr == "VFO-A") {
-      vfo = SHIM_RIG_VFO_A;
-    } else if (vfostr == "VFO-B") {
-      vfo = SHIM_RIG_VFO_B;
-    }
+  if (info.Length() >= 2) {
+    vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
+    RETURN_NULL_IF_INVALID_VFO(vfo);
   }
   
   SetFrequencyAsyncWorker* worker = new SetFrequencyAsyncWorker(env, this, freq, vfo);
@@ -2505,12 +2513,14 @@ Napi::Value NodeHamLib::SetMode(const Napi::CallbackInfo & info) {
     } else {
       // If second parameter is not "narrow" or "wide", might be VFO
       vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
+      RETURN_NULL_IF_INVALID_VFO(vfo);
     }
   }
   
   // Check for third parameter (VFO) if bandwidth was specified
   if (info.Length() >= 3) {
     vfo = parseVfoParameter(info, 2, SHIM_RIG_VFO_CURR);
+    RETURN_NULL_IF_INVALID_VFO(vfo);
   }
 
   SetModeAsyncWorker* worker = new SetModeAsyncWorker(env, this, mode, bandwidth, vfo);
@@ -2576,13 +2586,9 @@ Napi::Value NodeHamLib::GetFrequency(const Napi::CallbackInfo & info) {
   // Support optional VFO parameter
   int vfo = SHIM_RIG_VFO_CURR;
   
-  if (info.Length() >= 1 && info[0].IsString()) {
-    std::string vfostr = info[0].As<Napi::String>().Utf8Value();
-    if (vfostr == "VFO-A") {
-      vfo = SHIM_RIG_VFO_A;
-    } else if (vfostr == "VFO-B") {
-      vfo = SHIM_RIG_VFO_B;
-    }
+  if (info.Length() >= 1) {
+    vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
+    RETURN_NULL_IF_INVALID_VFO(vfo);
   }
   
   GetFrequencyAsyncWorker* worker = new GetFrequencyAsyncWorker(env, this, vfo);
@@ -2618,8 +2624,9 @@ Napi::Value NodeHamLib::GetStrength(const Napi::CallbackInfo & info) {
   // Support optional VFO parameter: getStrength() or getStrength(vfo)
   int vfo = SHIM_RIG_VFO_CURR;
   
-  if (info.Length() >= 1 && info[0].IsString()) {
+  if (info.Length() >= 1) {
     vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
+    RETURN_NULL_IF_INVALID_VFO(vfo);
   }
   
   GetStrengthAsyncWorker* worker = new GetStrengthAsyncWorker(env, this, vfo);
@@ -2748,18 +2755,13 @@ Napi::Value NodeHamLib::GetMemoryChannel(const Napi::CallbackInfo & info) {
     return env.Null();
   }
   
-  if (info.Length() < 1 || !info[0].IsNumber()) {
-    Napi::TypeError::New(env, "Expected (channelNumber: number) or (channelNumber: number, readOnly: boolean)").ThrowAsJavaScriptException();
+  if (info.Length() < 2 || !info[0].IsNumber() || !info[1].IsBoolean()) {
+    Napi::TypeError::New(env, "Expected (channelNumber: number, readOnly: boolean)").ThrowAsJavaScriptException();
     return env.Null();
   }
   
   int channel_num = info[0].As<Napi::Number>().Int32Value();
-  bool read_only = true;
-  
-  if (info.Length() >= 2 && info[1].IsBoolean()) {
-    // (channelNumber, readOnly)
-    read_only = info[1].As<Napi::Boolean>().Value();
-  }
+  bool read_only = info[1].As<Napi::Boolean>().Value();
   
   GetMemoryChannelAsyncWorker* worker = new GetMemoryChannelAsyncWorker(env, this, channel_num, read_only);
   worker->Queue();
@@ -2882,8 +2884,8 @@ Napi::Value NodeHamLib::StartScan(const Napi::CallbackInfo & info) {
     return env.Null();
   }
   
-  if (info.Length() < 1 || !info[0].IsString()) {
-    Napi::TypeError::New(env, "Expected scan type (VFO, MEM, PROG, etc.)").ThrowAsJavaScriptException();
+  if (info.Length() < 2 || !info[0].IsString() || !info[1].IsNumber()) {
+    Napi::TypeError::New(env, "Expected (scanType: string, channel: number)").ThrowAsJavaScriptException();
     return env.Null();
   }
   
@@ -2905,10 +2907,7 @@ Napi::Value NodeHamLib::StartScan(const Napi::CallbackInfo & info) {
     return env.Null();
   }
   
-  int channel = 0;
-  if (info.Length() > 1 && info[1].IsNumber()) {
-    channel = info[1].As<Napi::Number>().Int32Value();
-  }
+  int channel = info[1].As<Napi::Number>().Int32Value();
   
   StartScanAsyncWorker* asyncWorker = new StartScanAsyncWorker(env, this, scanType, channel);
   asyncWorker->Queue();
@@ -2945,13 +2944,9 @@ Napi::Value NodeHamLib::SetLevel(const Napi::CallbackInfo & info) {
   std::string levelTypeStr = info[0].As<Napi::String>().Utf8Value();
   double levelValue = info[1].As<Napi::Number>().DoubleValue();
   int vfo = SHIM_RIG_VFO_CURR;
-  if (info.Length() >= 3 && info[2].IsString()) {
-    std::string vfoStr = info[2].As<Napi::String>().Utf8Value();
-    if (vfoStr == "VFO-A") {
-      vfo = SHIM_RIG_VFO_A;
-    } else if (vfoStr == "VFO-B") {
-      vfo = SHIM_RIG_VFO_B;
-    }
+  if (info.Length() >= 3) {
+    vfo = parseVfoParameter(info, 2, SHIM_RIG_VFO_CURR);
+    RETURN_NULL_IF_INVALID_VFO(vfo);
   }
   
   // Map level type strings to hamlib constants
@@ -3042,7 +3037,7 @@ Napi::Value NodeHamLib::SetLevel(const Napi::CallbackInfo & info) {
   }
 
   float val = static_cast<float>(levelValue);
-  SetLevelAsyncWorker* worker = new SetLevelAsyncWorker(env, this, levelType, val);
+  SetLevelAsyncWorker* worker = new SetLevelAsyncWorker(env, this, levelType, val, vfo);
   worker->Queue();
   return worker->GetPromise();
 }
@@ -3143,15 +3138,11 @@ Napi::Value NodeHamLib::GetLevel(const Napi::CallbackInfo & info) {
     return env.Null();
   }
   
-  // Optional second parameter: VFO string ('VFO-A', 'VFO-B', 'currVFO')
+  // Optional second parameter: Hamlib VFO token string ('VFOA', 'VFOB', 'currVFO', ...)
   int vfo = SHIM_RIG_VFO_CURR;
-  if (info.Length() >= 2 && info[1].IsString()) {
-    std::string vfoStr = info[1].As<Napi::String>().Utf8Value();
-    if (vfoStr == "VFO-A") {
-      vfo = SHIM_RIG_VFO_A;
-    } else if (vfoStr == "VFO-B") {
-      vfo = SHIM_RIG_VFO_B;
-    }
+  if (info.Length() >= 2) {
+    vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
+    RETURN_NULL_IF_INVALID_VFO(vfo);
   }
 
   GetLevelAsyncWorker* worker = new GetLevelAsyncWorker(env, this, levelType, vfo);
@@ -3162,6 +3153,7 @@ Napi::Value NodeHamLib::GetLevel(const Napi::CallbackInfo & info) {
 
 Napi::Value NodeHamLib::GetSupportedLevels(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
   
   // Get capabilities from rig caps instead of state (doesn't require rig to be open)
   uint64_t levels = shim_rig_get_caps_has_get_level(my_rig) | shim_rig_get_caps_has_set_level(my_rig);
@@ -3395,6 +3387,7 @@ Napi::Value NodeHamLib::GetFunction(const Napi::CallbackInfo & info) {
 
 Napi::Value NodeHamLib::GetSupportedFunctions(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
   
   // Get capabilities from rig caps instead of state (doesn't require rig to be open)
   uint64_t functions = shim_rig_get_caps_has_get_func(my_rig) | shim_rig_get_caps_has_set_func(my_rig);
@@ -3440,6 +3433,7 @@ Napi::Value NodeHamLib::GetSupportedFunctions(const Napi::CallbackInfo & info) {
 // Mode Query
 Napi::Value NodeHamLib::GetSupportedModes(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
 
   // Get mode list from rig state (populated during rig_open from rx/tx range lists)
   uint64_t modes = shim_rig_get_mode_list(my_rig);
@@ -3490,6 +3484,7 @@ Napi::Value NodeHamLib::SetSplitFreq(const Napi::CallbackInfo & info) {
   if (info.Length() >= 2 && info[1].IsString()) {
     // setSplitFreq(freq, vfo)
     vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
+    RETURN_NULL_IF_INVALID_VFO(vfo);
   }
   
   SetSplitFreqAsyncWorker* asyncWorker = new SetSplitFreqAsyncWorker(env, this, tx_freq, vfo);
@@ -3510,6 +3505,7 @@ Napi::Value NodeHamLib::GetSplitFreq(const Napi::CallbackInfo & info) {
   if (info.Length() >= 1 && info[0].IsString()) {
     // getSplitFreq(vfo)
     vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
+    RETURN_NULL_IF_INVALID_VFO(vfo);
   }
   // Otherwise use default SHIM_RIG_VFO_CURR for getSplitFreq()
   
@@ -3547,6 +3543,7 @@ Napi::Value NodeHamLib::SetSplitMode(const Napi::CallbackInfo & info) {
     if (info[1].IsString()) {
       // setSplitMode(mode, vfo)
       vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
+      RETURN_NULL_IF_INVALID_VFO(vfo);
     } else if (info[1].IsNumber()) {
       // setSplitMode(mode, width)
       tx_width = info[1].As<Napi::Number>().Int32Value();
@@ -3555,6 +3552,7 @@ Napi::Value NodeHamLib::SetSplitMode(const Napi::CallbackInfo & info) {
     // setSplitMode(mode, width, vfo)
     tx_width = info[1].As<Napi::Number>().Int32Value();
     vfo = parseVfoParameter(info, 2, SHIM_RIG_VFO_CURR);
+    RETURN_NULL_IF_INVALID_VFO(vfo);
   }
   
   SetSplitModeAsyncWorker* asyncWorker = new SetSplitModeAsyncWorker(env, this, tx_mode, tx_width, vfo);
@@ -3575,6 +3573,7 @@ Napi::Value NodeHamLib::GetSplitMode(const Napi::CallbackInfo & info) {
   if (info.Length() >= 1 && info[0].IsString()) {
     // getSplitMode(vfo)
     vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
+    RETURN_NULL_IF_INVALID_VFO(vfo);
   }
   // Otherwise use default SHIM_RIG_VFO_CURR for getSplitMode()
   
@@ -3601,7 +3600,7 @@ Napi::Value NodeHamLib::SetSplit(const Napi::CallbackInfo & info) {
   
   // Default values
   int rx_vfo = SHIM_RIG_VFO_CURR;
-  int tx_vfo = SHIM_RIG_VFO_B;  // Default TX VFO
+  int tx_vfo = SHIM_RIG_VFO_CURR;
   
   // ⚠️  CRITICAL HISTORICAL ISSUE WARNING ⚠️
   // This Split API had a severe parameter order bug that caused AI to repeatedly
@@ -3620,31 +3619,17 @@ Napi::Value NodeHamLib::SetSplit(const Napi::CallbackInfo & info) {
   
   if (info.Length() == 2 && info[1].IsString()) {
     // setSplit(enable, rxVfo) - treating vfo as RX VFO for current VFO operation
-    std::string vfoStr = info[1].As<Napi::String>().Utf8Value();
-    if (vfoStr == "VFO-A") {
-      rx_vfo = SHIM_RIG_VFO_A;
-    } else if (vfoStr == "VFO-B") {
-      rx_vfo = SHIM_RIG_VFO_B;
-    }
+    rx_vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
+    RETURN_NULL_IF_INVALID_VFO(rx_vfo);
   } else if (info.Length() == 3 && info[1].IsString() && info[2].IsString()) {
     // setSplit(enable, rxVfo, txVfo)
     // ⚠️  CRITICAL: Parameter assignment was WRONG before 2024-08-10 fix!
     // ⚠️  Previous bug: info[1] -> txVfoStr, info[2] -> rxVfoStr (WRONG!)
     // ⚠️  Correct now: info[1] -> rxVfoStr, info[2] -> txVfoStr (RIGHT!)
-    std::string rxVfoStr = info[1].As<Napi::String>().Utf8Value();  // ✅ CORRECT: info[1] is rxVfo
-    std::string txVfoStr = info[2].As<Napi::String>().Utf8Value();  // ✅ CORRECT: info[2] is txVfo
-    
-    if (rxVfoStr == "VFO-A") {
-      rx_vfo = SHIM_RIG_VFO_A;
-    } else if (rxVfoStr == "VFO-B") {
-      rx_vfo = SHIM_RIG_VFO_B;
-    }
-    
-    if (txVfoStr == "VFO-A") {
-      tx_vfo = SHIM_RIG_VFO_A;
-    } else if (txVfoStr == "VFO-B") {
-      tx_vfo = SHIM_RIG_VFO_B;
-    }
+    rx_vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
+    RETURN_NULL_IF_INVALID_VFO(rx_vfo);
+    tx_vfo = parseVfoParameter(info, 2, SHIM_RIG_VFO_CURR);
+    RETURN_NULL_IF_INVALID_VFO(tx_vfo);
   }
   
   SetSplitAsyncWorker* asyncWorker = new SetSplitAsyncWorker(env, this, rx_vfo, split, tx_vfo);
@@ -3665,6 +3650,7 @@ Napi::Value NodeHamLib::GetSplit(const Napi::CallbackInfo & info) {
   if (info.Length() >= 1 && info[0].IsString()) {
     // getSplit(vfo)
     vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
+    RETURN_NULL_IF_INVALID_VFO(vfo);
   }
   // Otherwise use default SHIM_RIG_VFO_CURR for getSplit()
   
@@ -3746,6 +3732,7 @@ Napi::Value NodeHamLib::SetAntenna(const Napi::CallbackInfo & info) {
   int vfo = SHIM_RIG_VFO_CURR;
   if (info.Length() >= 2 && info[1].IsString()) {
     vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
+    RETURN_NULL_IF_INVALID_VFO(vfo);
   }
   
   // Default option value (can be extended later if needed)
@@ -3768,6 +3755,7 @@ Napi::Value NodeHamLib::GetAntenna(const Napi::CallbackInfo & info) {
   int vfo = SHIM_RIG_VFO_CURR;
   if (info.Length() >= 1 && info[0].IsString()) {
     vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
+    RETURN_NULL_IF_INVALID_VFO(vfo);
   }
   
   // Default antenna query (SHIM_RIG_ANT_CURR gets all antenna info)
@@ -4280,6 +4268,7 @@ Napi::Value NodeHamLib::GetPtt(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
   int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   GetPttAsyncWorker* asyncWorker = new GetPttAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -4291,6 +4280,7 @@ Napi::Value NodeHamLib::GetDcd(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
   int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   GetDcdAsyncWorker* asyncWorker = new GetDcdAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -4308,6 +4298,7 @@ Napi::Value NodeHamLib::SetTuningStep(const Napi::CallbackInfo& info) {
   
   int ts = info[0].As<Napi::Number>().Int32Value();
   int vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   SetTuningStepAsyncWorker* asyncWorker = new SetTuningStepAsyncWorker(env, this, vfo, ts);
   asyncWorker->Queue();
@@ -4318,6 +4309,7 @@ Napi::Value NodeHamLib::GetTuningStep(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
   int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   GetTuningStepAsyncWorker* asyncWorker = new GetTuningStepAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -4348,6 +4340,7 @@ Napi::Value NodeHamLib::SetRepeaterShift(const Napi::CallbackInfo& info) {
   }
   
   int vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   SetRepeaterShiftAsyncWorker* asyncWorker = new SetRepeaterShiftAsyncWorker(env, this, vfo, shift);
   asyncWorker->Queue();
@@ -4358,6 +4351,7 @@ Napi::Value NodeHamLib::GetRepeaterShift(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
   int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   GetRepeaterShiftAsyncWorker* asyncWorker = new GetRepeaterShiftAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -4374,6 +4368,7 @@ Napi::Value NodeHamLib::SetRepeaterOffset(const Napi::CallbackInfo& info) {
   
   int offset = info[0].As<Napi::Number>().Int32Value();
   int vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   SetRepeaterOffsetAsyncWorker* asyncWorker = new SetRepeaterOffsetAsyncWorker(env, this, vfo, offset);
   asyncWorker->Queue();
@@ -4384,6 +4379,7 @@ Napi::Value NodeHamLib::GetRepeaterOffset(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
   int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   GetRepeaterOffsetAsyncWorker* asyncWorker = new GetRepeaterOffsetAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -5185,6 +5181,7 @@ Napi::Value NodeHamLib::SetCtcssTone(const Napi::CallbackInfo& info) {
   
   unsigned int tone = static_cast<unsigned int>(info[0].As<Napi::Number>().Uint32Value());
   int vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   SetCtcssToneAsyncWorker* asyncWorker = new SetCtcssToneAsyncWorker(env, this, vfo, tone);
   asyncWorker->Queue();
@@ -5195,6 +5192,7 @@ Napi::Value NodeHamLib::GetCtcssTone(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
   int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   GetCtcssToneAsyncWorker* asyncWorker = new GetCtcssToneAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -5211,6 +5209,7 @@ Napi::Value NodeHamLib::SetDcsCode(const Napi::CallbackInfo& info) {
   
   unsigned int code = static_cast<unsigned int>(info[0].As<Napi::Number>().Uint32Value());
   int vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   SetDcsCodeAsyncWorker* asyncWorker = new SetDcsCodeAsyncWorker(env, this, vfo, code);
   asyncWorker->Queue();
@@ -5221,6 +5220,7 @@ Napi::Value NodeHamLib::GetDcsCode(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
   int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   GetDcsCodeAsyncWorker* asyncWorker = new GetDcsCodeAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -5237,6 +5237,7 @@ Napi::Value NodeHamLib::SetCtcssSql(const Napi::CallbackInfo& info) {
   
   unsigned int tone = static_cast<unsigned int>(info[0].As<Napi::Number>().Uint32Value());
   int vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   SetCtcssSqlAsyncWorker* asyncWorker = new SetCtcssSqlAsyncWorker(env, this, vfo, tone);
   asyncWorker->Queue();
@@ -5247,6 +5248,7 @@ Napi::Value NodeHamLib::GetCtcssSql(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
   int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   GetCtcssSqlAsyncWorker* asyncWorker = new GetCtcssSqlAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -5263,6 +5265,7 @@ Napi::Value NodeHamLib::SetDcsSql(const Napi::CallbackInfo& info) {
   
   unsigned int code = static_cast<unsigned int>(info[0].As<Napi::Number>().Uint32Value());
   int vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   SetDcsSqlAsyncWorker* asyncWorker = new SetDcsSqlAsyncWorker(env, this, vfo, code);
   asyncWorker->Queue();
@@ -5273,6 +5276,7 @@ Napi::Value NodeHamLib::GetDcsSql(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
   int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   GetDcsSqlAsyncWorker* asyncWorker = new GetDcsSqlAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -5335,6 +5339,7 @@ Napi::Value NodeHamLib::SendDtmf(const Napi::CallbackInfo& info) {
   
   std::string digits = info[0].As<Napi::String>().Utf8Value();
   int vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   SendDtmfAsyncWorker* asyncWorker = new SendDtmfAsyncWorker(env, this, vfo, digits);
   asyncWorker->Queue();
@@ -5344,12 +5349,14 @@ Napi::Value NodeHamLib::SendDtmf(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::RecvDtmf(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
-  int maxLength = 32; // Default max length
-  if (info.Length() > 0 && info[0].IsNumber()) {
-    maxLength = info[0].As<Napi::Number>().Int32Value();
+  if (info.Length() < 1 || !info[0].IsNumber()) {
+    Napi::TypeError::New(env, "Expected (maxLength: number, vfo?: string)").ThrowAsJavaScriptException();
+    return env.Null();
   }
+  int maxLength = info[0].As<Napi::Number>().Int32Value();
   
   int vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   RecvDtmfAsyncWorker* asyncWorker = new RecvDtmfAsyncWorker(env, this, vfo, maxLength);
   asyncWorker->Queue();
@@ -5361,6 +5368,7 @@ Napi::Value NodeHamLib::GetMem(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
   int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   GetMemAsyncWorker* asyncWorker = new GetMemAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -5377,6 +5385,7 @@ Napi::Value NodeHamLib::SetBank(const Napi::CallbackInfo& info) {
   
   int bank = info[0].As<Napi::Number>().Int32Value();
   int vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   SetBankAsyncWorker* asyncWorker = new SetBankAsyncWorker(env, this, vfo, bank);
   asyncWorker->Queue();
@@ -5402,6 +5411,7 @@ Napi::Value NodeHamLib::SendMorse(const Napi::CallbackInfo& info) {
   
   std::string msg = info[0].As<Napi::String>().Utf8Value();
   int vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   SendMorseAsyncWorker* asyncWorker = new SendMorseAsyncWorker(env, this, vfo, msg);
   asyncWorker->Queue();
@@ -5412,6 +5422,7 @@ Napi::Value NodeHamLib::StopMorse(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
   int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   StopMorseAsyncWorker* asyncWorker = new StopMorseAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -5422,6 +5433,7 @@ Napi::Value NodeHamLib::WaitMorse(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
   int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   WaitMorseAsyncWorker* asyncWorker = new WaitMorseAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -5439,6 +5451,7 @@ Napi::Value NodeHamLib::SendVoiceMem(const Napi::CallbackInfo& info) {
   
   int ch = info[0].As<Napi::Number>().Int32Value();
   int vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   SendVoiceMemAsyncWorker* asyncWorker = new SendVoiceMemAsyncWorker(env, this, vfo, ch);
   asyncWorker->Queue();
@@ -5449,6 +5462,7 @@ Napi::Value NodeHamLib::StopVoiceMem(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
   int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   StopVoiceMemAsyncWorker* asyncWorker = new StopVoiceMemAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -5475,6 +5489,7 @@ Napi::Value NodeHamLib::SetSplitFreqMode(const Napi::CallbackInfo& info) {
   std::string mode_str = info[1].As<Napi::String>().Utf8Value();
   int tx_width = static_cast<int>(info[2].As<Napi::Number>().DoubleValue());
   int vfo = parseVfoParameter(info, 3, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   int tx_mode = shim_rig_parse_mode(mode_str.c_str());
   if (tx_mode == SHIM_RIG_MODE_NONE) {
@@ -5491,6 +5506,7 @@ Napi::Value NodeHamLib::GetSplitFreqMode(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
   int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
   GetSplitFreqModeAsyncWorker* asyncWorker = new GetSplitFreqModeAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -5585,25 +5601,27 @@ Napi::Value NodeHamLib::MW2Power(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::Reset(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
-  int reset = SHIM_RIG_RESET_SOFT; // Default to soft reset
-  
-  if (info.Length() > 0 && info[0].IsString()) {
-    std::string reset_str = info[0].As<Napi::String>().Utf8Value();
-    if (reset_str == "NONE") {
-      reset = SHIM_RIG_RESET_NONE;
-    } else if (reset_str == "SOFT") {
-      reset = SHIM_RIG_RESET_SOFT;
-    } else if (reset_str == "MCALL") {
-      reset = SHIM_RIG_RESET_MCALL;
-    } else if (reset_str == "MASTER") {
-      reset = SHIM_RIG_RESET_MASTER;
-    } else if (reset_str == "VFO") {
-      reset = SHIM_RIG_RESET_VFO;
-    } else {
-      Napi::Error::New(env, "Invalid reset type: " + reset_str + 
-                      " (valid: NONE, SOFT, VFO, MCALL, MASTER)").ThrowAsJavaScriptException();
-      return env.Null();
-    }
+  if (info.Length() < 1 || !info[0].IsString()) {
+    Napi::TypeError::New(env, "Expected (resetType: string)").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+
+  int reset = SHIM_RIG_RESET_SOFT;
+  std::string reset_str = info[0].As<Napi::String>().Utf8Value();
+  if (reset_str == "NONE") {
+    reset = SHIM_RIG_RESET_NONE;
+  } else if (reset_str == "SOFT") {
+    reset = SHIM_RIG_RESET_SOFT;
+  } else if (reset_str == "MCALL") {
+    reset = SHIM_RIG_RESET_MCALL;
+  } else if (reset_str == "MASTER") {
+    reset = SHIM_RIG_RESET_MASTER;
+  } else if (reset_str == "VFO") {
+    reset = SHIM_RIG_RESET_VFO;
+  } else {
+    Napi::Error::New(env, "Invalid reset type: " + reset_str +
+                    " (valid: NONE, SOFT, VFO, MCALL, MASTER)").ThrowAsJavaScriptException();
+    return env.Null();
   }
   
   ResetAsyncWorker* asyncWorker = new ResetAsyncWorker(env, this, reset);
@@ -5876,6 +5894,7 @@ Napi::Value NodeHamLib::GetVfoInfo(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
 
   int vfo = parseVfoParameter(info, 0, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
 
   GetVfoInfoAsyncWorker* asyncWorker = new GetVfoInfoAsyncWorker(env, this, vfo);
   asyncWorker->Queue();
@@ -6003,6 +6022,7 @@ Napi::Value NodeHamLib::SendRaw(const Napi::CallbackInfo& info) {
 
 Napi::Value NodeHamLib::GetSpectrumCapabilities(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
   Napi::Object result = Napi::Object::New(env);
 
   result.Set("asyncDataSupported", Napi::Boolean::New(env, shim_rig_is_async_data_supported(my_rig) != 0));
@@ -6214,6 +6234,7 @@ Napi::Value NodeHamLib::GetConf(const Napi::CallbackInfo& info) {
 
 Napi::Value NodeHamLib::GetPassbandNormal(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
 
   if (info.Length() < 1 || !info[0].IsString()) {
     Napi::TypeError::New(env, "Expected (mode: string)").ThrowAsJavaScriptException();
@@ -6228,6 +6249,7 @@ Napi::Value NodeHamLib::GetPassbandNormal(const Napi::CallbackInfo& info) {
 
 Napi::Value NodeHamLib::GetPassbandNarrow(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
 
   if (info.Length() < 1 || !info[0].IsString()) {
     Napi::TypeError::New(env, "Expected (mode: string)").ThrowAsJavaScriptException();
@@ -6242,6 +6264,7 @@ Napi::Value NodeHamLib::GetPassbandNarrow(const Napi::CallbackInfo& info) {
 
 Napi::Value NodeHamLib::GetPassbandWide(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
 
   if (info.Length() < 1 || !info[0].IsString()) {
     Napi::TypeError::New(env, "Expected (mode: string)").ThrowAsJavaScriptException();
@@ -6258,6 +6281,7 @@ Napi::Value NodeHamLib::GetPassbandWide(const Napi::CallbackInfo& info) {
 
 Napi::Value NodeHamLib::GetResolution(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
 
   if (info.Length() < 1 || !info[0].IsString()) {
     Napi::TypeError::New(env, "Expected (mode: string)").ThrowAsJavaScriptException();
@@ -6274,6 +6298,7 @@ Napi::Value NodeHamLib::GetResolution(const Napi::CallbackInfo& info) {
 
 Napi::Value NodeHamLib::GetSupportedParms(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
 
   uint64_t parms = shim_rig_get_caps_has_get_parm(my_rig) | shim_rig_get_caps_has_set_parm(my_rig);
   Napi::Array parmArray = Napi::Array::New(env);
@@ -6295,6 +6320,7 @@ Napi::Value NodeHamLib::GetSupportedParms(const Napi::CallbackInfo& info) {
 
 Napi::Value NodeHamLib::GetSupportedVfoOps(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
 
   int ops = shim_rig_get_caps_vfo_ops(my_rig);
   Napi::Array opsArray = Napi::Array::New(env);
@@ -6321,6 +6347,7 @@ Napi::Value NodeHamLib::GetSupportedVfoOps(const Napi::CallbackInfo& info) {
 
 Napi::Value NodeHamLib::GetSupportedScanTypes(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
 
   int scan = shim_rig_get_caps_has_scan(my_rig);
   Napi::Array scanArray = Napi::Array::New(env);
@@ -6355,6 +6382,7 @@ static Napi::Array ModeBitmaskToArray(Napi::Env env, uint64_t modes) {
 
 Napi::Value NodeHamLib::GetPreampValues(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
   int buf[SHIM_HAMLIB_MAX_MODES];
   int count = shim_rig_get_caps_preamp(my_rig, buf, SHIM_HAMLIB_MAX_MODES);
   Napi::Array arr = Napi::Array::New(env, count);
@@ -6366,6 +6394,7 @@ Napi::Value NodeHamLib::GetPreampValues(const Napi::CallbackInfo& info) {
 
 Napi::Value NodeHamLib::GetAttenuatorValues(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
   int buf[SHIM_HAMLIB_MAX_MODES];
   int count = shim_rig_get_caps_attenuator(my_rig, buf, SHIM_HAMLIB_MAX_MODES);
   Napi::Array arr = Napi::Array::New(env, count);
@@ -6376,19 +6405,26 @@ Napi::Value NodeHamLib::GetAttenuatorValues(const Napi::CallbackInfo& info) {
 }
 
 Napi::Value NodeHamLib::GetMaxRit(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
   return Napi::Number::New(info.Env(), (double)shim_rig_get_caps_max_rit(my_rig));
 }
 
 Napi::Value NodeHamLib::GetMaxXit(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
   return Napi::Number::New(info.Env(), (double)shim_rig_get_caps_max_xit(my_rig));
 }
 
 Napi::Value NodeHamLib::GetMaxIfShift(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
   return Napi::Number::New(info.Env(), (double)shim_rig_get_caps_max_ifshift(my_rig));
 }
 
 Napi::Value NodeHamLib::GetAvailableCtcssTones(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
   unsigned int buf[256];
   int count = shim_rig_get_caps_ctcss_list(my_rig, buf, 256);
   Napi::Array arr = Napi::Array::New(env, count);
@@ -6401,6 +6437,7 @@ Napi::Value NodeHamLib::GetAvailableCtcssTones(const Napi::CallbackInfo& info) {
 
 Napi::Value NodeHamLib::GetAvailableDcsCodes(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
   unsigned int buf[256];
   int count = shim_rig_get_caps_dcs_list(my_rig, buf, 256);
   Napi::Array arr = Napi::Array::New(env, count);
@@ -6412,6 +6449,7 @@ Napi::Value NodeHamLib::GetAvailableDcsCodes(const Napi::CallbackInfo& info) {
 
 Napi::Value NodeHamLib::GetFrequencyRanges(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
 
   shim_freq_range_t rx_buf[30];
   shim_freq_range_t tx_buf[30];
@@ -6442,6 +6480,7 @@ Napi::Value NodeHamLib::GetFrequencyRanges(const Napi::CallbackInfo& info) {
 
 Napi::Value NodeHamLib::GetTuningSteps(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
   shim_mode_value_t buf[20];
   int count = shim_rig_get_caps_tuning_steps(my_rig, buf, 20);
   Napi::Array arr = Napi::Array::New(env, count);
@@ -6456,6 +6495,7 @@ Napi::Value NodeHamLib::GetTuningSteps(const Napi::CallbackInfo& info) {
 
 Napi::Value NodeHamLib::GetFilterList(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
   shim_mode_value_t buf[60];
   int count = shim_rig_get_caps_filters(my_rig, buf, 60);
   Napi::Array arr = Napi::Array::New(env, count);

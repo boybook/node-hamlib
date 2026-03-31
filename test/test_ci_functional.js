@@ -34,6 +34,40 @@ function assert(condition, msg) {
   if (!condition) throw new Error(msg || 'Assertion failed');
 }
 
+function assertThrows(fn, pattern) {
+  let caught = null;
+  try {
+    fn();
+  } catch (error) {
+    caught = error;
+  }
+
+  if (!caught) {
+    throw new Error('Expected function to throw');
+  }
+
+  if (pattern && !pattern.test(caught.message)) {
+    throw new Error(`Unexpected error: ${caught.message}`);
+  }
+}
+
+async function assertRejects(fn, pattern) {
+  let caught = null;
+  try {
+    await fn();
+  } catch (error) {
+    caught = error;
+  }
+
+  if (!caught) {
+    throw new Error('Expected promise to reject');
+  }
+
+  if (pattern && !pattern.test(caught.message)) {
+    throw new Error(`Unexpected error: ${caught.message}`);
+  }
+}
+
 async function run() {
   console.log('=== CI Functional Test ===\n');
 
@@ -80,43 +114,62 @@ async function run() {
   // --- VFO operations ---
   console.log('\n[VFO Operations]');
 
-  await test('setVfo VFO-A', async () => {
-    await rig.setVfo('VFO-A');
+  await test('setVfo VFOA', async () => {
+    await rig.setVfo('VFOA');
   });
 
-  await test('getVfo returns VFO-A', async () => {
+  await test('getVfo returns VFOA', async () => {
     const vfo = await rig.getVfo();
-    assert(vfo === 'VFO-A', `expected VFO-A, got ${vfo}`);
+    assert(vfo === 'VFOA', `expected VFOA, got ${vfo}`);
   });
 
-  await test('setVfo VFO-B', async () => {
-    await rig.setVfo('VFO-B');
+  await test('setVfo VFOB', async () => {
+    await rig.setVfo('VFOB');
   });
 
-  await test('getVfo returns VFO-B', async () => {
+  await test('getVfo returns VFOB', async () => {
     const vfo = await rig.getVfo();
-    assert(vfo === 'VFO-B', `expected VFO-B, got ${vfo}`);
+    assert(vfo === 'VFOB', `expected VFOB, got ${vfo}`);
+  });
+
+  await test('setVfo accepts Hamlib token VFOA', async () => {
+    await rig.setVfo('VFOA');
+    const vfo = await rig.getVfo();
+    assert(vfo === 'VFOA', `expected VFOA, got ${vfo}`);
   });
 
   // --- Frequency operations ---
   console.log('\n[Frequency Operations]');
 
-  await test('setFrequency 144.39MHz on VFO-A', async () => {
-    await rig.setFrequency(144390000, 'VFO-A');
+  await test('setFrequency 144.39MHz on VFOA', async () => {
+    await rig.setFrequency(144390000, 'VFOA');
   });
 
   await test('getFrequency returns 144.39MHz', async () => {
-    const freq = await rig.getFrequency('VFO-A');
+    const freq = await rig.getFrequency('VFOA');
     assert(freq === 144390000, `expected 144390000, got ${freq}`);
   });
 
-  await test('setFrequency 432.1MHz on VFO-B', async () => {
-    await rig.setFrequency(432100000, 'VFO-B');
+  await test('setFrequency 432.1MHz on VFOB', async () => {
+    await rig.setFrequency(432100000, 'VFOB');
   });
 
-  await test('getFrequency VFO-B returns 432.1MHz', async () => {
-    const freq = await rig.getFrequency('VFO-B');
+  await test('getFrequency VFOB returns 432.1MHz', async () => {
+    const freq = await rig.getFrequency('VFOB');
     assert(freq === 432100000, `expected 432100000, got ${freq}`);
+  });
+
+  await test('getFrequency currVFO returns current VFO frequency', async () => {
+    const freq = await rig.getFrequency('currVFO');
+    assert(freq === 144390000, `expected 144390000, got ${freq}`);
+  });
+
+  await test('getFrequency rejects invalid VFO token', async () => {
+    await assertRejects(() => rig.getFrequency('NOT-A-VFO'), /Invalid Hamlib VFO token/);
+  });
+
+  await test('getFrequency rejects empty-string VFO instead of silently falling back', async () => {
+    await assertRejects(() => rig.getFrequency(''), /Invalid Hamlib VFO token/);
   });
 
   // --- PTT operations ---
@@ -249,7 +302,7 @@ async function run() {
 
   await test('getVfoInfo returns object or ENIMPL', async () => {
     try {
-      const info = await rig.getVfoInfo('VFO-A');
+      const info = await rig.getVfoInfo('VFOA');
       assert(typeof info === 'object', `expected object, got ${typeof info}`);
       assert(info.hasOwnProperty('frequency'), 'missing frequency field');
       assert(info.hasOwnProperty('mode'), 'missing mode field');
@@ -432,6 +485,22 @@ async function run() {
     }
   });
 
+  await test('getMemoryChannel requires explicit readOnly flag', async () => {
+    await assertRejects(() => rig.getMemoryChannel(1), /Expected \(channelNumber: number, readOnly: boolean\)/);
+  });
+
+  await test('startScan requires explicit channel argument', async () => {
+    await assertRejects(() => rig.startScan('VFO'), /Expected \(scanType: string, channel: number\)/);
+  });
+
+  await test('recvDtmf requires explicit maxLength', async () => {
+    await assertRejects(() => rig.recvDtmf(), /Expected \(maxLength: number, vfo\?: string\)/);
+  });
+
+  await test('reset requires explicit resetType', async () => {
+    await assertRejects(() => rig.reset(), /Expected \(resetType: string\)/);
+  });
+
   // --- Cleanup ---
   console.log('\n[Cleanup]');
 
@@ -441,6 +510,10 @@ async function run() {
 
   await test('destroy() succeeds', async () => {
     await rig.destroy();
+  });
+
+  await test('sync capability query after destroy throws instead of crashing', () => {
+    assertThrows(() => rig.getSupportedModes(), /destroyed|initialized/);
   });
 
   // --- Summary ---

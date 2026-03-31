@@ -59,9 +59,27 @@ interface AntennaInfo {
 }
 
 /**
- * VFO type
+ * Hamlib VFO token.
+ * 实际支持的 token 取决于具体 backend / 电台型号。
  */
-type VFO = 'VFO-A' | 'VFO-B';
+type VFO =
+  | 'VFOA'
+  | 'VFOB'
+  | 'VFOC'
+  | 'currVFO'
+  | 'VFO'
+  | 'MEM'
+  | 'Main'
+  | 'Sub'
+  | 'TX'
+  | 'RX'
+  | 'MainA'
+  | 'MainB'
+  | 'MainC'
+  | 'SubA'
+  | 'SubB'
+  | 'SubC'
+  | 'Other';
 
 /**
  * Radio mode type
@@ -251,7 +269,7 @@ interface SplitStatusInfo {
   /** Split enabled status */
   enabled: boolean;
   /** TX VFO */
-  txVfo: string;
+  txVfo: VFO;
 }
 
 /**
@@ -410,10 +428,9 @@ declare class HamLib extends EventEmitter {
   /**
    * Set Hamlib debug level (affects all instances globally)
    * Controls the verbosity of Hamlib library debug output.
-   * By default, debug level is set to 0 (NONE) to prevent unwanted output.
    *
    * @param level Debug level:
-   *   - 0 = NONE (no debug output) - default
+   *   - 0 = NONE (no debug output)
    *   - 1 = BUG (serious bug messages only)
    *   - 2 = ERR (error messages)
    *   - 3 = WARN (warning messages)
@@ -421,7 +438,7 @@ declare class HamLib extends EventEmitter {
    *   - 5 = TRACE (trace messages - very detailed)
    * @static
    * @example
-   * // Disable all debug output (default)
+   * // Disable all debug output
    * HamLib.setDebugLevel(0);
    *
    * // Enable verbose debugging for troubleshooting
@@ -451,7 +468,7 @@ declare class HamLib extends EventEmitter {
 
   /**
    * Set VFO (Variable Frequency Oscillator)
-   * @param vfo VFO identifier, typically 'VFO-A' or 'VFO-B'
+   * @param vfo VFO identifier, typically 'VFOA' or 'VFOB'
    * @throws Throws error when device doesn't support or operation fails
    */
   setVfo(vfo: VFO): Promise<number>;
@@ -459,11 +476,11 @@ declare class HamLib extends EventEmitter {
   /**
    * Set frequency
    * @param frequency Frequency value in hertz
-   * @param vfo Optional VFO to set frequency on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to set frequency on ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @example
    * await rig.setFrequency(144390000); // Set to 144.39MHz on current VFO
-   * await rig.setFrequency(144390000, 'VFO-A'); // Set to 144.39MHz on VFO-A
-   * await rig.setFrequency(144390000, 'VFO-B'); // Set to 144.39MHz on VFO-B
+   * await rig.setFrequency(144390000, 'VFOA'); // Set to 144.39MHz on VFOA
+   * await rig.setFrequency(144390000, 'VFOB'); // Set to 144.39MHz on VFOB
    */
   setFrequency(frequency: number, vfo?: VFO): Promise<number>;
 
@@ -471,11 +488,11 @@ declare class HamLib extends EventEmitter {
    * Set radio mode
    * @param mode Radio mode (such as 'USB', 'LSB', 'FM', 'PKTFM')
    * @param bandwidth Optional bandwidth setting ('narrow', 'wide', or default)
-   * @param vfo Optional VFO to set mode on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to set mode on ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @example
    * await rig.setMode('USB');
    * await rig.setMode('FM', 'narrow');
-   * await rig.setMode('USB', 'wide', 'VFO-A');
+   * await rig.setMode('USB', 'wide', 'VFOA');
    */
   setMode(mode: RadioMode, bandwidth?: 'narrow' | 'wide', vfo?: VFO): Promise<number>;
 
@@ -490,16 +507,16 @@ declare class HamLib extends EventEmitter {
    * Get current VFO
    * @returns Current VFO identifier
    */
-  getVfo(): Promise<string>;
+  getVfo(): Promise<VFO>;
 
   /**
    * Get current frequency
-   * @param vfo Optional VFO to get frequency from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to get frequency from ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Current frequency value in hertz
    * @example
    * await rig.getFrequency(); // Get frequency from current VFO
-   * await rig.getFrequency('VFO-A'); // Get frequency from VFO-A
-   * await rig.getFrequency('VFO-B'); // Get frequency from VFO-B
+   * await rig.getFrequency('VFOA'); // Get frequency from VFOA
+   * await rig.getFrequency('VFOB'); // Get frequency from VFOB
    */
   getFrequency(vfo?: VFO): Promise<number>;
 
@@ -512,11 +529,11 @@ declare class HamLib extends EventEmitter {
 
   /**
    * Get current signal strength
-   * @param vfo Optional VFO to get signal strength from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to get signal strength from ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Signal strength value
    * @example
    * const strength = await rig.getStrength(); // Get strength from current VFO
-   * const strengthA = await rig.getStrength('VFO-A'); // Get strength from VFO-A
+   * const strengthA = await rig.getStrength('VFOA'); // Get strength from VFOA
    */
   getStrength(vfo?: VFO): Promise<number>;
 
@@ -550,10 +567,10 @@ declare class HamLib extends EventEmitter {
   /**
    * Get memory channel data
    * @param channelNumber Memory channel number
-   * @param readOnly Whether to read in read-only mode (default: true)
+   * @param readOnly Whether to read in read-only mode
    * @returns Channel data
    */
-  getMemoryChannel(channelNumber: number, readOnly?: boolean): Promise<MemoryChannelInfo>;
+  getMemoryChannel(channelNumber: number, readOnly: boolean): Promise<MemoryChannelInfo>;
 
   /**
    * Select memory channel for operation
@@ -598,15 +615,8 @@ declare class HamLib extends EventEmitter {
   /**
    * Start scanning operation
    * @param scanType Scan type ('VFO', 'MEM', 'PROG', 'DELTA', 'PRIO')
-   * @param callback Callback function
-   */
-  startScan(scanType: ScanType): Promise<number>;
-
-  /**
-   * Start scanning operation with channel
    * @param scanType Scan type ('VFO', 'MEM', 'PROG', 'DELTA', 'PRIO')
    * @param channel Channel number for some scan types
-   * @param callback Callback function
    */
   startScan(scanType: ScanType, channel: number): Promise<number>;
 
@@ -622,15 +632,15 @@ declare class HamLib extends EventEmitter {
    * @param levelType Level type ('AF', 'RF', 'SQL', 'RFPOWER', etc.)
    * @param value Level value (0.0-1.0 typically)
    */
-  setLevel(levelType: LevelType, value: number, vfo?: string): Promise<number>;
+  setLevel(levelType: LevelType, value: number, vfo?: VFO): Promise<number>;
 
   /**
    * Get radio level
    * @param levelType Level type ('AF', 'RF', 'SQL', 'STRENGTH', etc.)
-   * @param vfo Optional VFO ('VFO-A', 'VFO-B', 'currVFO'). Defaults to currVFO.
+   * @param vfo Optional Hamlib VFO token. If not specified, uses current VFO.
    * @returns Level value
    */
-  getLevel(levelType: LevelType, vfo?: string): Promise<number>;
+  getLevel(levelType: LevelType, vfo?: VFO): Promise<number>;
 
   /**
    * Get list of supported level types
@@ -674,13 +684,13 @@ declare class HamLib extends EventEmitter {
   /**
    * Set split mode TX frequency
    * @param txFrequency TX frequency in Hz
-   * @param vfo Optional VFO to set TX frequency on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to set TX frequency on ('VFOA' or 'VFOB'). If not specified, uses current VFO
    */
   setSplitFreq(txFrequency: number, vfo?: VFO): Promise<number>;
 
   /**
    * Get split mode TX frequency
-   * @param vfo Optional VFO to get TX frequency from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to get TX frequency from ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns TX frequency in Hz
    */
   getSplitFreq(vfo?: VFO): Promise<number>;
@@ -688,7 +698,7 @@ declare class HamLib extends EventEmitter {
   /**
    * Set split mode TX mode
    * @param txMode TX mode ('USB', 'LSB', 'FM', etc.)
-   * @param vfo Optional VFO to set TX mode on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to set TX mode on ('VFOA' or 'VFOB'). If not specified, uses current VFO
    */
   setSplitMode(txMode: RadioMode, vfo?: VFO): Promise<number>;
 
@@ -696,13 +706,13 @@ declare class HamLib extends EventEmitter {
    * Set split mode TX mode with width
    * @param txMode TX mode ('USB', 'LSB', 'FM', etc.)
    * @param txWidth TX bandwidth
-   * @param vfo Optional VFO to set TX mode on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to set TX mode on ('VFOA' or 'VFOB'). If not specified, uses current VFO
    */
   setSplitMode(txMode: RadioMode, txWidth: number, vfo?: VFO): Promise<number>;
 
   /**
    * Get split mode TX mode
-   * @param vfo Optional VFO to get TX mode from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to get TX mode from ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns TX mode and width
    */
   getSplitMode(vfo?: VFO): Promise<SplitModeInfo>;
@@ -710,18 +720,18 @@ declare class HamLib extends EventEmitter {
   /**
    * Enable/disable split operation
    * @param enable true to enable split, false to disable
-   * @param rxVfo Optional RX VFO ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
-   * @param txVfo Optional TX VFO ('VFO-A' or 'VFO-B'). If not specified, uses VFO-B
+   * @param rxVfo Optional RX VFO ('VFOA' or 'VFOB'). If not specified, uses current VFO
+   * @param txVfo Optional TX VFO ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @example
    * await rig.setSplit(true);                    // Enable split with defaults
-   * await rig.setSplit(true, 'VFO-A');          // Enable split, RX on VFO-A, TX on VFO-B
-   * await rig.setSplit(true, 'VFO-A', 'VFO-B'); // Enable split, explicit RX and TX VFOs
+   * await rig.setSplit(true, 'VFOA');          // Enable split, RX on VFOA, TX on current VFO
+   * await rig.setSplit(true, 'VFOA', 'VFOB'); // Enable split, explicit RX and TX VFOs
    */
   setSplit(enable: boolean, rxVfo?: VFO, txVfo?: VFO): Promise<number>;
 
   /**
    * Get split operation status
-   * @param vfo Optional VFO to get status from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to get status from ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Split status and TX VFO
    */
   getSplit(vfo?: VFO): Promise<SplitStatusInfo>;
@@ -874,7 +884,7 @@ declare class HamLib extends EventEmitter {
 
   /**
    * Get current PTT status
-   * @param vfo Optional VFO to get PTT status from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to get PTT status from ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns PTT status (true if transmitting, false if receiving)
    * @example
    * const isTransmitting = await rig.getPtt();
@@ -888,7 +898,7 @@ declare class HamLib extends EventEmitter {
 
   /**
    * Get current DCD (Data Carrier Detect) status
-   * @param vfo Optional VFO to get DCD status from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to get DCD status from ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns DCD status (true if carrier detected, false if no carrier)
    * @example
    * const carrierDetected = await rig.getDcd();
@@ -903,7 +913,7 @@ declare class HamLib extends EventEmitter {
   /**
    * Set tuning step
    * @param step Tuning step in Hz
-   * @param vfo Optional VFO to set tuning step on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to set tuning step on ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Success status
    * @example
    * await rig.setTuningStep(25000); // 25 kHz steps
@@ -914,7 +924,7 @@ declare class HamLib extends EventEmitter {
 
   /**
    * Get current tuning step
-   * @param vfo Optional VFO to get tuning step from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to get tuning step from ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Current tuning step in Hz
    * @example
    * const step = await rig.getTuningStep();
@@ -927,7 +937,7 @@ declare class HamLib extends EventEmitter {
   /**
    * Set repeater shift direction
    * @param shift Repeater shift direction ('NONE', 'MINUS', 'PLUS', '-', '+')
-   * @param vfo Optional VFO to set repeater shift on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to set repeater shift on ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Success status
    * @example
    * await rig.setRepeaterShift('PLUS');  // Positive shift (+)
@@ -938,7 +948,7 @@ declare class HamLib extends EventEmitter {
 
   /**
    * Get current repeater shift direction
-   * @param vfo Optional VFO to get repeater shift from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to get repeater shift from ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Current repeater shift direction
    * @example
    * const shift = await rig.getRepeaterShift();
@@ -949,7 +959,7 @@ declare class HamLib extends EventEmitter {
   /**
    * Set repeater offset frequency
    * @param offset Repeater offset in Hz
-   * @param vfo Optional VFO to set repeater offset on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to set repeater offset on ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Success status
    * @example
    * await rig.setRepeaterOffset(600000);  // 600 kHz offset (2m band)
@@ -959,7 +969,7 @@ declare class HamLib extends EventEmitter {
 
   /**
    * Get current repeater offset frequency
-   * @param vfo Optional VFO to get repeater offset from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to get repeater offset from ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Current repeater offset in Hz
    * @example
    * const offset = await rig.getRepeaterOffset();
@@ -972,7 +982,7 @@ declare class HamLib extends EventEmitter {
   /**
    * Set CTCSS tone frequency
    * @param tone CTCSS tone frequency in tenths of Hz (e.g., 1000 for 100.0 Hz)
-   * @param vfo Optional VFO to set tone on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to set tone on ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Success status
    * @example
    * await rig.setCtcssTone(1000); // Set 100.0 Hz CTCSS tone
@@ -982,7 +992,7 @@ declare class HamLib extends EventEmitter {
 
   /**
    * Get current CTCSS tone frequency
-   * @param vfo Optional VFO to get tone from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to get tone from ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Current CTCSS tone frequency in tenths of Hz
    * @example
    * const tone = await rig.getCtcssTone();
@@ -993,7 +1003,7 @@ declare class HamLib extends EventEmitter {
   /**
    * Set DCS code
    * @param code DCS code (e.g., 23, 174, 754)
-   * @param vfo Optional VFO to set code on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to set code on ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Success status
    * @example
    * await rig.setDcsCode(23);  // Set DCS code 023
@@ -1003,7 +1013,7 @@ declare class HamLib extends EventEmitter {
 
   /**
    * Get current DCS code
-   * @param vfo Optional VFO to get code from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to get code from ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Current DCS code
    * @example
    * const code = await rig.getDcsCode();
@@ -1014,7 +1024,7 @@ declare class HamLib extends EventEmitter {
   /**
    * Set CTCSS SQL (squelch) tone frequency
    * @param tone CTCSS SQL tone frequency in tenths of Hz (e.g., 1000 for 100.0 Hz)
-   * @param vfo Optional VFO to set tone on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to set tone on ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Success status
    * @example
    * await rig.setCtcssSql(1000); // Set 100.0 Hz CTCSS SQL tone
@@ -1023,7 +1033,7 @@ declare class HamLib extends EventEmitter {
 
   /**
    * Get current CTCSS SQL tone frequency
-   * @param vfo Optional VFO to get tone from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to get tone from ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Current CTCSS SQL tone frequency in tenths of Hz
    * @example
    * const tone = await rig.getCtcssSql();
@@ -1034,7 +1044,7 @@ declare class HamLib extends EventEmitter {
   /**
    * Set DCS SQL (squelch) code
    * @param code DCS SQL code (e.g., 23, 174, 754)
-   * @param vfo Optional VFO to set code on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to set code on ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Success status
    * @example
    * await rig.setDcsSql(23); // Set DCS SQL code 023
@@ -1043,7 +1053,7 @@ declare class HamLib extends EventEmitter {
 
   /**
    * Get current DCS SQL code
-   * @param vfo Optional VFO to get code from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to get code from ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Current DCS SQL code
    * @example
    * const code = await rig.getDcsSql();
@@ -1079,7 +1089,7 @@ declare class HamLib extends EventEmitter {
   /**
    * Send DTMF digits
    * @param digits DTMF digits to send (0-9, A-D, *, #)
-   * @param vfo Optional VFO to send from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to send from ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Success status
    * @example
    * await rig.sendDtmf('1234'); // Send DTMF sequence 1234
@@ -1089,20 +1099,20 @@ declare class HamLib extends EventEmitter {
 
   /**
    * Receive DTMF digits
-   * @param maxLength Maximum number of digits to receive (default: 32)
-   * @param vfo Optional VFO to receive from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param maxLength Maximum number of digits to receive
+   * @param vfo Optional VFO to receive from ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Received DTMF digits and count
    * @example
    * const result = await rig.recvDtmf(10);
    * console.log(`Received DTMF: ${result.digits} (${result.length} digits)`);
    */
-  recvDtmf(maxLength?: number, vfo?: VFO): Promise<{digits: string, length: number}>;
+  recvDtmf(maxLength: number, vfo?: VFO): Promise<{digits: string, length: number}>;
 
   // Memory Channel Advanced Operations
 
   /**
    * Get current memory channel number
-   * @param vfo Optional VFO to get memory channel from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to get memory channel from ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Current memory channel number
    * @example
    * const currentChannel = await rig.getMem();
@@ -1113,7 +1123,7 @@ declare class HamLib extends EventEmitter {
   /**
    * Set memory bank
    * @param bank Bank number to select
-   * @param vfo Optional VFO to set bank on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to set bank on ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Success status
    * @example
    * await rig.setBank(1); // Select memory bank 1
@@ -1135,7 +1145,7 @@ declare class HamLib extends EventEmitter {
   /**
    * Send Morse code message
    * @param message Morse code message to send (text will be converted to Morse)
-   * @param vfo Optional VFO to send from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to send from ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Success status
    * @example
    * await rig.sendMorse('CQ CQ DE VK3ABC K'); // Send CQ call
@@ -1145,7 +1155,7 @@ declare class HamLib extends EventEmitter {
 
   /**
    * Stop current Morse code transmission
-   * @param vfo Optional VFO to stop ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to stop ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Success status
    * @example
    * await rig.stopMorse(); // Stop ongoing Morse transmission
@@ -1154,7 +1164,7 @@ declare class HamLib extends EventEmitter {
 
   /**
    * Wait for Morse code transmission to complete
-   * @param vfo Optional VFO to wait on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to wait on ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Success status when transmission completes
    * @example
    * await rig.sendMorse('TEST');
@@ -1167,7 +1177,7 @@ declare class HamLib extends EventEmitter {
   /**
    * Play voice memory channel
    * @param channel Voice memory channel number to play
-   * @param vfo Optional VFO to play from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to play from ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Success status
    * @example
    * await rig.sendVoiceMem(1); // Play voice memory channel 1
@@ -1177,7 +1187,7 @@ declare class HamLib extends EventEmitter {
 
   /**
    * Stop voice memory playback
-   * @param vfo Optional VFO to stop ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to stop ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Success status
    * @example
    * await rig.stopVoiceMem(); // Stop ongoing voice memory playback
@@ -1191,7 +1201,7 @@ declare class HamLib extends EventEmitter {
    * @param txFrequency TX frequency in Hz
    * @param txMode TX mode ('USB', 'LSB', 'FM', etc.)
    * @param txWidth TX bandwidth in Hz
-   * @param vfo Optional VFO for split operation ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO for split operation ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Success status
    * @example
    * await rig.setSplitFreqMode(14205000, 'USB', 2400); // Set split: TX on 14.205 MHz USB 2400Hz width
@@ -1201,7 +1211,7 @@ declare class HamLib extends EventEmitter {
 
   /**
    * Get split frequency and mode information
-   * @param vfo Optional VFO to get split info from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to get split info from ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Object containing TX frequency, mode, and width
    * @example
    * const splitInfo = await rig.getSplitFreqMode();
@@ -1214,7 +1224,7 @@ declare class HamLib extends EventEmitter {
   /**
    * Set antenna selection
    * @param antenna Antenna number to select (1-based)
-   * @param vfo Optional VFO to set antenna on ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to set antenna on ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Success status
    * @example
    * await rig.setAntenna(1); // Select antenna 1
@@ -1224,7 +1234,7 @@ declare class HamLib extends EventEmitter {
 
   /**
    * Get comprehensive antenna information
-   * @param vfo Optional VFO to get antenna info from ('VFO-A' or 'VFO-B'). If not specified, uses current VFO
+   * @param vfo Optional VFO to get antenna info from ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Antenna information object containing current, TX, RX antenna settings and option
    * @example
    * const antennaInfo = await rig.getAntenna();
@@ -1264,7 +1274,7 @@ declare class HamLib extends EventEmitter {
 
   /**
    * Reset radio to default state
-   * @param resetType Reset type ('NONE', 'SOFT', 'VFO', 'MCALL', 'MASTER'). Default: 'SOFT'
+   * @param resetType Reset type ('NONE', 'SOFT', 'VFO', 'MCALL', 'MASTER')
    *   - NONE: No reset
    *   - SOFT: Soft reset (preserve some settings)
    *   - VFO: VFO reset
@@ -1274,9 +1284,8 @@ declare class HamLib extends EventEmitter {
    * @example
    * await rig.reset('SOFT');   // Soft reset
    * await rig.reset('MASTER'); // Factory reset (CAUTION: loses all settings!)
-   * await rig.reset();         // Default soft reset
    */
-  reset(resetType?: 'NONE' | 'SOFT' | 'VFO' | 'MCALL' | 'MASTER'): Promise<number>;
+  reset(resetType: 'NONE' | 'SOFT' | 'VFO' | 'MCALL' | 'MASTER'): Promise<number>;
 
   // ===== Rig Info / Spectrum / Conf (async) =====
 
@@ -1301,51 +1310,6 @@ declare class HamLib extends EventEmitter {
   getSpectrumCapabilities(): Promise<SpectrumCapabilities>;
 
   /**
-   * Summarize whether official Hamlib spectrum streaming is usable.
-   */
-  getSpectrumSupportSummary(): Promise<SpectrumSupportSummary>;
-
-  /**
-   * Apply spectrum-related settings using official Hamlib level/function APIs.
-   */
-  configureSpectrum(config?: SpectrumConfig): Promise<SpectrumSupportSummary>;
-
-  /**
-   * Get the current spectrum edge slot if exposed by the backend.
-   */
-  getSpectrumEdgeSlot(): Promise<number>;
-
-  /**
-   * Set the current spectrum edge slot if exposed by the backend.
-   */
-  setSpectrumEdgeSlot(slot: number): Promise<number>;
-
-  /**
-   * Get supported spectrum edge slots.
-   */
-  getSpectrumSupportedEdgeSlots(): Promise<number[]>;
-
-  /**
-   * Read current fixed spectrum edges.
-   */
-  getSpectrumFixedEdges(): Promise<{lowHz: number, highHz: number}>;
-
-  /**
-   * Set current fixed spectrum edges.
-   */
-  setSpectrumFixedEdges(range: {lowHz: number, highHz: number}): Promise<{lowHz: number, highHz: number}>;
-
-  /**
-   * Get a normalized spectrum display state for application use.
-   */
-  getSpectrumDisplayState(): Promise<SpectrumDisplayState>;
-
-  /**
-   * Configure spectrum display state using a normalized application-facing shape.
-   */
-  configureSpectrumDisplay(config?: SpectrumConfig): Promise<SpectrumDisplayState>;
-
-  /**
    * Start receiving official Hamlib spectrum line events.
    */
   startSpectrumStream(callback?: (line: SpectrumLine) => void): Promise<boolean>;
@@ -1356,28 +1320,11 @@ declare class HamLib extends EventEmitter {
   stopSpectrumStream(): Promise<boolean>;
 
   /**
-   * High-level managed spectrum startup.
-   */
-  startManagedSpectrum(config?: SpectrumConfig): Promise<boolean>;
-
-  /**
-   * High-level managed spectrum shutdown.
-   */
-  stopManagedSpectrum(): Promise<boolean>;
-
-  /**
    * Listen for official spectrum line events.
    */
   on(event: 'spectrumLine', listener: (line: SpectrumLine) => void): this;
   once(event: 'spectrumLine', listener: (line: SpectrumLine) => void): this;
   off(event: 'spectrumLine', listener: (line: SpectrumLine) => void): this;
-
-  /**
-   * Listen for managed spectrum state changes.
-   */
-  on(event: 'spectrumStateChanged', listener: (state: { active: boolean }) => void): this;
-  once(event: 'spectrumStateChanged', listener: (state: { active: boolean }) => void): this;
-  off(event: 'spectrumStateChanged', listener: (state: { active: boolean }) => void): this;
 
   /**
    * Listen for asynchronous spectrum errors.
@@ -1597,7 +1544,7 @@ export { ConnectionInfo, ModeInfo, SupportedRigInfo, AntennaInfo, VFO, RadioMode
          ScanType, VfoOperationType, SerialConfigParam, SerialBaudRate, SerialParity,
          SerialHandshake, SerialControlState, PttType, DcdType, SerialConfigOptions,
          SpectrumScopeInfo, SpectrumModeInfo, SpectrumAverageModeInfo, SpectrumLine,
-         SpectrumCapabilities, SpectrumSupportSummary, SpectrumConfig,
+         SpectrumCapabilities, SpectrumSupportSummary, SpectrumConfig, SpectrumDisplayState,
          ClockInfo, VfoInfo, HamLib };
 
 // Support both CommonJS and ES module exports

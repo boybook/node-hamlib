@@ -48,7 +48,7 @@ typedef void* hamlib_shim_handle_t;
 
 /* VFO constants */
 #define SHIM_RIG_VFO_NONE    0
-#define SHIM_RIG_VFO_CURR    ((int)0x40000000)  /* RIG_VFO_CURR */
+#define SHIM_RIG_VFO_CURR    ((int)(1u<<29))    /* RIG_VFO_CURR */
 #define SHIM_RIG_VFO_MEM     ((int)0x10000000)  /* RIG_VFO_MEM */
 #define SHIM_RIG_VFO_A       ((int)(1<<0))      /* RIG_VFO_A */
 #define SHIM_RIG_VFO_B       ((int)(1<<1))      /* RIG_VFO_B */
@@ -408,6 +408,8 @@ SHIM_API int shim_rig_get_freq(hamlib_shim_handle_t h, int vfo, double* freq);
 
 SHIM_API int shim_rig_set_vfo(hamlib_shim_handle_t h, int vfo);
 SHIM_API int shim_rig_get_vfo(hamlib_shim_handle_t h, int* vfo);
+SHIM_API int shim_rig_parse_vfo(const char* vfo_str);
+SHIM_API const char* shim_rig_strvfo(int vfo);
 
 /* ===== Mode control ===== */
 

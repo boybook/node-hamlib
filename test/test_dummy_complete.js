@@ -78,8 +78,8 @@ async function runCompleteTest() {
     // ========== 第二部分：VFO操作 ==========
     console.log('\n📡 第二部分：VFO (可变频率振荡器) 操作');
     
-    await testWithErrorHandling('设置VFO-A', async () => {
-      await rig.setVfo('VFO-A');
+    await testWithErrorHandling('设置VFOA', async () => {
+      await rig.setVfo('VFOA');
       return '设置成功';
     });
     
@@ -88,8 +88,8 @@ async function runCompleteTest() {
       return `当前VFO: ${vfo}`;
     });
     
-    await testWithErrorHandling('设置VFO-B', async () => {
-      await rig.setVfo('VFO-B');
+    await testWithErrorHandling('设置VFOB', async () => {
+      await rig.setVfo('VFOB');
       return '设置成功';
     });
     
@@ -106,14 +106,14 @@ async function runCompleteTest() {
       return `频率: ${(freq/1000000).toFixed(3)} MHz`;
     });
     
-    await testWithErrorHandling('设置VFO-A频率', async () => {
-      await rig.setFrequency(145500000, 'VFO-A');
+    await testWithErrorHandling('设置VFOA频率', async () => {
+      await rig.setFrequency(145500000, 'VFOA');
       return '设置成功';
     });
     
-    await testWithErrorHandling('获取VFO-A频率', async () => {
-      const freq = await rig.getFrequency('VFO-A');
-      return `VFO-A频率: ${(freq/1000000).toFixed(3)} MHz`;
+    await testWithErrorHandling('获取VFOA频率', async () => {
+      const freq = await rig.getFrequency('VFOA');
+      return `VFOA频率: ${(freq/1000000).toFixed(3)} MHz`;
     });
     
     // ========== 第四部分：模式控制 ==========
@@ -134,8 +134,8 @@ async function runCompleteTest() {
       return '设置成功';
     });
     
-    await testWithErrorHandling('设置VFO-A模式', async () => {
-      await rig.setMode('LSB', 'narrow', 'VFO-A');
+    await testWithErrorHandling('设置VFOA模式', async () => {
+      await rig.setMode('LSB', 'narrow', 'VFOA');
       return '设置成功';
     });
     
@@ -165,9 +165,9 @@ async function runCompleteTest() {
       return `信号强度: ${strength}`;
     });
     
-    await testWithErrorHandling('获取VFO-A信号强度', async () => {
-      const strength = await rig.getStrength('VFO-A');
-      return `VFO-A信号强度: ${strength}`;
+    await testWithErrorHandling('获取VFOA信号强度', async () => {
+      const strength = await rig.getStrength('VFOA');
+      return `VFOA信号强度: ${strength}`;
     });
     
     await testWithErrorHandling('获取载波检测状态', async () => {
@@ -230,7 +230,7 @@ async function runCompleteTest() {
     console.log('\n🔀 第九部分：分频 (Split) 操作');
     
     await testWithErrorHandling('启用分频模式', async () => {
-      await rig.setSplit(true, 'VFO-A', 'VFO-B');
+      await rig.setSplit(true, 'VFOA', 'VFOB');
       return '分频启用';
     });
     
@@ -296,7 +296,7 @@ async function runCompleteTest() {
     });
     
     await testWithErrorHandling('设置调谐步进 (12.5kHz)', async () => {
-      await rig.setTuningStep(12500, 'VFO-A');
+      await rig.setTuningStep(12500, 'VFOA');
       return '设置成功';
     });
     
@@ -365,7 +365,7 @@ async function runCompleteTest() {
     console.log('\n🔍 第十四部分：扫描功能');
     
     await testWithErrorHandling('启动VFO扫描', async () => {
-      await rig.startScan('VFO');
+      await rig.startScan('VFO', 0);
       return '扫描启动';
     });
     
@@ -387,7 +387,7 @@ async function runCompleteTest() {
     });
     
     await testWithErrorHandling('获取内存通道1', async () => {
-      const channel = await rig.getMemoryChannel(1);
+      const channel = await rig.getMemoryChannel(1, true);
       return `频率: ${(channel.frequency/1000000).toFixed(3)}MHz, 模式: ${channel.mode}`;
     });
     

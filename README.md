@@ -89,7 +89,7 @@ await rig.setMode('USB');
 const mode = await rig.getMode();
 
 // VFO
-await rig.setVfo('VFO-A');
+await rig.setVfo('VFOA');
 const vfo = await rig.getVfo();
 
 // PTT
@@ -111,7 +111,7 @@ await rig.setMemoryChannel(1, {
 });
 
 // Recall channel
-const channel = await rig.getMemoryChannel(1);
+const channel = await rig.getMemoryChannel(1, true);
 await rig.selectMemoryChannel(1);
 ```
 
@@ -124,7 +124,7 @@ await rig.setXit(-50);               // -50 Hz XIT
 await rig.clearRitXit();             // Clear both
 
 // Scanning
-await rig.startScan('VFO');          // Start VFO scan
+await rig.startScan('VFO', 0);       // Start VFO scan
 await rig.stopScan();                // Stop scan
 
 // Levels (0.0-1.0)
@@ -158,15 +158,17 @@ const reply = await rig.sendRaw(
 Notes:
 - `sendRaw()` is request/response oriented.
 - Continuous spectrum streaming now uses Hamlib's official spectrum callback APIs instead of a raw serial byte subscription.
-- For Icom rigs, start managed spectrum only after `open()`. The built-in helper now follows the validated sequence: register callback, best-effort enable async, configure spectrum, enable `SPECTRUM`, then enable `TRANSCEIVE`.
+- The main `HamLib` class stays a bridge. High-level spectrum helpers live under the `hamlib/spectrum` subpath.
 
 ### Official Spectrum Streaming
 
 ```javascript
 const { HamLib } = require('hamlib');
+const { SpectrumController } = require('hamlib/spectrum');
 
 async function monitorSpectrum() {
   const rig = new HamLib(3085, '/dev/tty.usbmodem11201');
+  const spectrum = new SpectrumController(rig);
 
   await rig.setSerialConfig('rate', '9600');
   await rig.setSerialConfig('data_bits', '8');
@@ -174,12 +176,12 @@ async function monitorSpectrum() {
   await rig.setSerialConfig('serial_parity', 'None');
   await rig.open();
 
-  const support = await rig.getSpectrumSupportSummary();
+  const support = await spectrum.getSpectrumSupportSummary();
   if (!support.supported) {
     throw new Error('Official Hamlib spectrum streaming is not supported by this rig/backend');
   }
 
-  rig.on('spectrumLine', (line) => {
+  spectrum.on('spectrumLine', (line) => {
     console.log({
       centerFreq: line.centerFreq,
       spanHz: line.spanHz,
@@ -187,51 +189,54 @@ async function monitorSpectrum() {
     });
   });
 
-  await rig.startManagedSpectrum({
+  await spectrum.startManagedSpectrum({
     hold: false,
     spanHz: 10000,
+    pumpIntervalMs: 200,
   });
 
   await new Promise((resolve) => setTimeout(resolve, 15000));
 
-  await rig.stopManagedSpectrum();
+  await spectrum.stopManagedSpectrum();
   await rig.close();
 }
 ```
 
 Spectrum API summary:
 
-- `getSpectrumCapabilities()` returns conservative backend metadata exposed by the native addon.
-- `getSpectrumSupportSummary()` returns a product-oriented summary of whether official spectrum streaming is usable on the current rig/backend.
-- `configureSpectrum()` applies supported `SPECTRUM_*` levels and optional `SPECTRUM_HOLD`.
-- `getSpectrumDisplayState()` returns a normalized display state with `mode/span/fixed edges/edge slot`.
-- `configureSpectrumDisplay()` applies a normalized display config and reads back the resulting state.
-- `getSpectrumEdgeSlot()` / `setSpectrumEdgeSlot()` expose backend edge-slot control when available.
-- `getSpectrumFixedEdges()` / `setSpectrumFixedEdges()` expose direct fixed-range control using `SPECTRUM_EDGE_LOW/HIGH`.
-- `startSpectrumStream(callback?)` registers the official Hamlib spectrum callback only.
-- `stopSpectrumStream()` unregisters the official spectrum callback.
-- `startManagedSpectrum(config?)` runs the validated startup sequence for Icom/Hamlib async spectrum.
-- `stopManagedSpectrum()` runs the symmetric shutdown sequence and unregisters the callback.
+- `HamLib.getSpectrumCapabilities()` returns conservative backend metadata exposed by the native addon.
+- `HamLib.startSpectrumStream(callback?)` registers the official Hamlib spectrum callback only.
+- `HamLib.stopSpectrumStream()` unregisters the official spectrum callback.
+- `SpectrumController.getSpectrumSupportSummary()` returns a product-oriented summary of whether official spectrum streaming is usable on the current rig/backend.
+- `SpectrumController.configureSpectrum()` applies supported `SPECTRUM_*` levels and optional `SPECTRUM_HOLD`.
+- `SpectrumController.getSpectrumDisplayState()` returns a normalized display state with `mode/span/fixed edges/edge slot`.
+- `SpectrumController.configureSpectrumDisplay()` applies a normalized display config and reads back the resulting state.
+- `SpectrumController.getSpectrumEdgeSlot()` / `SpectrumController.setSpectrumEdgeSlot()` expose backend edge-slot control when available.
+- `SpectrumController.getSpectrumFixedEdges()` / `SpectrumController.setSpectrumFixedEdges()` expose direct fixed-range control using `SPECTRUM_EDGE_LOW/HIGH`.
+- `SpectrumController.startManagedSpectrum(config?)` runs the validated startup sequence for Icom/Hamlib async spectrum.
+  - `pumpIntervalMs` controls a lightweight helper-side CAT pump. Default `200`; set `0` or `false` to disable.
+- `SpectrumController.stopManagedSpectrum()` runs the symmetric shutdown sequence and unregisters the callback.
 
 Fixed-range example:
 
 ```javascript
-await rig.configureSpectrumDisplay({
+await spectrum.configureSpectrumDisplay({
   mode: 'fixed',
   edgeSlot: 1,
   edgeLowHz: 14074000,
   edgeHighHz: 14077000,
 });
 
-const displayState = await rig.getSpectrumDisplayState();
+const displayState = await spectrum.getSpectrumDisplayState();
 console.log(displayState);
 ```
 
 Emitted events:
 
-- `spectrumLine` carries a single `SpectrumLine` object with frequency edges, mode, and raw bin payload.
-- `spectrumStateChanged` emits `{ active: boolean }` when managed spectrum starts or stops.
-- `spectrumError` is reserved for asynchronous streaming failures.
+- `HamLib` emits `spectrumLine` when `startSpectrumStream()` is used without an explicit callback.
+- `SpectrumController` emits `spectrumLine` for managed spectrum data.
+- `SpectrumController` emits `spectrumStateChanged` when managed spectrum starts or stops.
+- `SpectrumController` emits `spectrumError` when managed startup fails asynchronously.
 
 ### Power and Status
 

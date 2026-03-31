@@ -116,8 +116,8 @@ async function testNetworkConnection() {
         // Test 8: VFO switching (if supported)
         console.log('🔄 Test 8: VFO switching');
         try {
-            const setVfoResult = await networkRig.setVfo('VFO-A');
-            console.log(`   Set VFO-A result: ${setVfoResult}`);
+            const setVfoResult = await networkRig.setVfo('VFOA');
+            console.log(`   Set VFOA result: ${setVfoResult}`);
         } catch (error) {
             console.log(`   Error: ${error.message}`);
         }

@@ -271,6 +271,14 @@ SHIM_API int shim_rig_get_vfo(hamlib_shim_handle_t h, int* vfo) {
     return ret;
 }
 
+SHIM_API int shim_rig_parse_vfo(const char* vfo_str) {
+    return (int)rig_parse_vfo(vfo_str);
+}
+
+SHIM_API const char* shim_rig_strvfo(int vfo) {
+    return rig_strvfo((vfo_t)vfo);
+}
+
 /* ===== Mode control ===== */
 
 SHIM_API int shim_rig_set_mode(hamlib_shim_handle_t h, int vfo, int mode, int width) {
