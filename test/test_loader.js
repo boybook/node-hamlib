@@ -4,7 +4,7 @@
  */
 
 const { HamLib } = require('../index.js');
-const { SpectrumController } = require('../lib/spectrum.js');
+const { SpectrumController } = require('../spectrum.js');
 
 console.log('🧪 测试node-hamlib模块加载和基础功能...\n');
 
@@ -89,6 +89,7 @@ try {
   test('HamLib实例创建成功', () => testRig && typeof testRig === 'object');
   const spectrumController = new SpectrumController(testRig);
   test('SpectrumController实例创建成功', () => spectrumController && typeof spectrumController === 'object');
+  test('spectrum 子路径 CJS 代理可用', () => typeof SpectrumController === 'function');
   
   // 4. 基础方法存在性测试
   console.log('\n🔍 基础方法存在性测试:');

@@ -60,6 +60,4 @@ export type {
   SpectrumSupportSummary,
 };
 
-// @ts-ignore
-export = spectrumModule;
 export default spectrumModule;

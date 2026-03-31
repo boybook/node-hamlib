@@ -1,6 +1,6 @@
 {
   "name": "hamlib",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Node.js bindings for Hamlib rig control with official spectrum streaming support",
   "main": "index.js",
   "module": "lib/index.mjs",
@@ -12,9 +12,16 @@
       "types": "./index.d.ts"
     },
     "./spectrum": {
-      "import": "./lib/spectrum.mjs",
-      "require": "./lib/spectrum.js",
-      "types": "./lib/spectrum.d.ts"
+      "import": "./spectrum.mjs",
+      "require": "./spectrum.js",
+      "types": "./spectrum.d.ts"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "spectrum": [
+        "spectrum.d.ts"
+      ]
     }
   },
   "gypfile": true,
@@ -38,6 +45,9 @@
     "docs/",
     "index.js",
     "index.d.ts",
+    "spectrum.js",
+    "spectrum.mjs",
+    "spectrum.d.ts",
     "binding.gyp",
     "COPYING",
     "README.md"
