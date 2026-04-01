@@ -293,6 +293,44 @@ typedef struct {
     int rig_type;
 } shim_rig_info_t;
 
+#define SHIM_CONF_NAME_MAX 64
+#define SHIM_CONF_LABEL_MAX 128
+#define SHIM_CONF_TOOLTIP_MAX 256
+#define SHIM_CONF_DEFAULT_MAX 128
+#define SHIM_CONF_COMBO_MAX 16
+#define SHIM_CONF_COMBO_VALUE_MAX 64
+#define SHIM_PORT_TYPE_MAX 32
+#define SHIM_PARITY_MAX 32
+#define SHIM_HANDSHAKE_MAX 32
+
+typedef struct {
+    int token;
+    char name[SHIM_CONF_NAME_MAX];
+    char label[SHIM_CONF_LABEL_MAX];
+    char tooltip[SHIM_CONF_TOOLTIP_MAX];
+    char dflt[SHIM_CONF_DEFAULT_MAX];
+    int type;
+    double numeric_min;
+    double numeric_max;
+    double numeric_step;
+    int combo_count;
+    char combo_options[SHIM_CONF_COMBO_MAX][SHIM_CONF_COMBO_VALUE_MAX];
+} shim_confparam_info_t;
+
+typedef struct {
+    char port_type[SHIM_PORT_TYPE_MAX];
+    int serial_rate_min;
+    int serial_rate_max;
+    int serial_data_bits;
+    int serial_stop_bits;
+    char serial_parity[SHIM_PARITY_MAX];
+    char serial_handshake[SHIM_HANDSHAKE_MAX];
+    int write_delay;
+    int post_write_delay;
+    int timeout;
+    int retry;
+} shim_rig_port_caps_t;
+
 typedef struct {
     int id;
     char name[64];
@@ -331,6 +369,8 @@ typedef int (*shim_spectrum_cb_t)(void* handle, const shim_spectrum_line_t* line
 
 /* Rig list callback: (info, data) -> int */
 typedef int (*shim_rig_list_cb_t)(const shim_rig_info_t* info, void* data);
+/* Rig config callback: (info, data) -> int */
+typedef int (*shim_rig_cfg_cb_t)(const shim_confparam_info_t* info, void* data);
 
 /* ===== Lifecycle functions ===== */
 
@@ -347,6 +387,8 @@ SHIM_API int  shim_rig_get_debug(void);
 SHIM_API const char* shim_rig_get_version(void);
 SHIM_API int  shim_rig_load_all_backends(void);
 SHIM_API int  shim_rig_list_foreach(shim_rig_list_cb_t cb, void* data);
+SHIM_API int  shim_rig_cfgparams_foreach(hamlib_shim_handle_t h, shim_rig_cfg_cb_t cb, void* data);
+SHIM_API int  shim_rig_get_port_caps(hamlib_shim_handle_t h, shim_rig_port_caps_t* out_caps);
 SHIM_API const char* shim_rig_strstatus(int status);
 
 /* ===== Port configuration (before open) ===== */

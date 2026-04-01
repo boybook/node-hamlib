@@ -40,6 +40,23 @@ struct RigListData {
   Napi::Env env;
 };
 
+struct RigConfigFieldDescriptor {
+  int token;
+  std::string name;
+  std::string label;
+  std::string tooltip;
+  std::string defaultValue;
+  int type;
+  double numericMin;
+  double numericMax;
+  double numericStep;
+  std::vector<std::string> options;
+};
+
+struct RigConfigSchemaData {
+  std::vector<RigConfigFieldDescriptor> fields;
+};
+
 using namespace Napi;
 
 Napi::FunctionReference NodeHamLib::constructor;
@@ -53,6 +70,31 @@ static std::string publicVfoToken(int vfo) {
     return "UNKNOWN";
   }
   return rawToken;
+}
+
+static const char* publicConfTypeName(int type) {
+  switch (type) {
+    case 0:
+      return "string";
+    case 1:
+      return "combo";
+    case 2:
+      return "numeric";
+    case 3:
+      return "checkbutton";
+    case 4:
+      return "button";
+    case 5:
+      return "binary";
+    case 6:
+      return "int";
+    default:
+      return "unknown";
+  }
+}
+
+static bool hasPositiveValue(int value) {
+  return value > 0;
 }
 
 static int parseVfoString(Napi::Env env, const std::string& vfoToken) {
@@ -3832,6 +3874,8 @@ Napi::Function NodeHamLib::GetClass(Napi::Env env) {
       NodeHamLib::InstanceMethod("setDcdType", & NodeHamLib::SetDcdType),
       NodeHamLib::InstanceMethod("getDcdType", & NodeHamLib::GetDcdType),
       NodeHamLib::InstanceMethod("getSupportedSerialConfigs", & NodeHamLib::GetSupportedSerialConfigs),
+      NodeHamLib::InstanceMethod("getConfigSchema", & NodeHamLib::GetConfigSchema),
+      NodeHamLib::InstanceMethod("getPortCaps", & NodeHamLib::GetPortCaps),
       
       // Power Control
       NodeHamLib::InstanceMethod("setPowerstat", & NodeHamLib::SetPowerstat),
@@ -4220,7 +4264,7 @@ Napi::Value NodeHamLib::GetSupportedSerialConfigs(const Napi::CallbackInfo& info
   pttTypeOptions[5u] = Napi::String::New(env, "GPIO");
   pttTypeOptions[6u] = Napi::String::New(env, "GPION");
   pttTypeOptions[7u] = Napi::String::New(env, "NONE");
-  configs.Set("intype", pttTypeOptions);
+  configs.Set("ptt_type", pttTypeOptions);
   
   // DCD type options
   Napi::Array dcdTypeOptions = Napi::Array::New(env, 9);
@@ -4233,9 +4277,122 @@ Napi::Value NodeHamLib::GetSupportedSerialConfigs(const Napi::CallbackInfo& info
   dcdTypeOptions[6u] = Napi::String::New(env, "GPIO");
   dcdTypeOptions[7u] = Napi::String::New(env, "GPION");
   dcdTypeOptions[8u] = Napi::String::New(env, "NONE");
-  configs.Set("intype", dcdTypeOptions);
+  configs.Set("dcd_type", dcdTypeOptions);
   
   return configs;
+}
+
+int NodeHamLib::rig_config_callback(const shim_confparam_info_t* info, void* data) {
+  RigConfigSchemaData* schema_data = static_cast<RigConfigSchemaData*>(data);
+
+  if (!schema_data || !info) {
+    return 0;
+  }
+
+  RigConfigFieldDescriptor field;
+  field.token = info->token;
+  field.name = info->name;
+  field.label = info->label;
+  field.tooltip = info->tooltip;
+  field.defaultValue = info->dflt;
+  field.type = info->type;
+  field.numericMin = info->numeric_min;
+  field.numericMax = info->numeric_max;
+  field.numericStep = info->numeric_step;
+
+  for (int i = 0; i < info->combo_count; ++i) {
+    field.options.emplace_back(info->combo_options[i]);
+  }
+
+  schema_data->fields.push_back(field);
+  return 1;
+}
+
+Napi::Value NodeHamLib::GetConfigSchema(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
+
+  RigConfigSchemaData schemaData{};
+  int result = shim_rig_cfgparams_foreach(my_rig, rig_config_callback, &schemaData);
+
+  if (result != SHIM_RIG_OK) {
+    Napi::Error::New(env, shim_rigerror(result)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+
+  Napi::Array schemaArray = Napi::Array::New(env, schemaData.fields.size());
+  for (size_t i = 0; i < schemaData.fields.size(); ++i) {
+    const RigConfigFieldDescriptor& descriptor = schemaData.fields[i];
+    Napi::Object field = Napi::Object::New(env);
+    field.Set("token", Napi::Number::New(env, descriptor.token));
+    field.Set("name", Napi::String::New(env, descriptor.name));
+    field.Set("label", Napi::String::New(env, descriptor.label));
+    field.Set("tooltip", Napi::String::New(env, descriptor.tooltip));
+    field.Set("defaultValue", Napi::String::New(env, descriptor.defaultValue));
+    field.Set("type", Napi::String::New(env, publicConfTypeName(descriptor.type)));
+
+    if (descriptor.type == 2 || descriptor.type == 6) {
+      Napi::Object numeric = Napi::Object::New(env);
+      numeric.Set("min", Napi::Number::New(env, descriptor.numericMin));
+      numeric.Set("max", Napi::Number::New(env, descriptor.numericMax));
+      numeric.Set("step", Napi::Number::New(env, descriptor.numericStep));
+      field.Set("numeric", numeric);
+    }
+
+    if (!descriptor.options.empty()) {
+      Napi::Array options = Napi::Array::New(env, descriptor.options.size());
+      for (size_t optionIndex = 0; optionIndex < descriptor.options.size(); ++optionIndex) {
+        options[static_cast<uint32_t>(optionIndex)] =
+            Napi::String::New(env, descriptor.options[optionIndex]);
+      }
+      field.Set("options", options);
+    }
+
+    schemaArray[static_cast<uint32_t>(i)] = field;
+  }
+
+  return schemaArray;
+}
+
+Napi::Value NodeHamLib::GetPortCaps(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
+
+  shim_rig_port_caps_t caps{};
+  int result = shim_rig_get_port_caps(my_rig, &caps);
+
+  if (result != SHIM_RIG_OK) {
+    Napi::Error::New(env, shim_rigerror(result)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+
+  Napi::Object portCaps = Napi::Object::New(env);
+  portCaps.Set("portType", Napi::String::New(env, caps.port_type));
+  portCaps.Set("writeDelay", Napi::Number::New(env, caps.write_delay));
+  portCaps.Set("postWriteDelay", Napi::Number::New(env, caps.post_write_delay));
+  portCaps.Set("timeout", Napi::Number::New(env, caps.timeout));
+  portCaps.Set("retry", Napi::Number::New(env, caps.retry));
+
+  if (hasPositiveValue(caps.serial_rate_min)) {
+    portCaps.Set("serialRateMin", Napi::Number::New(env, caps.serial_rate_min));
+  }
+  if (hasPositiveValue(caps.serial_rate_max)) {
+    portCaps.Set("serialRateMax", Napi::Number::New(env, caps.serial_rate_max));
+  }
+  if (hasPositiveValue(caps.serial_data_bits)) {
+    portCaps.Set("serialDataBits", Napi::Number::New(env, caps.serial_data_bits));
+  }
+  if (hasPositiveValue(caps.serial_stop_bits)) {
+    portCaps.Set("serialStopBits", Napi::Number::New(env, caps.serial_stop_bits));
+  }
+  if (caps.serial_parity[0] != '\0' && std::string(caps.serial_parity) != "Unknown") {
+    portCaps.Set("serialParity", Napi::String::New(env, caps.serial_parity));
+  }
+  if (caps.serial_handshake[0] != '\0' && std::string(caps.serial_handshake) != "Unknown") {
+    portCaps.Set("serialHandshake", Napi::String::New(env, caps.serial_handshake));
+  }
+
+  return portCaps;
 }
 
 // Power Control Methods
@@ -6156,11 +6313,7 @@ private:
 
 Napi::Value NodeHamLib::SetConf(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
 
   if (info.Length() < 2 || !info[0].IsString() || !info[1].IsString()) {
     Napi::TypeError::New(env, "Expected (name: string, value: string)").ThrowAsJavaScriptException();
@@ -6212,11 +6365,7 @@ private:
 
 Napi::Value NodeHamLib::GetConf(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
 
   if (info.Length() < 1 || !info[0].IsString()) {
     Napi::TypeError::New(env, "Expected (name: string)").ThrowAsJavaScriptException();

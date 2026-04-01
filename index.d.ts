@@ -378,6 +378,62 @@ interface SerialConfigOptions {
   dcd_type: string[];
 }
 
+type HamlibConfigFieldType =
+  | 'string'
+  | 'combo'
+  | 'numeric'
+  | 'checkbutton'
+  | 'button'
+  | 'binary'
+  | 'int'
+  | 'unknown';
+
+interface HamlibConfigFieldDescriptor {
+  token: number;
+  name: string;
+  label: string;
+  tooltip: string;
+  defaultValue: string;
+  type: HamlibConfigFieldType;
+  numeric?: {
+    min: number;
+    max: number;
+    step: number;
+  };
+  options?: string[];
+}
+
+type HamlibPortType =
+  | 'none'
+  | 'serial'
+  | 'network'
+  | 'device'
+  | 'packet'
+  | 'dtmf'
+  | 'ultra'
+  | 'rpc'
+  | 'parallel'
+  | 'usb'
+  | 'udp-network'
+  | 'cm108'
+  | 'gpio'
+  | 'gpion'
+  | 'other';
+
+interface HamlibPortCaps {
+  portType: HamlibPortType;
+  serialRateMin?: number;
+  serialRateMax?: number;
+  serialDataBits?: number;
+  serialStopBits?: number;
+  serialParity?: string;
+  serialHandshake?: string;
+  writeDelay: number;
+  postWriteDelay: number;
+  timeout: number;
+  retry: number;
+}
+
 /**
  * HamLib class - for controlling amateur radio devices
  */
@@ -855,6 +911,18 @@ declare class HamLib extends EventEmitter {
    * console.log('Supported PTT types:', configs.ptt_type);
    */
   getSupportedSerialConfigs(): SerialConfigOptions;
+
+  /**
+   * Get backend-specific configuration schema for the current rig model.
+   * This can be queried before opening the connection and is suitable for
+   * driving dynamic configuration UIs.
+   */
+  getConfigSchema(): HamlibConfigFieldDescriptor[];
+
+  /**
+   * Get backend port capabilities and effective connection defaults.
+   */
+  getPortCaps(): HamlibPortCaps;
 
   // Power Control
 
@@ -1543,6 +1611,7 @@ export { ConnectionInfo, ModeInfo, SupportedRigInfo, AntennaInfo, VFO, RadioMode
          MemoryChannelInfo, SplitModeInfo, SplitStatusInfo, LevelType, FunctionType,
          ScanType, VfoOperationType, SerialConfigParam, SerialBaudRate, SerialParity,
          SerialHandshake, SerialControlState, PttType, DcdType, SerialConfigOptions,
+         HamlibConfigFieldType, HamlibConfigFieldDescriptor, HamlibPortType, HamlibPortCaps,
          SpectrumScopeInfo, SpectrumModeInfo, SpectrumAverageModeInfo, SpectrumLine,
          SpectrumCapabilities, SpectrumSupportSummary, SpectrumConfig, SpectrumDisplayState,
          ClockInfo, VfoInfo, HamLib };

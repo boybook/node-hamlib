@@ -101,6 +101,50 @@ async function run() {
     assert(info.originalModel === 1, `model should be 1, got ${info.originalModel}`);
   });
 
+  await test('getConfigSchema works before open', () => {
+    const schema = rig.getConfigSchema();
+    assert(Array.isArray(schema), 'schema should be an array');
+    assert(schema.length > 0, 'schema should not be empty');
+    assert(typeof schema[0].name === 'string', 'schema item missing name');
+    assert(schema.some((field) => field.name === 'rig_pathname'), 'schema should include rig_pathname');
+  });
+
+  await test('getPortCaps works before open', () => {
+    const caps = rig.getPortCaps();
+    assert(caps && typeof caps === 'object', 'caps should be an object');
+    assert(typeof caps.portType === 'string', 'caps.portType should be a string');
+    assert(typeof caps.timeout === 'number', 'caps.timeout should be a number');
+  });
+
+  await test('FlexRadio direct backend schema exposes network endpoint fields', async () => {
+    const flexRig = new HamLib(2036);
+    try {
+      const schema = flexRig.getConfigSchema();
+      const caps = flexRig.getPortCaps();
+      assert(schema.some((field) => field.name === 'rig_pathname'), 'Flex schema should include rig_pathname');
+      assert(schema.some((field) => field.name === 'client'), 'Flex schema should include client');
+      assert(caps.portType === 'network', `Flex port type should be network, got ${caps.portType}`);
+    } finally {
+      await flexRig.destroy();
+    }
+  });
+
+  await test('IC-705 port caps expose serial defaults', async () => {
+    const ic705 = new HamLib(3085);
+    try {
+      const caps = ic705.getPortCaps();
+      assert(caps.portType === 'serial', `IC-705 port type should be serial, got ${caps.portType}`);
+      assert(caps.serialRateMax === 19200, `IC-705 serialRateMax should be 19200, got ${caps.serialRateMax}`);
+      assert(caps.serialDataBits === 8, `IC-705 serialDataBits should be 8, got ${caps.serialDataBits}`);
+    } finally {
+      await ic705.destroy();
+    }
+  });
+
+  await test('setConf works before open', async () => {
+    await rig.setConf('rig_pathname', '/dev/null');
+  });
+
   await test('open() succeeds', async () => {
     const result = await rig.open();
     assert(result === 0, `expected 0, got ${result}`);

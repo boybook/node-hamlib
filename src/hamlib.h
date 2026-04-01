@@ -99,6 +99,8 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
   Napi::Value SetDcdType(const Napi::CallbackInfo&);
   Napi::Value GetDcdType(const Napi::CallbackInfo&);
   Napi::Value GetSupportedSerialConfigs(const Napi::CallbackInfo&);
+  Napi::Value GetConfigSchema(const Napi::CallbackInfo&);
+  Napi::Value GetPortCaps(const Napi::CallbackInfo&);
 
   // Power Control
   Napi::Value SetPowerstat(const Napi::CallbackInfo&);
@@ -242,6 +244,7 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
 
   // Static callback helper for shim_rig_list_foreach
   static int rig_list_callback(const shim_rig_info_t* info, void* data);
+  static int rig_config_callback(const shim_confparam_info_t* info, void* data);
 
   void EmitSpectrumLine(const shim_spectrum_line_t& line);
   void StopSpectrumStreamInternal();

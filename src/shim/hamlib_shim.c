@@ -66,6 +66,19 @@ struct shim_list_adapter {
     void* user_data;
 };
 
+struct shim_cfg_adapter {
+    RIG* rig;
+    shim_rig_cfg_cb_t user_cb;
+    void* user_data;
+};
+
+static void shim_copy_string(char* dest, size_t dest_size, const char* src) {
+    if (!dest || dest_size == 0) return;
+    if (!src) src = "";
+    strncpy(dest, src, dest_size - 1);
+    dest[dest_size - 1] = '\0';
+}
+
 static int shim_list_foreach_adapter(const struct rig_caps *caps, void *data) {
     struct shim_list_adapter *adapter = (struct shim_list_adapter*)data;
     shim_rig_info_t info;
@@ -83,6 +96,137 @@ SHIM_API int shim_rig_list_foreach(shim_rig_list_cb_t cb, void* data) {
     adapter.user_cb = cb;
     adapter.user_data = data;
     return rig_list_foreach(shim_list_foreach_adapter, &adapter);
+}
+
+static int shim_cfg_foreach_adapter(const struct confparams* param, rig_ptr_t data) {
+    struct shim_cfg_adapter* adapter = (struct shim_cfg_adapter*)data;
+    const struct confparams* lookup;
+    shim_confparam_info_t info;
+    int i;
+
+    if (!adapter || !adapter->user_cb || !param) {
+        return 0;
+    }
+
+    if (!adapter->rig || !param->name) {
+        return 1;
+    }
+
+    lookup = rig_confparam_lookup(adapter->rig, param->name);
+    if (!lookup || lookup->token != param->token) {
+        return 1;
+    }
+
+    memset(&info, 0, sizeof(info));
+    info.token = (int)param->token;
+    info.type = (int)param->type;
+
+    shim_copy_string(info.name, sizeof(info.name), param->name);
+    shim_copy_string(info.label, sizeof(info.label), param->label);
+    shim_copy_string(info.tooltip, sizeof(info.tooltip), param->tooltip);
+    shim_copy_string(info.dflt, sizeof(info.dflt), param->dflt);
+
+    if (param->type == RIG_CONF_NUMERIC || param->type == RIG_CONF_INT) {
+        info.numeric_min = param->u.n.min;
+        info.numeric_max = param->u.n.max;
+        info.numeric_step = param->u.n.step;
+    } else if (param->type == RIG_CONF_COMBO) {
+        for (i = 0; i < RIG_COMBO_MAX && i < SHIM_CONF_COMBO_MAX; ++i) {
+            if (!param->u.c.combostr[i] || !*param->u.c.combostr[i]) {
+                break;
+            }
+
+            shim_copy_string(
+                info.combo_options[i],
+                sizeof(info.combo_options[i]),
+                param->u.c.combostr[i]
+            );
+            info.combo_count++;
+        }
+    }
+
+    return adapter->user_cb(&info, adapter->user_data);
+}
+
+SHIM_API int shim_rig_cfgparams_foreach(hamlib_shim_handle_t h, shim_rig_cfg_cb_t cb, void* data) {
+    RIG* rig = (RIG*)h;
+    struct shim_cfg_adapter adapter;
+
+    if (!rig || !cb) {
+        return -RIG_EINVAL;
+    }
+
+    adapter.rig = rig;
+    adapter.user_cb = cb;
+    adapter.user_data = data;
+
+    return rig_token_foreach(rig, shim_cfg_foreach_adapter, &adapter);
+}
+
+static const char* shim_port_type_name(enum rig_port_e port_type) {
+    switch (port_type) {
+        case RIG_PORT_NONE: return "none";
+        case RIG_PORT_SERIAL: return "serial";
+        case RIG_PORT_NETWORK: return "network";
+        case RIG_PORT_DEVICE: return "device";
+        case RIG_PORT_PACKET: return "packet";
+        case RIG_PORT_DTMF: return "dtmf";
+        case RIG_PORT_ULTRA: return "ultra";
+        case RIG_PORT_RPC: return "rpc";
+        case RIG_PORT_PARALLEL: return "parallel";
+        case RIG_PORT_USB: return "usb";
+        case RIG_PORT_UDP_NETWORK: return "udp-network";
+        case RIG_PORT_CM108: return "cm108";
+        case RIG_PORT_GPIO: return "gpio";
+        case RIG_PORT_GPION: return "gpion";
+        default: return "other";
+    }
+}
+
+static const char* shim_serial_parity_name(enum serial_parity_e parity) {
+    switch (parity) {
+        case RIG_PARITY_NONE: return "None";
+        case RIG_PARITY_ODD: return "Odd";
+        case RIG_PARITY_EVEN: return "Even";
+        case RIG_PARITY_MARK: return "Mark";
+        case RIG_PARITY_SPACE: return "Space";
+        default: return "Unknown";
+    }
+}
+
+static const char* shim_serial_handshake_name(enum serial_handshake_e handshake) {
+    switch (handshake) {
+        case RIG_HANDSHAKE_NONE: return "None";
+        case RIG_HANDSHAKE_XONXOFF: return "XONXOFF";
+        case RIG_HANDSHAKE_HARDWARE: return "Hardware";
+        default: return "Unknown";
+    }
+}
+
+SHIM_API int shim_rig_get_port_caps(hamlib_shim_handle_t h, shim_rig_port_caps_t* out_caps) {
+    RIG* rig = (RIG*)h;
+    const struct rig_caps* caps;
+
+    if (!rig || !out_caps || !rig->caps) {
+        return -RIG_EINVAL;
+    }
+
+    caps = rig->caps;
+    memset(out_caps, 0, sizeof(*out_caps));
+
+    shim_copy_string(out_caps->port_type, sizeof(out_caps->port_type), shim_port_type_name(caps->port_type));
+    out_caps->serial_rate_min = caps->serial_rate_min;
+    out_caps->serial_rate_max = caps->serial_rate_max;
+    out_caps->serial_data_bits = caps->serial_data_bits;
+    out_caps->serial_stop_bits = caps->serial_stop_bits;
+    shim_copy_string(out_caps->serial_parity, sizeof(out_caps->serial_parity), shim_serial_parity_name(caps->serial_parity));
+    shim_copy_string(out_caps->serial_handshake, sizeof(out_caps->serial_handshake), shim_serial_handshake_name(caps->serial_handshake));
+    out_caps->write_delay = caps->write_delay;
+    out_caps->post_write_delay = caps->post_write_delay;
+    out_caps->timeout = caps->timeout;
+    out_caps->retry = caps->retry;
+
+    return RIG_OK;
 }
 
 SHIM_API const char* shim_rig_strstatus(int status) {

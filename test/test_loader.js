@@ -132,7 +132,7 @@ try {
   console.log('\n🆕 补齐 API 方法存在性测试:');
   const newApiMethods = [
     'getInfo', 'sendRaw', 'getSpectrumCapabilities',
-    'startSpectrumStream', 'stopSpectrumStream', 'setConf', 'getConf',
+    'startSpectrumStream', 'stopSpectrumStream', 'setConf', 'getConf', 'getConfigSchema', 'getPortCaps',
     'getPassbandNormal', 'getPassbandNarrow', 'getPassbandWide',
     'getResolution',
     'getSupportedParms', 'getSupportedVfoOps', 'getSupportedScanTypes'
