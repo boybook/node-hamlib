@@ -6,7 +6,7 @@
  * Tests core API operations to ensure the native addon is functional.
  */
 
-const { HamLib } = require('../index.js');
+const { HamLib, Rotator } = require('../index.js');
 
 let passed = 0;
 let failed = 0;
@@ -365,6 +365,25 @@ async function run() {
     assert(typeof info === 'string', `expected string, got ${typeof info}`);
   });
 
+  // --- Antenna ---
+  console.log('\n[Antenna]');
+
+  await test('setAntenna accepts 1-based antenna numbers', async () => {
+    await rig.setAntenna(3);
+  });
+
+  await test('getAntenna returns 1-based antenna numbers', async () => {
+    const antenna = await rig.getAntenna();
+    assert(antenna.currentAntenna === 3, `expected currentAntenna 3, got ${antenna.currentAntenna}`);
+  });
+
+  await test('setAntenna accepts option and VFO overload', async () => {
+    await rig.setAntenna(2, 7, 'VFOA');
+    const antenna = await rig.getAntenna('VFOA');
+    assert(antenna.currentAntenna === 2, `expected currentAntenna 2, got ${antenna.currentAntenna}`);
+    assert(antenna.option === 7, `expected option 7, got ${antenna.option}`);
+  });
+
   // --- New API: sendRaw ---
   console.log('\n[Send Raw]');
 
@@ -545,6 +564,108 @@ async function run() {
     await assertRejects(() => rig.reset(), /Expected \(resetType: string\)/);
   });
 
+  // --- Rotator ---
+  console.log('\n[Rotator]');
+
+  await test('Rotator.getSupportedRotators returns non-empty array', () => {
+    const rotators = Rotator.getSupportedRotators();
+    assert(Array.isArray(rotators) && rotators.length > 0, `got ${rotators.length} rotators`);
+    assert(rotators[0].rotModel !== undefined, 'rotator entry missing rotModel');
+  });
+
+  const rotator = new Rotator(1);
+
+  await test('rotator constructor creates instance', () => {
+    assert(rotator !== null && rotator !== undefined);
+  });
+
+  await test('rotator getConfigSchema works before open', () => {
+    const schema = rotator.getConfigSchema();
+    assert(Array.isArray(schema), 'schema should be an array');
+    assert(schema.length > 0, 'schema should not be empty');
+    assert(schema.some((field) => field.name === 'rot_pathname'), 'schema should include rot_pathname');
+  });
+
+  await test('rotator getPortCaps works before open', () => {
+    const caps = rotator.getPortCaps();
+    assert(caps && typeof caps === 'object', 'caps should be an object');
+    assert(typeof caps.portType === 'string', 'caps.portType should be a string');
+  });
+
+  await test('rotator setConf works before open', async () => {
+    await rotator.setConf('rot_pathname', '/dev/null');
+  });
+
+  await test('rotator open() succeeds', async () => {
+    const result = await rotator.open();
+    assert(result === 0, `expected 0, got ${result}`);
+  });
+
+  await test('rotator getConnectionInfo after open', () => {
+    const info = rotator.getConnectionInfo();
+    assert(info.isOpen === true, 'should be open');
+  });
+
+  await test('rotator getRotatorCaps returns expected shape', () => {
+    const caps = rotator.getRotatorCaps();
+    assert(typeof caps.rotType === 'string', `expected rotType string, got ${typeof caps.rotType}`);
+    assert(typeof caps.minAz === 'number', 'missing minAz');
+    assert(Array.isArray(caps.supportedStatuses), 'supportedStatuses should be array');
+  });
+
+  await test('rotator getSupportedLevels includes SPEED', () => {
+    const levels = rotator.getSupportedLevels();
+    assert(Array.isArray(levels), `expected array, got ${typeof levels}`);
+    assert(levels.includes('SPEED'), `expected SPEED in ${levels.join(', ')}`);
+  });
+
+  await test('rotator setPosition/getPosition round trip', async () => {
+    await rotator.setPosition(120, 30);
+    const position = await rotator.getPosition();
+    assert(typeof position.azimuth === 'number', 'missing azimuth');
+    assert(typeof position.elevation === 'number', 'missing elevation');
+  });
+
+  await test('rotator move/stop succeeds', async () => {
+    await rotator.move('RIGHT', 2);
+    await rotator.stop();
+  });
+
+  await test('rotator park succeeds', async () => {
+    await rotator.park();
+  });
+
+  await test('rotator reset succeeds', async () => {
+    await rotator.reset('ALL');
+  });
+
+  await test('rotator getInfo returns string', async () => {
+    const info = await rotator.getInfo();
+    assert(typeof info === 'string', `expected string, got ${typeof info}`);
+  });
+
+  await test('rotator getStatus returns object', async () => {
+    const status = await rotator.getStatus();
+    assert(typeof status === 'object', `expected object, got ${typeof status}`);
+    assert(Array.isArray(status.flags), 'flags should be array');
+  });
+
+  await test('rotator setLevel/getLevel on SPEED', async () => {
+    await rotator.setLevel('SPEED', 3);
+    const speed = await rotator.getLevel('SPEED');
+    assert(typeof speed === 'number', `expected number, got ${typeof speed}`);
+  });
+
+  await test('rotator getSupportedFunctions returns array', () => {
+    const funcs = rotator.getSupportedFunctions();
+    assert(Array.isArray(funcs), `expected array, got ${typeof funcs}`);
+  });
+
+  await test('rotator getSupportedParms returns array', () => {
+    const parms = rotator.getSupportedParms();
+    assert(Array.isArray(parms), `expected array, got ${typeof parms}`);
+  });
+
   // --- Cleanup ---
   console.log('\n[Cleanup]');
 
@@ -558,6 +679,18 @@ async function run() {
 
   await test('sync capability query after destroy throws instead of crashing', () => {
     assertThrows(() => rig.getSupportedModes(), /destroyed|initialized/);
+  });
+
+  await test('rotator close() succeeds', async () => {
+    await rotator.close();
+  });
+
+  await test('rotator destroy() succeeds', async () => {
+    await rotator.destroy();
+  });
+
+  await test('rotator sync capability query after destroy throws instead of crashing', () => {
+    assertThrows(() => rotator.getRotatorCaps(), /destroyed|initialized/);
   });
 
   // --- Summary ---

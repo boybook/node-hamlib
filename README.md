@@ -8,6 +8,8 @@ Control amateur radio transceivers from Node.js using the [Hamlib](https://hamli
 - **Full Async/Promise API** - Non-blocking operations with async/await support  
 - **Comprehensive Serial Control** - 13 parameters for complete serial port configuration
 - **Multiple Connections** - Serial ports, network (rigctld), direct control
+- **Rotator Bridge** - Control antenna rotators through Hamlib's `rot_*` API with the same Promise-first bridge style
+- **Antenna Switching** - Rig antenna APIs now use true 1-based antenna numbers and optional antenna option values
 - **Official Spectrum Streaming** - Wraps Hamlib's official spectrum callback API with Promise helpers and typed events
 - **TypeScript Ready** - Complete type definitions included
 - **Cross-platform** - Windows, Linux, macOS
@@ -38,7 +40,7 @@ For faster installation or offline environments, you can manually install precom
 ## Quick Start
 
 ```javascript
-const { HamLib } = require('hamlib');
+const { HamLib, Rotator } = require('hamlib');
 
 async function main() {
   // Create rig instance (model 1035 = FT-991A)
@@ -55,6 +57,13 @@ async function main() {
   console.log(`${freq/1000000} MHz ${mode.mode}`);
   
   await rig.close();
+
+  // Create rotator instance (model 1 = Dummy rotator)
+  const rotator = new Rotator(1);
+  await rotator.open();
+  await rotator.setPosition(180, 30);
+  console.log(await rotator.getPosition());
+  await rotator.close();
 }
 
 main().catch(console.error);
@@ -75,6 +84,27 @@ const rig = new HamLib(1035, 'localhost:4532'); // Network (rigctld)
 
 await rig.open();
 await rig.close();
+```
+
+### Rotator Control
+
+```javascript
+const rotators = Rotator.getSupportedRotators();
+const dummy = rotators.find(r => r.modelName === 'Dummy');
+
+const rotator = new Rotator(dummy.rotModel);
+await rotator.open();
+
+await rotator.setPosition(135, 20);
+const position = await rotator.getPosition();
+
+await rotator.move('RIGHT', 2);
+await rotator.stop();
+
+const status = await rotator.getStatus();
+const caps = rotator.getRotatorCaps();
+
+await rotator.close();
 ```
 
 ### Basic Control
@@ -135,6 +165,12 @@ const audioLevel = await rig.getLevel('AF');
 // Functions
 await rig.setFunction('NB', true);   // Noise blanker on
 const voxEnabled = await rig.getFunction('VOX');
+
+// Antenna switching (1-based antenna number)
+await rig.setAntenna(2);             // Select antenna 2
+await rig.setAntenna(2, 7);          // Select antenna 2 with backend-specific option
+const antenna = await rig.getAntenna();
+console.log(antenna.currentAntenna, antenna.option);
 
 // Split operation
 await rig.setSplit(true);            // Enable split

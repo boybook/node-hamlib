@@ -11,6 +11,7 @@
 #endif
 #include "hamlib_shim.h"
 #include <hamlib/rig.h>
+#include <hamlib/rotator.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -30,6 +31,22 @@ SHIM_API int shim_rig_close(hamlib_shim_handle_t h) {
 
 SHIM_API int shim_rig_cleanup(hamlib_shim_handle_t h) {
     return rig_cleanup((RIG*)h);
+}
+
+SHIM_API hamlib_shim_handle_t shim_rot_init(unsigned int model) {
+    return (hamlib_shim_handle_t)rot_init((rot_model_t)model);
+}
+
+SHIM_API int shim_rot_open(hamlib_shim_handle_t h) {
+    return rot_open((ROT*)h);
+}
+
+SHIM_API int shim_rot_close(hamlib_shim_handle_t h) {
+    return rot_close((ROT*)h);
+}
+
+SHIM_API int shim_rot_cleanup(hamlib_shim_handle_t h) {
+    return rot_cleanup((ROT*)h);
 }
 
 SHIM_API const char* shim_rigerror(int errcode) {
@@ -60,14 +77,29 @@ SHIM_API int shim_rig_load_all_backends(void) {
     return rig_load_all_backends();
 }
 
+SHIM_API int shim_rot_load_all_backends(void) {
+    return rot_load_all_backends();
+}
+
 /* Internal callback adapter for rig_list_foreach */
 struct shim_list_adapter {
     shim_rig_list_cb_t user_cb;
     void* user_data;
 };
 
+struct shim_rot_list_adapter {
+    shim_rot_list_cb_t user_cb;
+    void* user_data;
+};
+
 struct shim_cfg_adapter {
     RIG* rig;
+    shim_rig_cfg_cb_t user_cb;
+    void* user_data;
+};
+
+struct shim_rot_cfg_adapter {
+    ROT* rot;
     shim_rig_cfg_cb_t user_cb;
     void* user_data;
 };
@@ -96,6 +128,25 @@ SHIM_API int shim_rig_list_foreach(shim_rig_list_cb_t cb, void* data) {
     adapter.user_cb = cb;
     adapter.user_data = data;
     return rig_list_foreach(shim_list_foreach_adapter, &adapter);
+}
+
+static int shim_rot_list_foreach_adapter(const struct rot_caps *caps, void *data) {
+    struct shim_rot_list_adapter *adapter = (struct shim_rot_list_adapter*)data;
+    shim_rot_info_t info;
+    info.rot_model = caps->rot_model;
+    info.model_name = caps->model_name ? caps->model_name : "";
+    info.mfg_name = caps->mfg_name ? caps->mfg_name : "";
+    info.version = caps->version ? caps->version : "";
+    info.status = (int)caps->status;
+    info.rot_type = caps->rot_type;
+    return adapter->user_cb(&info, adapter->user_data);
+}
+
+SHIM_API int shim_rot_list_foreach(shim_rot_list_cb_t cb, void* data) {
+    struct shim_rot_list_adapter adapter;
+    adapter.user_cb = cb;
+    adapter.user_data = data;
+    return rot_list_foreach(shim_rot_list_foreach_adapter, &adapter);
 }
 
 static int shim_cfg_foreach_adapter(const struct confparams* param, rig_ptr_t data) {
@@ -161,6 +212,71 @@ SHIM_API int shim_rig_cfgparams_foreach(hamlib_shim_handle_t h, shim_rig_cfg_cb_
     adapter.user_data = data;
 
     return rig_token_foreach(rig, shim_cfg_foreach_adapter, &adapter);
+}
+
+static int shim_rot_cfg_foreach_adapter(const struct confparams* param, rig_ptr_t data) {
+    struct shim_rot_cfg_adapter* adapter = (struct shim_rot_cfg_adapter*)data;
+    const struct confparams* lookup;
+    shim_confparam_info_t info;
+    int i;
+
+    if (!adapter || !adapter->user_cb || !param) {
+        return 0;
+    }
+
+    if (!adapter->rot || !param->name) {
+        return 1;
+    }
+
+    lookup = rot_confparam_lookup(adapter->rot, param->name);
+    if (!lookup || lookup->token != param->token) {
+        return 1;
+    }
+
+    memset(&info, 0, sizeof(info));
+    info.token = (int)param->token;
+    info.type = (int)param->type;
+
+    shim_copy_string(info.name, sizeof(info.name), param->name);
+    shim_copy_string(info.label, sizeof(info.label), param->label);
+    shim_copy_string(info.tooltip, sizeof(info.tooltip), param->tooltip);
+    shim_copy_string(info.dflt, sizeof(info.dflt), param->dflt);
+
+    if (param->type == RIG_CONF_NUMERIC || param->type == RIG_CONF_INT) {
+        info.numeric_min = param->u.n.min;
+        info.numeric_max = param->u.n.max;
+        info.numeric_step = param->u.n.step;
+    } else if (param->type == RIG_CONF_COMBO) {
+        for (i = 0; i < RIG_COMBO_MAX && i < SHIM_CONF_COMBO_MAX; ++i) {
+            if (!param->u.c.combostr[i] || !*param->u.c.combostr[i]) {
+                break;
+            }
+
+            shim_copy_string(
+                info.combo_options[i],
+                sizeof(info.combo_options[i]),
+                param->u.c.combostr[i]
+            );
+            info.combo_count++;
+        }
+    }
+
+    return adapter->user_cb(&info, adapter->user_data);
+}
+
+SHIM_API int shim_rot_cfgparams_foreach(hamlib_shim_handle_t h, shim_rig_cfg_cb_t cb, void* data) {
+    ROT* rot = (ROT*)h;
+    struct shim_rot_cfg_adapter adapter;
+
+    if (!rot || !cb) {
+        return -RIG_EINVAL;
+    }
+
+    adapter.rot = rot;
+    adapter.user_cb = cb;
+    adapter.user_data = data;
+
+    return rot_token_foreach(rot, shim_rot_cfg_foreach_adapter, &adapter);
 }
 
 static const char* shim_port_type_name(enum rig_port_e port_type) {
@@ -233,6 +349,73 @@ SHIM_API const char* shim_rig_strstatus(int status) {
     return rig_strstatus((enum rig_status_e)status);
 }
 
+SHIM_API int shim_rot_get_port_caps(hamlib_shim_handle_t h, shim_rig_port_caps_t* out_caps) {
+    ROT* rot = (ROT*)h;
+    const struct rot_caps* caps;
+
+    if (!rot || !out_caps || !rot->caps) {
+        return -RIG_EINVAL;
+    }
+
+    caps = rot->caps;
+    memset(out_caps, 0, sizeof(*out_caps));
+
+    shim_copy_string(out_caps->port_type, sizeof(out_caps->port_type), shim_port_type_name(caps->port_type));
+    out_caps->serial_rate_min = caps->serial_rate_min;
+    out_caps->serial_rate_max = caps->serial_rate_max;
+    out_caps->serial_data_bits = caps->serial_data_bits;
+    out_caps->serial_stop_bits = caps->serial_stop_bits;
+    shim_copy_string(out_caps->serial_parity, sizeof(out_caps->serial_parity), shim_serial_parity_name(caps->serial_parity));
+    shim_copy_string(out_caps->serial_handshake, sizeof(out_caps->serial_handshake), shim_serial_handshake_name(caps->serial_handshake));
+    out_caps->write_delay = caps->write_delay;
+    out_caps->post_write_delay = caps->post_write_delay;
+    out_caps->timeout = caps->timeout;
+    out_caps->retry = caps->retry;
+
+    return RIG_OK;
+}
+
+SHIM_API int shim_rot_get_caps(hamlib_shim_handle_t h, shim_rot_caps_t* out_caps) {
+    ROT* rot = (ROT*)h;
+    const struct rot_caps* caps;
+
+    if (!rot || !out_caps || !rot->caps) {
+        return -RIG_EINVAL;
+    }
+
+    caps = rot->caps;
+    memset(out_caps, 0, sizeof(*out_caps));
+    out_caps->rot_type = caps->rot_type;
+    out_caps->min_az = caps->min_az;
+    out_caps->max_az = caps->max_az;
+    out_caps->min_el = caps->min_el;
+    out_caps->max_el = caps->max_el;
+    out_caps->has_get_level = (uint64_t)caps->has_get_level;
+    out_caps->has_set_level = (uint64_t)caps->has_set_level;
+    out_caps->has_get_func = (uint64_t)caps->has_get_func;
+    out_caps->has_set_func = (uint64_t)caps->has_set_func;
+    out_caps->has_get_parm = (uint64_t)caps->has_get_parm;
+    out_caps->has_set_parm = (uint64_t)caps->has_set_parm;
+    out_caps->has_status = (int)caps->has_status;
+
+    return RIG_OK;
+}
+
+SHIM_API const char* shim_rot_strstatus(int status) {
+    return rot_strstatus((rot_status_t)status);
+}
+
+SHIM_API const char* shim_rot_type_str(int rot_type) {
+    switch (rot_type) {
+        case ROT_TYPE_AZIMUTH: return "azimuth";
+        case ROT_TYPE_ELEVATION: return "elevation";
+        case ROT_TYPE_AZEL: return "azel";
+        case ROT_TYPE_OTHER:
+        default:
+            return "other";
+    }
+}
+
 /* ===== Port configuration ===== */
 
 SHIM_API void shim_rig_set_port_path(hamlib_shim_handle_t h, const char* path) {
@@ -244,6 +427,17 @@ SHIM_API void shim_rig_set_port_path(hamlib_shim_handle_t h, const char* path) {
 SHIM_API void shim_rig_set_port_type(hamlib_shim_handle_t h, int type) {
     RIG* rig = (RIG*)h;
     rig->state.rigport.type.rig = (enum rig_port_e)type;
+}
+
+SHIM_API void shim_rot_set_port_path(hamlib_shim_handle_t h, const char* path) {
+    ROT* rot = (ROT*)h;
+    strncpy(rot->state.rotport.pathname, path, HAMLIB_FILPATHLEN - 1);
+    rot->state.rotport.pathname[HAMLIB_FILPATHLEN - 1] = '\0';
+}
+
+SHIM_API void shim_rot_set_port_type(hamlib_shim_handle_t h, int type) {
+    ROT* rot = (ROT*)h;
+    rot->state.rotport.type.rig = (enum rig_port_e)type;
 }
 
 /* Serial config */
@@ -984,6 +1178,215 @@ SHIM_API int shim_rig_mW2power(hamlib_shim_handle_t h, float* power, unsigned in
 
 SHIM_API int shim_rig_reset(hamlib_shim_handle_t h, int reset_type) {
     return rig_reset((RIG*)h, (reset_t)reset_type);
+}
+
+/* ===== Rotator control ===== */
+
+SHIM_API int shim_rot_set_position(hamlib_shim_handle_t h, double azimuth, double elevation) {
+    return rot_set_position((ROT*)h, (azimuth_t)azimuth, (elevation_t)elevation);
+}
+
+SHIM_API int shim_rot_get_position(hamlib_shim_handle_t h, double* azimuth, double* elevation) {
+    azimuth_t az = 0;
+    elevation_t el = 0;
+    int ret = rot_get_position((ROT*)h, &az, &el);
+    if (azimuth) *azimuth = (double)az;
+    if (elevation) *elevation = (double)el;
+    return ret;
+}
+
+SHIM_API int shim_rot_stop(hamlib_shim_handle_t h) {
+    return rot_stop((ROT*)h);
+}
+
+SHIM_API int shim_rot_park(hamlib_shim_handle_t h) {
+    return rot_park((ROT*)h);
+}
+
+SHIM_API int shim_rot_reset(hamlib_shim_handle_t h, int reset_type) {
+    return rot_reset((ROT*)h, (rot_reset_t)reset_type);
+}
+
+SHIM_API int shim_rot_move(hamlib_shim_handle_t h, int direction, int speed) {
+    return rot_move((ROT*)h, direction, speed);
+}
+
+SHIM_API const char* shim_rot_get_info(hamlib_shim_handle_t h) {
+    ROT *rot = (ROT *)h;
+    if (!rot) return "";
+    {
+        const char *info = rot_get_info(rot);
+        return info ? info : "";
+    }
+}
+
+SHIM_API int shim_rot_get_status(hamlib_shim_handle_t h, int* status) {
+    rot_status_t s = 0;
+    int ret = rot_get_status((ROT*)h, &s);
+    if (status) *status = (int)s;
+    return ret;
+}
+
+SHIM_API int shim_rot_set_conf(hamlib_shim_handle_t h, const char* name, const char* val) {
+    ROT *rot = (ROT *)h;
+    hamlib_token_t token;
+    if (!rot || !name || !val) return -RIG_EINVAL;
+    token = rot_token_lookup(rot, name);
+    if (token == 0) return -RIG_EINVAL;
+    return rot_set_conf(rot, token, val);
+}
+
+SHIM_API int shim_rot_get_conf(hamlib_shim_handle_t h, const char* name, char* buf, int buflen) {
+    ROT *rot = (ROT *)h;
+    hamlib_token_t token;
+    if (!rot || !name || !buf || buflen <= 0) return -RIG_EINVAL;
+    token = rot_token_lookup(rot, name);
+    if (token == 0) return -RIG_EINVAL;
+    return rot_get_conf2(rot, token, buf, buflen);
+}
+
+SHIM_API uint64_t shim_rot_get_caps_has_get_level(hamlib_shim_handle_t h) {
+    ROT *rot = (ROT *)h;
+    return rot && rot->caps ? (uint64_t)rot->caps->has_get_level : 0;
+}
+
+SHIM_API uint64_t shim_rot_get_caps_has_set_level(hamlib_shim_handle_t h) {
+    ROT *rot = (ROT *)h;
+    return rot && rot->caps ? (uint64_t)rot->caps->has_set_level : 0;
+}
+
+SHIM_API uint64_t shim_rot_get_caps_has_get_func(hamlib_shim_handle_t h) {
+    ROT *rot = (ROT *)h;
+    return rot && rot->caps ? (uint64_t)rot->caps->has_get_func : 0;
+}
+
+SHIM_API uint64_t shim_rot_get_caps_has_set_func(hamlib_shim_handle_t h) {
+    ROT *rot = (ROT *)h;
+    return rot && rot->caps ? (uint64_t)rot->caps->has_set_func : 0;
+}
+
+SHIM_API uint64_t shim_rot_get_caps_has_get_parm(hamlib_shim_handle_t h) {
+    ROT *rot = (ROT *)h;
+    return rot && rot->caps ? (uint64_t)rot->caps->has_get_parm : 0;
+}
+
+SHIM_API uint64_t shim_rot_get_caps_has_set_parm(hamlib_shim_handle_t h) {
+    ROT *rot = (ROT *)h;
+    return rot && rot->caps ? (uint64_t)rot->caps->has_set_parm : 0;
+}
+
+SHIM_API int shim_rot_set_level_f(hamlib_shim_handle_t h, uint64_t level, float value) {
+    value_t val;
+    memset(&val, 0, sizeof(val));
+    val.f = value;
+    return rot_set_level((ROT*)h, (setting_t)level, val);
+}
+
+SHIM_API int shim_rot_set_level_i(hamlib_shim_handle_t h, uint64_t level, int value) {
+    value_t val;
+    memset(&val, 0, sizeof(val));
+    val.i = value;
+    return rot_set_level((ROT*)h, (setting_t)level, val);
+}
+
+SHIM_API int shim_rot_get_level_f(hamlib_shim_handle_t h, uint64_t level, float* value) {
+    value_t val;
+    memset(&val, 0, sizeof(val));
+    {
+        int ret = rot_get_level((ROT*)h, (setting_t)level, &val);
+        if (value) *value = val.f;
+        return ret;
+    }
+}
+
+SHIM_API int shim_rot_get_level_i(hamlib_shim_handle_t h, uint64_t level, int* value) {
+    value_t val;
+    memset(&val, 0, sizeof(val));
+    {
+        int ret = rot_get_level((ROT*)h, (setting_t)level, &val);
+        if (value) *value = val.i;
+        return ret;
+    }
+}
+
+SHIM_API int shim_rot_get_level_auto(hamlib_shim_handle_t h, uint64_t level, double* value) {
+    value_t val;
+    memset(&val, 0, sizeof(val));
+    {
+        int ret = rot_get_level((ROT*)h, (setting_t)level, &val);
+        if (ret != RIG_OK) return ret;
+        if (value) {
+            if (ROT_LEVEL_IS_FLOAT((setting_t)level)) *value = (double)val.f;
+            else *value = (double)val.i;
+        }
+        return ret;
+    }
+}
+
+SHIM_API int shim_rot_set_func(hamlib_shim_handle_t h, uint64_t func, int enable) {
+    return rot_set_func((ROT*)h, (setting_t)func, enable);
+}
+
+SHIM_API int shim_rot_get_func(hamlib_shim_handle_t h, uint64_t func, int* state) {
+    return rot_get_func((ROT*)h, (setting_t)func, state);
+}
+
+SHIM_API int shim_rot_set_parm_f(hamlib_shim_handle_t h, uint64_t parm, float value) {
+    value_t val;
+    memset(&val, 0, sizeof(val));
+    val.f = value;
+    return rot_set_parm((ROT*)h, (setting_t)parm, val);
+}
+
+SHIM_API int shim_rot_set_parm_i(hamlib_shim_handle_t h, uint64_t parm, int value) {
+    value_t val;
+    memset(&val, 0, sizeof(val));
+    val.i = value;
+    return rot_set_parm((ROT*)h, (setting_t)parm, val);
+}
+
+SHIM_API int shim_rot_get_parm_f(hamlib_shim_handle_t h, uint64_t parm, float* value) {
+    value_t val;
+    memset(&val, 0, sizeof(val));
+    {
+        int ret = rot_get_parm((ROT*)h, (setting_t)parm, &val);
+        if (value) *value = val.f;
+        return ret;
+    }
+}
+
+SHIM_API int shim_rot_get_parm_i(hamlib_shim_handle_t h, uint64_t parm, int* value) {
+    value_t val;
+    memset(&val, 0, sizeof(val));
+    {
+        int ret = rot_get_parm((ROT*)h, (setting_t)parm, &val);
+        if (value) *value = val.i;
+        return ret;
+    }
+}
+
+SHIM_API uint64_t shim_rot_parse_level(const char* level_str) {
+    return (uint64_t)rot_parse_level(level_str);
+}
+
+SHIM_API uint64_t shim_rot_parse_func(const char* func_str) {
+    return (uint64_t)rot_parse_func(func_str);
+}
+
+SHIM_API uint64_t shim_rot_parse_parm(const char* parm_str) {
+    return (uint64_t)rot_parse_parm(parm_str);
+}
+
+SHIM_API const char* shim_rot_strlevel(uint64_t level) {
+    return rot_strlevel((setting_t)level);
+}
+
+SHIM_API const char* shim_rot_strfunc(uint64_t func) {
+    return rot_strfunc((setting_t)func);
+}
+
+SHIM_API const char* shim_rot_strparm(uint64_t parm) {
+    return rot_strparm((setting_t)parm);
 }
 
 /* ===== Callbacks ===== */

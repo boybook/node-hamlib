@@ -9,11 +9,15 @@ interface ConnectionInfo {
   /** Port path or network address */
   portPath: string;
   /** Connection status */
-  connected: boolean;
+  isOpen: boolean;
   /** Original model number */
   originalModel: number;
   /** Actual model number used */
-  actualModel: number;
+  currentModel: number;
+  /** @deprecated Use isOpen */
+  connected?: boolean;
+  /** @deprecated Use currentModel */
+  actualModel?: number;
 }
 
 /**
@@ -44,6 +48,16 @@ interface SupportedRigInfo {
   rigType: string;
 }
 
+interface SupportedRotatorInfo {
+  rotModel: number;
+  modelName: string;
+  mfgName: string;
+  version: string;
+  status: string;
+  rotType: 'azimuth' | 'elevation' | 'azel' | 'other';
+  rotTypeMask: number;
+}
+
 /**
  * Antenna information interface
  */
@@ -56,6 +70,53 @@ interface AntennaInfo {
   rxAntenna: number;
   /** Additional antenna option/parameter */
   option: number;
+}
+
+interface RotatorConnectionInfo {
+  connectionType: 'serial' | 'network';
+  portPath: string;
+  isOpen: boolean;
+  originalModel: number;
+  currentModel: number;
+}
+
+interface RotatorPosition {
+  azimuth: number;
+  elevation: number;
+}
+
+interface RotatorStatus {
+  mask: number;
+  flags: string[];
+}
+
+type RotatorDirection =
+  | 'UP'
+  | 'DOWN'
+  | 'LEFT'
+  | 'RIGHT'
+  | 'CCW'
+  | 'CW'
+  | 'UP_LEFT'
+  | 'UP_RIGHT'
+  | 'DOWN_LEFT'
+  | 'DOWN_RIGHT'
+  | 'UP_CCW'
+  | 'UP_CW'
+  | 'DOWN_CCW'
+  | 'DOWN_CW'
+  | number;
+
+type RotatorResetType = 'ALL' | number;
+
+interface RotatorCaps {
+  rotType: 'azimuth' | 'elevation' | 'azel' | 'other';
+  rotTypeMask: number;
+  minAz: number;
+  maxAz: number;
+  minEl: number;
+  maxEl: number;
+  supportedStatuses: string[];
 }
 
 /**
@@ -1299,6 +1360,7 @@ declare class HamLib extends EventEmitter {
    * await rig.setAntenna(2); // Select antenna 2
    */
   setAntenna(antenna: number, vfo?: VFO): Promise<number>;
+  setAntenna(antenna: number, option: number, vfo?: VFO): Promise<number>;
 
   /**
    * Get comprehensive antenna information
@@ -1574,6 +1636,50 @@ declare class HamLib extends EventEmitter {
   getVfoInfo(vfo?: VFO): Promise<VfoInfo>;
 }
 
+declare class Rotator extends EventEmitter {
+  constructor(model: number, port?: string);
+
+  static getSupportedRotators(): SupportedRotatorInfo[];
+  static getHamlibVersion(): string;
+  static setDebugLevel(level: RigDebugLevel): void;
+  static getDebugLevel(): never;
+  static getCopyright(): string;
+  static getLicense(): string;
+
+  open(): Promise<number>;
+  close(): Promise<number>;
+  destroy(): Promise<number>;
+  getConnectionInfo(): RotatorConnectionInfo;
+
+  setPosition(azimuth: number, elevation: number): Promise<number>;
+  getPosition(): Promise<RotatorPosition>;
+  move(direction: RotatorDirection, speed: number): Promise<number>;
+  stop(): Promise<number>;
+  park(): Promise<number>;
+  reset(resetType: RotatorResetType): Promise<number>;
+
+  getInfo(): Promise<string>;
+  getStatus(): Promise<RotatorStatus>;
+
+  setConf(name: string, value: string): Promise<number>;
+  getConf(name: string): Promise<string>;
+  getConfigSchema(): HamlibConfigFieldDescriptor[];
+  getPortCaps(): HamlibPortCaps;
+  getRotatorCaps(): RotatorCaps;
+
+  setLevel(level: string, value: number): Promise<number>;
+  getLevel(level: string): Promise<number>;
+  getSupportedLevels(): string[];
+
+  setFunction(func: string, enable: boolean): Promise<number>;
+  getFunction(func: string): Promise<boolean>;
+  getSupportedFunctions(): string[];
+
+  setParm(parm: string, value: number): Promise<number>;
+  getParm(parm: string): Promise<number>;
+  getSupportedParms(): string[];
+}
+
 /**
  * Clock information for rig's internal clock
  */
@@ -1604,17 +1710,19 @@ interface VfoInfo {
  */
 declare const nodeHamlib: {
   HamLib: typeof HamLib;
+  Rotator: typeof Rotator;
 };
 
 // Export types for use elsewhere
-export { ConnectionInfo, ModeInfo, SupportedRigInfo, AntennaInfo, VFO, RadioMode, MemoryChannelData,
+export { ConnectionInfo, ModeInfo, SupportedRigInfo, SupportedRotatorInfo, AntennaInfo, RotatorConnectionInfo,
+         RotatorPosition, RotatorStatus, RotatorDirection, RotatorResetType, RotatorCaps, VFO, RadioMode, MemoryChannelData,
          MemoryChannelInfo, SplitModeInfo, SplitStatusInfo, LevelType, FunctionType,
          ScanType, VfoOperationType, SerialConfigParam, SerialBaudRate, SerialParity,
          SerialHandshake, SerialControlState, PttType, DcdType, SerialConfigOptions,
          HamlibConfigFieldType, HamlibConfigFieldDescriptor, HamlibPortType, HamlibPortCaps,
          SpectrumScopeInfo, SpectrumModeInfo, SpectrumAverageModeInfo, SpectrumLine,
          SpectrumCapabilities, SpectrumSupportSummary, SpectrumConfig, SpectrumDisplayState,
-         ClockInfo, VfoInfo, HamLib };
+         ClockInfo, VfoInfo, HamLib, Rotator };
 
 // Support both CommonJS and ES module exports
 // @ts-ignore

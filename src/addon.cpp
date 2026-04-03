@@ -1,5 +1,6 @@
 #include <napi.h>
 #include "hamlib.h"
+#include "node_rotator.h"
 #include "decoder.h"
 #include "shim/hamlib_shim.h"
 
@@ -10,6 +11,9 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
 
   Napi::String name = Napi::String::New(env, "HamLib");
   exports.Set(name, NodeHamLib::GetClass(env));
+
+  Napi::String rotatorName = Napi::String::New(env, "Rotator");
+  exports.Set(rotatorName, NodeRotator::GetClass(env));
 
 
   // Napi::String decoder_name = Napi::String::New(env, "Decoder");

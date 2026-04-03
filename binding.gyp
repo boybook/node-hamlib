@@ -4,6 +4,7 @@
       "target_name": "hamlib",
       "sources": [
         "src/hamlib.cpp",
+        "src/node_rotator.cpp",
         "src/decoder.cpp",
         "src/addon.cpp"
       ],

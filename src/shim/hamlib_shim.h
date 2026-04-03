@@ -32,7 +32,7 @@ extern "C" {
   #define SHIM_API
 #endif
 
-/* Opaque handle type - hides RIG* from the addon */
+/* Opaque handle type - hides RIG* / ROT* from the addon */
 typedef void* hamlib_shim_handle_t;
 
 /* ===== Constants (mirror Hamlib values) ===== */
@@ -147,7 +147,50 @@ typedef void* hamlib_shim_handle_t;
 #define SHIM_RIG_RESET_MASTER   8
 
 /* Antenna */
-#define SHIM_RIG_ANT_CURR  0
+#define SHIM_RIG_ANT_CURR  ((int)0x80000000u)
+
+/* ===== Rotator constants (mirror Hamlib values) ===== */
+#define SHIM_ROT_TYPE_OTHER      0
+#define SHIM_ROT_TYPE_AZIMUTH    (1 << 1)
+#define SHIM_ROT_TYPE_ELEVATION  (1 << 2)
+#define SHIM_ROT_TYPE_AZEL       (SHIM_ROT_TYPE_AZIMUTH | SHIM_ROT_TYPE_ELEVATION)
+
+#define SHIM_ROT_MOVE_UP          (1 << 1)
+#define SHIM_ROT_MOVE_DOWN        (1 << 2)
+#define SHIM_ROT_MOVE_LEFT        (1 << 3)
+#define SHIM_ROT_MOVE_CCW         SHIM_ROT_MOVE_LEFT
+#define SHIM_ROT_MOVE_RIGHT       (1 << 4)
+#define SHIM_ROT_MOVE_CW          SHIM_ROT_MOVE_RIGHT
+#define SHIM_ROT_MOVE_UP_LEFT     (1 << 5)
+#define SHIM_ROT_MOVE_UP_CCW      SHIM_ROT_MOVE_UP_LEFT
+#define SHIM_ROT_MOVE_UP_RIGHT    (1 << 6)
+#define SHIM_ROT_MOVE_UP_CW       SHIM_ROT_MOVE_UP_RIGHT
+#define SHIM_ROT_MOVE_DOWN_LEFT   (1 << 7)
+#define SHIM_ROT_MOVE_DOWN_CCW    SHIM_ROT_MOVE_DOWN_LEFT
+#define SHIM_ROT_MOVE_DOWN_RIGHT  (1 << 8)
+#define SHIM_ROT_MOVE_DOWN_CW     SHIM_ROT_MOVE_DOWN_RIGHT
+#define SHIM_ROT_SPEED_NOCHANGE   (-1)
+
+#define SHIM_ROT_RESET_ALL        1
+#define SHIM_ROT_LEVEL_SPEED      (1ULL << 0)
+
+#define SHIM_ROT_STATUS_NONE          0
+#define SHIM_ROT_STATUS_BUSY          (1 << 0)
+#define SHIM_ROT_STATUS_MOVING        (1 << 1)
+#define SHIM_ROT_STATUS_MOVING_AZ     (1 << 2)
+#define SHIM_ROT_STATUS_MOVING_LEFT   (1 << 3)
+#define SHIM_ROT_STATUS_MOVING_RIGHT  (1 << 4)
+#define SHIM_ROT_STATUS_MOVING_EL     (1 << 5)
+#define SHIM_ROT_STATUS_MOVING_UP     (1 << 6)
+#define SHIM_ROT_STATUS_MOVING_DOWN   (1 << 7)
+#define SHIM_ROT_STATUS_LIMIT_UP      (1 << 8)
+#define SHIM_ROT_STATUS_LIMIT_DOWN    (1 << 9)
+#define SHIM_ROT_STATUS_LIMIT_LEFT    (1 << 10)
+#define SHIM_ROT_STATUS_LIMIT_RIGHT   (1 << 11)
+#define SHIM_ROT_STATUS_OVERLAP_UP    (1 << 12)
+#define SHIM_ROT_STATUS_OVERLAP_DOWN  (1 << 13)
+#define SHIM_ROT_STATUS_OVERLAP_LEFT  (1 << 14)
+#define SHIM_ROT_STATUS_OVERLAP_RIGHT (1 << 16)
 
 /* Rig type mask and types */
 #define SHIM_RIG_TYPE_MASK  0x7F000000
@@ -293,6 +336,15 @@ typedef struct {
     int rig_type;
 } shim_rig_info_t;
 
+typedef struct {
+    unsigned int rot_model;
+    const char* model_name;
+    const char* mfg_name;
+    const char* version;
+    int status;
+    int rot_type;
+} shim_rot_info_t;
+
 #define SHIM_CONF_NAME_MAX 64
 #define SHIM_CONF_LABEL_MAX 128
 #define SHIM_CONF_TOOLTIP_MAX 256
@@ -332,6 +384,21 @@ typedef struct {
 } shim_rig_port_caps_t;
 
 typedef struct {
+    int rot_type;
+    double min_az;
+    double max_az;
+    double min_el;
+    double max_el;
+    uint64_t has_get_level;
+    uint64_t has_set_level;
+    uint64_t has_get_func;
+    uint64_t has_set_func;
+    uint64_t has_get_parm;
+    uint64_t has_set_parm;
+    int has_status;
+} shim_rot_caps_t;
+
+typedef struct {
     int id;
     char name[64];
 } shim_spectrum_scope_t;
@@ -369,6 +436,8 @@ typedef int (*shim_spectrum_cb_t)(void* handle, const shim_spectrum_line_t* line
 
 /* Rig list callback: (info, data) -> int */
 typedef int (*shim_rig_list_cb_t)(const shim_rig_info_t* info, void* data);
+/* Rotator list callback: (info, data) -> int */
+typedef int (*shim_rot_list_cb_t)(const shim_rot_info_t* info, void* data);
 /* Rig config callback: (info, data) -> int */
 typedef int (*shim_rig_cfg_cb_t)(const shim_confparam_info_t* info, void* data);
 
@@ -390,11 +459,24 @@ SHIM_API int  shim_rig_list_foreach(shim_rig_list_cb_t cb, void* data);
 SHIM_API int  shim_rig_cfgparams_foreach(hamlib_shim_handle_t h, shim_rig_cfg_cb_t cb, void* data);
 SHIM_API int  shim_rig_get_port_caps(hamlib_shim_handle_t h, shim_rig_port_caps_t* out_caps);
 SHIM_API const char* shim_rig_strstatus(int status);
+SHIM_API hamlib_shim_handle_t shim_rot_init(unsigned int model);
+SHIM_API int  shim_rot_open(hamlib_shim_handle_t h);
+SHIM_API int  shim_rot_close(hamlib_shim_handle_t h);
+SHIM_API int  shim_rot_cleanup(hamlib_shim_handle_t h);
+SHIM_API int  shim_rot_load_all_backends(void);
+SHIM_API int  shim_rot_list_foreach(shim_rot_list_cb_t cb, void* data);
+SHIM_API int  shim_rot_cfgparams_foreach(hamlib_shim_handle_t h, shim_rig_cfg_cb_t cb, void* data);
+SHIM_API int  shim_rot_get_port_caps(hamlib_shim_handle_t h, shim_rig_port_caps_t* out_caps);
+SHIM_API int  shim_rot_get_caps(hamlib_shim_handle_t h, shim_rot_caps_t* out_caps);
+SHIM_API const char* shim_rot_strstatus(int status);
+SHIM_API const char* shim_rot_type_str(int rot_type);
 
 /* ===== Port configuration (before open) ===== */
 
 SHIM_API void shim_rig_set_port_path(hamlib_shim_handle_t h, const char* path);
 SHIM_API void shim_rig_set_port_type(hamlib_shim_handle_t h, int type);
+SHIM_API void shim_rot_set_port_path(hamlib_shim_handle_t h, const char* path);
+SHIM_API void shim_rot_set_port_type(hamlib_shim_handle_t h, int type);
 
 /* Serial port configuration */
 SHIM_API void shim_rig_set_serial_rate(hamlib_shim_handle_t h, int rate);
@@ -592,6 +674,39 @@ SHIM_API int shim_rig_mW2power(hamlib_shim_handle_t h, float* power, unsigned in
 /* ===== Reset ===== */
 
 SHIM_API int shim_rig_reset(hamlib_shim_handle_t h, int reset_type);
+SHIM_API int shim_rot_set_position(hamlib_shim_handle_t h, double azimuth, double elevation);
+SHIM_API int shim_rot_get_position(hamlib_shim_handle_t h, double* azimuth, double* elevation);
+SHIM_API int shim_rot_stop(hamlib_shim_handle_t h);
+SHIM_API int shim_rot_park(hamlib_shim_handle_t h);
+SHIM_API int shim_rot_reset(hamlib_shim_handle_t h, int reset_type);
+SHIM_API int shim_rot_move(hamlib_shim_handle_t h, int direction, int speed);
+SHIM_API const char* shim_rot_get_info(hamlib_shim_handle_t h);
+SHIM_API int shim_rot_get_status(hamlib_shim_handle_t h, int* status);
+SHIM_API int shim_rot_set_conf(hamlib_shim_handle_t h, const char* name, const char* val);
+SHIM_API int shim_rot_get_conf(hamlib_shim_handle_t h, const char* name, char* buf, int buflen);
+SHIM_API uint64_t shim_rot_get_caps_has_get_level(hamlib_shim_handle_t h);
+SHIM_API uint64_t shim_rot_get_caps_has_set_level(hamlib_shim_handle_t h);
+SHIM_API uint64_t shim_rot_get_caps_has_get_func(hamlib_shim_handle_t h);
+SHIM_API uint64_t shim_rot_get_caps_has_set_func(hamlib_shim_handle_t h);
+SHIM_API uint64_t shim_rot_get_caps_has_get_parm(hamlib_shim_handle_t h);
+SHIM_API uint64_t shim_rot_get_caps_has_set_parm(hamlib_shim_handle_t h);
+SHIM_API int shim_rot_set_level_f(hamlib_shim_handle_t h, uint64_t level, float value);
+SHIM_API int shim_rot_set_level_i(hamlib_shim_handle_t h, uint64_t level, int value);
+SHIM_API int shim_rot_get_level_f(hamlib_shim_handle_t h, uint64_t level, float* value);
+SHIM_API int shim_rot_get_level_i(hamlib_shim_handle_t h, uint64_t level, int* value);
+SHIM_API int shim_rot_get_level_auto(hamlib_shim_handle_t h, uint64_t level, double* value);
+SHIM_API int shim_rot_set_func(hamlib_shim_handle_t h, uint64_t func, int enable);
+SHIM_API int shim_rot_get_func(hamlib_shim_handle_t h, uint64_t func, int* state);
+SHIM_API int shim_rot_set_parm_f(hamlib_shim_handle_t h, uint64_t parm, float value);
+SHIM_API int shim_rot_set_parm_i(hamlib_shim_handle_t h, uint64_t parm, int value);
+SHIM_API int shim_rot_get_parm_f(hamlib_shim_handle_t h, uint64_t parm, float* value);
+SHIM_API int shim_rot_get_parm_i(hamlib_shim_handle_t h, uint64_t parm, int* value);
+SHIM_API uint64_t shim_rot_parse_level(const char* level_str);
+SHIM_API uint64_t shim_rot_parse_func(const char* func_str);
+SHIM_API uint64_t shim_rot_parse_parm(const char* parm_str);
+SHIM_API const char* shim_rot_strlevel(uint64_t level);
+SHIM_API const char* shim_rot_strfunc(uint64_t func);
+SHIM_API const char* shim_rot_strparm(uint64_t parm);
 
 /* ===== Callbacks ===== */
 

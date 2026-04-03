@@ -106,6 +106,27 @@ static int parseVfoString(Napi::Env env, const std::string& vfoToken) {
   return vfo;
 }
 
+static int antennaOrdinalToMask(Napi::Env env, int antennaOrdinal) {
+  if (antennaOrdinal < 1 || antennaOrdinal > 30) {
+    Napi::RangeError::New(env, "Antenna number must be between 1 and 30").ThrowAsJavaScriptException();
+    return 0;
+  }
+  return static_cast<int>(1u << (antennaOrdinal - 1));
+}
+
+static int antennaMaskToOrdinal(int antennaMask) {
+  const uint32_t mask = static_cast<uint32_t>(antennaMask);
+  if (mask == 0 || (mask & (mask - 1)) != 0) {
+    return 0;
+  }
+  for (int bit = 0; bit < 30; ++bit) {
+    if (mask == (1u << bit)) {
+      return bit + 1;
+    }
+  }
+  return 0;
+}
+
 // Base AsyncWorker implementation with Promise support
 HamLibAsyncWorker::HamLibAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
     : AsyncWorker(env), hamlib_instance_(hamlib_instance), result_code_(0), error_message_(""), deferred_(Napi::Promise::Deferred::New(env)) {}
@@ -1230,9 +1251,9 @@ public:
         } else {
             Napi::Object result = Napi::Object::New(env);
 
-            result.Set("currentAntenna", Napi::Number::New(env, antenna_curr_));
-            result.Set("txAntenna", Napi::Number::New(env, antenna_tx_));
-            result.Set("rxAntenna", Napi::Number::New(env, antenna_rx_));
+            result.Set("currentAntenna", Napi::Number::New(env, antennaMaskToOrdinal(antenna_curr_)));
+            result.Set("txAntenna", Napi::Number::New(env, antennaMaskToOrdinal(antenna_tx_)));
+            result.Set("rxAntenna", Napi::Number::New(env, antennaMaskToOrdinal(antenna_rx_)));
             result.Set("option", Napi::Number::New(env, option_));
 
             deferred_.Resolve(result);
@@ -3768,17 +3789,38 @@ Napi::Value NodeHamLib::SetAntenna(const Napi::CallbackInfo & info) {
     return env.Null();
   }
   
-  int antenna = info[0].As<Napi::Number>().Int32Value();
-  
-  // Support optional VFO parameter: setAntenna(antenna) or setAntenna(antenna, vfo)
-  int vfo = SHIM_RIG_VFO_CURR;
-  if (info.Length() >= 2 && info[1].IsString()) {
-    vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
-    RETURN_NULL_IF_INVALID_VFO(vfo);
+  const int antennaOrdinal = info[0].As<Napi::Number>().Int32Value();
+  const int antenna = antennaOrdinalToMask(env, antennaOrdinal);
+  if (antenna == 0) {
+    return env.Null();
   }
-  
-  // Default option value (can be extended later if needed)
+
+  int vfo = SHIM_RIG_VFO_CURR;
   float option = 0.0f;
+
+  if (info.Length() >= 2) {
+    if (info[1].IsNumber()) {
+      option = info[1].As<Napi::Number>().FloatValue();
+      if (info.Length() >= 3 && info[2].IsString()) {
+        vfo = parseVfoParameter(info, 2, SHIM_RIG_VFO_CURR);
+        RETURN_NULL_IF_INVALID_VFO(vfo);
+      } else if (info.Length() >= 3 && !info[2].IsUndefined()) {
+        Napi::TypeError::New(env, "Expected VFO token as third argument").ThrowAsJavaScriptException();
+        return env.Null();
+      }
+    } else if (info[1].IsString()) {
+      vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
+      RETURN_NULL_IF_INVALID_VFO(vfo);
+    } else if (!info[1].IsUndefined()) {
+      Napi::TypeError::New(env, "Expected antenna option as number or VFO token as string").ThrowAsJavaScriptException();
+      return env.Null();
+    }
+  }
+
+  if (info.Length() >= 3 && info[1].IsString()) {
+    Napi::TypeError::New(env, "Antenna option must come before VFO").ThrowAsJavaScriptException();
+    return env.Null();
+  }
 
   SetAntennaAsyncWorker* asyncWorker = new SetAntennaAsyncWorker(env, this, antenna, vfo, option);
   asyncWorker->Queue();

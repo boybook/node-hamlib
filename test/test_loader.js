@@ -3,7 +3,7 @@
  * Tests module loading, instantiation, method existence, and static methods
  */
 
-const { HamLib } = require('../index.js');
+const { HamLib, Rotator } = require('../index.js');
 const { SpectrumController } = require('../spectrum.js');
 
 console.log('🧪 测试node-hamlib模块加载和基础功能...\n');
@@ -41,11 +41,13 @@ try {
   console.log('📦 模块加载测试:');
   test('HamLib类成功加载', () => HamLib && typeof HamLib === 'function');
   test('HamLib构造函数可用', () => typeof HamLib === 'function');
+  test('Rotator类成功加载', () => Rotator && typeof Rotator === 'function');
   
   // 2. 静态方法测试
   console.log('\n📊 静态方法测试:');
   test('getHamlibVersion静态方法存在', () => typeof HamLib.getHamlibVersion === 'function');
   test('getSupportedRigs静态方法存在', () => typeof HamLib.getSupportedRigs === 'function');
+  test('Rotator.getSupportedRotators静态方法存在', () => typeof Rotator.getSupportedRotators === 'function');
 
   try {
     const supportedRigs = HamLib.getSupportedRigs();
@@ -82,11 +84,28 @@ try {
     console.log(`❌ getSupportedRigs调用失败: ${e.message}`);
     testsFailed++;
   }
+
+  try {
+    const supportedRotators = Rotator.getSupportedRotators();
+    test('getSupportedRotators返回数组', () => Array.isArray(supportedRotators));
+    test('getSupportedRotators返回非空数据', () => supportedRotators.length > 0);
+    test('支持的旋转器数据结构正确', () => {
+      if (supportedRotators.length === 0) return false;
+      const first = supportedRotators[0];
+      return first.rotModel && first.modelName && first.mfgName;
+    });
+    console.log(`   🛰️ 找到 ${supportedRotators.length} 个支持的旋转器型号`);
+  } catch (e) {
+    console.log(`❌ getSupportedRotators调用失败: ${e.message}`);
+    testsFailed++;
+  }
   
   // 3. 实例化测试
   console.log('\n🔧 实例化测试:');
   const testRig = new HamLib(1035, '/dev/null');
+  const testRotator = new Rotator(1);
   test('HamLib实例创建成功', () => testRig && typeof testRig === 'object');
+  test('Rotator实例创建成功', () => testRotator && typeof testRotator === 'object');
   const spectrumController = new SpectrumController(testRig);
   test('SpectrumController实例创建成功', () => spectrumController && typeof spectrumController === 'object');
   test('spectrum 子路径 CJS 代理可用', () => typeof SpectrumController === 'function');
@@ -188,6 +207,30 @@ try {
 
   capQueryMethods.forEach(method => {
     test(`能力查询方法 ${method} 存在`, () => typeof testRig[method] === 'function');
+  });
+
+  console.log('\n🛰️ Rotator 方法存在性测试:');
+  const rotatorMethods = [
+    'open', 'close', 'destroy', 'getConnectionInfo',
+    'setPosition', 'getPosition', 'move', 'stop', 'park', 'reset',
+    'getInfo', 'getStatus',
+    'setConf', 'getConf', 'getConfigSchema', 'getPortCaps', 'getRotatorCaps',
+    'setLevel', 'getLevel', 'getSupportedLevels',
+    'setFunction', 'getFunction', 'getSupportedFunctions',
+    'setParm', 'getParm', 'getSupportedParms'
+  ];
+
+  rotatorMethods.forEach(method => {
+    test(`Rotator 方法 ${method} 存在`, () => typeof testRotator[method] === 'function');
+  });
+
+  const rotatorStaticMethods = [
+    'getSupportedRotators', 'getHamlibVersion', 'setDebugLevel',
+    'getDebugLevel', 'getCopyright', 'getLicense'
+  ];
+
+  rotatorStaticMethods.forEach(method => {
+    test(`Rotator 静态方法 ${method} 存在`, () => typeof Rotator[method] === 'function');
   });
 
   // 6. 方法计数测试
