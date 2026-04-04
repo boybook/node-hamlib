@@ -133,6 +133,11 @@ async function runCompleteTest() {
       await rig.setMode('USB', 'wide');
       return '设置成功';
     });
+
+    await testWithErrorHandling('保持当前带宽切换模式', async () => {
+      await rig.setMode('USB', 'nochange');
+      return '设置成功';
+    });
     
     await testWithErrorHandling('设置VFOA模式', async () => {
       await rig.setMode('LSB', 'narrow', 'VFOA');

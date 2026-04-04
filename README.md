@@ -40,7 +40,7 @@ For faster installation or offline environments, you can manually install precom
 ## Quick Start
 
 ```javascript
-const { HamLib, Rotator } = require('hamlib');
+const { HamLib, Rotator, PASSBAND } = require('hamlib');
 
 async function main() {
   // Create rig instance (model 1035 = FT-991A)
@@ -50,7 +50,7 @@ async function main() {
   
   // Basic operations
   await rig.setFrequency(144390000);  // 144.39 MHz
-  await rig.setMode('FM');
+  await rig.setMode('FM', 'nochange');
   
   const freq = await rig.getFrequency();
   const mode = await rig.getMode();
@@ -116,6 +116,9 @@ const freq = await rig.getFrequency();
 
 // Mode
 await rig.setMode('USB');
+await rig.setMode('USB', 'nochange');
+await rig.setMode('USB', PASSBAND.NOCHANGE);
+await rig.setMode('USB', rig.getPassbandNormal('USB'));
 const mode = await rig.getMode();
 
 // VFO
@@ -360,7 +363,7 @@ async function repeaterOperation() {
     
     // Set up for 2m repeater
     await rig.setFrequency(145500000);      // 145.500 MHz
-    await rig.setMode('FM');
+    await rig.setMode('FM', 'nochange');
     await rig.setRepeaterShift('MINUS');    // Negative offset
     await rig.setRepeaterOffset(600000);    // 600 kHz offset
     await rig.setTuningStep(12500);         // 12.5 kHz steps

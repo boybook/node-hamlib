@@ -6,7 +6,7 @@
  * Tests core API operations to ensure the native addon is functional.
  */
 
-const { HamLib, Rotator } = require('../index.js');
+const { HamLib, Rotator, PASSBAND } = require('../index.js');
 
 let passed = 0;
 let failed = 0;
@@ -431,6 +431,22 @@ async function run() {
   await test('getPassbandWide returns number for USB', () => {
     const pb = rig.getPassbandWide('USB');
     assert(typeof pb === 'number', `expected number, got ${typeof pb}`);
+  });
+
+  await test('setMode accepts nochange selector', async () => {
+    await rig.setMode('USB', 'nochange');
+  });
+
+  await test('setMode accepts normal selector', async () => {
+    await rig.setMode('USB', 'normal');
+  });
+
+  await test('setMode accepts PASSBAND.NOCHANGE constant', async () => {
+    await rig.setMode('USB', PASSBAND.NOCHANGE);
+  });
+
+  await test('setMode accepts numeric passband width', async () => {
+    await rig.setMode('USB', rig.getPassbandNormal('USB'));
   });
 
   await test('getResolution returns number for USB', () => {

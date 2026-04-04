@@ -2567,16 +2567,28 @@ Napi::Value NodeHamLib::SetMode(const Napi::CallbackInfo & info) {
   int vfo = SHIM_RIG_VFO_CURR;
 
   // Parse parameters: setMode(mode) or setMode(mode, bandwidth) or setMode(mode, bandwidth, vfo)
-  if (info.Length() >= 2 && info[1].IsString()) {
-    std::string bandstr = info[1].As<Napi::String>().Utf8Value();
-    if (bandstr == "narrow") {
-      bandwidth = shim_rig_passband_narrow(my_rig, mode);
-    } else if (bandstr == "wide") {
-      bandwidth = shim_rig_passband_wide(my_rig, mode);
+  if (info.Length() >= 2) {
+    if (info[1].IsNumber()) {
+      bandwidth = info[1].As<Napi::Number>().Int32Value();
+    } else if (info[1].IsString()) {
+      std::string bandstr = info[1].As<Napi::String>().Utf8Value();
+      if (bandstr == "narrow") {
+        bandwidth = shim_rig_passband_narrow(my_rig, mode);
+      } else if (bandstr == "wide") {
+        bandwidth = shim_rig_passband_wide(my_rig, mode);
+      } else if (bandstr == "normal") {
+        bandwidth = SHIM_RIG_PASSBAND_NORMAL;
+      } else if (bandstr == "nochange") {
+        bandwidth = SHIM_RIG_PASSBAND_NOCHANGE;
+      } else {
+        // If second parameter is not a known passband selector, treat it as VFO
+        vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
+        RETURN_NULL_IF_INVALID_VFO(vfo);
+      }
     } else {
-      // If second parameter is not "narrow" or "wide", might be VFO
-      vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
-      RETURN_NULL_IF_INVALID_VFO(vfo);
+      Napi::TypeError::New(env, "Bandwidth must be a string selector or numeric passband width")
+        .ThrowAsJavaScriptException();
+      return env.Null();
     }
   }
   

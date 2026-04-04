@@ -1,6 +1,6 @@
 {
   "name": "hamlib",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "Node.js bindings for Hamlib rig control with official spectrum streaming support",
   "main": "index.js",
   "module": "lib/index.mjs",

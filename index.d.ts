@@ -147,6 +147,13 @@ type VFO =
  */
 type RadioMode = 'USB' | 'LSB' | 'FM' | 'PKTFM' | 'AM' | 'CW' | 'RTTY' | 'DIG' | string;
 
+type PassbandSelector = 'narrow' | 'wide' | 'normal' | 'nochange' | number;
+
+interface PassbandConstants {
+  NORMAL: 0;
+  NOCHANGE: -1;
+}
+
 /**
  * Frequency range information
  */
@@ -604,14 +611,16 @@ declare class HamLib extends EventEmitter {
   /**
    * Set radio mode
    * @param mode Radio mode (such as 'USB', 'LSB', 'FM', 'PKTFM')
-   * @param bandwidth Optional bandwidth setting ('narrow', 'wide', or default)
+   * @param bandwidth Optional bandwidth selector ('narrow', 'wide', 'normal', 'nochange') or width in Hz
    * @param vfo Optional VFO to set mode on ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @example
    * await rig.setMode('USB');
    * await rig.setMode('FM', 'narrow');
+   * await rig.setMode('USB', 'nochange');
+   * await rig.setMode('USB', PASSBAND.NOCHANGE);
    * await rig.setMode('USB', 'wide', 'VFOA');
    */
-  setMode(mode: RadioMode, bandwidth?: 'narrow' | 'wide', vfo?: VFO): Promise<number>;
+  setMode(mode: RadioMode, bandwidth?: PassbandSelector, vfo?: VFO): Promise<number>;
 
   /**
    * Set PTT (Push-to-Talk) status
@@ -1711,7 +1720,10 @@ interface VfoInfo {
 declare const nodeHamlib: {
   HamLib: typeof HamLib;
   Rotator: typeof Rotator;
+  PASSBAND: PassbandConstants;
 };
+
+declare const PASSBAND: PassbandConstants;
 
 // Export types for use elsewhere
 export { ConnectionInfo, ModeInfo, SupportedRigInfo, SupportedRotatorInfo, AntennaInfo, RotatorConnectionInfo,
@@ -1722,7 +1734,7 @@ export { ConnectionInfo, ModeInfo, SupportedRigInfo, SupportedRotatorInfo, Anten
          HamlibConfigFieldType, HamlibConfigFieldDescriptor, HamlibPortType, HamlibPortCaps,
          SpectrumScopeInfo, SpectrumModeInfo, SpectrumAverageModeInfo, SpectrumLine,
          SpectrumCapabilities, SpectrumSupportSummary, SpectrumConfig, SpectrumDisplayState,
-         ClockInfo, VfoInfo, HamLib, Rotator };
+         ClockInfo, VfoInfo, PassbandSelector, PassbandConstants, HamLib, Rotator, PASSBAND };
 
 // Support both CommonJS and ES module exports
 // @ts-ignore

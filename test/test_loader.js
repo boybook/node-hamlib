@@ -3,7 +3,7 @@
  * Tests module loading, instantiation, method existence, and static methods
  */
 
-const { HamLib, Rotator } = require('../index.js');
+const { HamLib, Rotator, PASSBAND } = require('../index.js');
 const { SpectrumController } = require('../spectrum.js');
 
 console.log('🧪 测试node-hamlib模块加载和基础功能...\n');
@@ -42,12 +42,15 @@ try {
   test('HamLib类成功加载', () => HamLib && typeof HamLib === 'function');
   test('HamLib构造函数可用', () => typeof HamLib === 'function');
   test('Rotator类成功加载', () => Rotator && typeof Rotator === 'function');
+  test('PASSBAND常量成功加载', () => PASSBAND && typeof PASSBAND === 'object');
   
   // 2. 静态方法测试
   console.log('\n📊 静态方法测试:');
   test('getHamlibVersion静态方法存在', () => typeof HamLib.getHamlibVersion === 'function');
   test('getSupportedRigs静态方法存在', () => typeof HamLib.getSupportedRigs === 'function');
   test('Rotator.getSupportedRotators静态方法存在', () => typeof Rotator.getSupportedRotators === 'function');
+  test('PASSBAND.NORMAL 常量正确', () => PASSBAND.NORMAL === 0);
+  test('PASSBAND.NOCHANGE 常量正确', () => PASSBAND.NOCHANGE === -1);
 
   try {
     const supportedRigs = HamLib.getSupportedRigs();
