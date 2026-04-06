@@ -126,7 +126,7 @@ async function runCompleteTest() {
     
     await testWithErrorHandling('获取当前模式', async () => {
       const mode = await rig.getMode();
-      return `模式: ${mode.mode}, 带宽: ${mode.width}`;
+      return `模式: ${mode.mode}, 带宽: ${mode.bandwidth}`;
     });
     
     await testWithErrorHandling('设置USB模式', async () => {

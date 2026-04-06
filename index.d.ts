@@ -26,8 +26,8 @@ interface ConnectionInfo {
 interface ModeInfo {
   /** Radio mode character */
   mode: string;
-  /** Bandwidth width */
-  width: number;
+  /** Bandwidth in Hz */
+  bandwidth: number;
 }
 
 /**

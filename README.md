@@ -54,7 +54,7 @@ async function main() {
   
   const freq = await rig.getFrequency();
   const mode = await rig.getMode();
-  console.log(`${freq/1000000} MHz ${mode.mode}`);
+  console.log(`${freq/1000000} MHz ${mode.mode} ${mode.bandwidth}Hz`);
   
   await rig.close();
 
@@ -120,6 +120,7 @@ await rig.setMode('USB', 'nochange');
 await rig.setMode('USB', PASSBAND.NOCHANGE);
 await rig.setMode('USB', rig.getPassbandNormal('USB'));
 const mode = await rig.getMode();
+console.log(mode.bandwidth); // Current passband width in Hz
 
 // VFO
 await rig.setVfo('VFOA');

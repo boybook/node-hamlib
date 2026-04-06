@@ -449,6 +449,12 @@ async function run() {
     await rig.setMode('USB', rig.getPassbandNormal('USB'));
   });
 
+  await test('getMode returns mode and numeric bandwidth', async () => {
+    const mode = await rig.getMode();
+    assert(typeof mode.mode === 'string', `expected mode string, got ${typeof mode.mode}`);
+    assert(typeof mode.bandwidth === 'number', `expected numeric bandwidth, got ${typeof mode.bandwidth}`);
+  });
+
   await test('getResolution returns number for USB', () => {
     const res = rig.getResolution('USB');
     assert(typeof res === 'number', `expected number, got ${typeof res}`);
