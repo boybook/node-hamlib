@@ -1813,6 +1813,37 @@ SHIM_API int shim_rig_get_caps_attenuator(hamlib_shim_handle_t h, int* out, int 
     return count;
 }
 
+SHIM_API int shim_rig_get_caps_agc_levels(hamlib_shim_handle_t h, int* out, int max_count) {
+    RIG *rig = (RIG *)h;
+    if (!rig || !out || max_count <= 0) return 0;
+
+    int count = 0;
+    if (rig->caps->agc_level_count > 0) {
+        for (int i = 0; i < rig->caps->agc_level_count && count < max_count; i++) {
+            out[count++] = rig->caps->agc_levels[i];
+        }
+        return count;
+    }
+
+    /* Backwards-compatibility: Hamlib documents agc_level_count=0 as "all standard modes". */
+    static const int default_agc_levels[] = {
+        RIG_AGC_OFF,
+        RIG_AGC_SUPERFAST,
+        RIG_AGC_FAST,
+        RIG_AGC_SLOW,
+        RIG_AGC_USER,
+        RIG_AGC_MEDIUM,
+        RIG_AGC_AUTO,
+        RIG_AGC_LONG,
+        RIG_AGC_ON,
+    };
+    const int default_count = (int)(sizeof(default_agc_levels) / sizeof(default_agc_levels[0]));
+    for (int i = 0; i < default_count && count < max_count; i++) {
+        out[count++] = default_agc_levels[i];
+    }
+    return count;
+}
+
 SHIM_API long shim_rig_get_caps_max_rit(hamlib_shim_handle_t h) {
     RIG *rig = (RIG *)h;
     if (!rig) return 0;

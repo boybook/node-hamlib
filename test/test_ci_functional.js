@@ -506,6 +506,12 @@ async function run() {
     vals.forEach((v, i) => assert(typeof v === 'number', `element ${i} not number`));
   });
 
+  await test('getAgcLevels returns number[]', () => {
+    const vals = rig.getAgcLevels();
+    assert(Array.isArray(vals), `expected array, got ${typeof vals}`);
+    vals.forEach((v, i) => assert(typeof v === 'number', `element ${i} not number`));
+  });
+
   await test('getMaxRit returns number >= 0', () => {
     const val = rig.getMaxRit();
     assert(typeof val === 'number' && val >= 0, `expected number >= 0, got ${val}`);

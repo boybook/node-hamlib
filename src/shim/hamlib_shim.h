@@ -762,6 +762,7 @@ typedef struct {
 /* Group A: Simple value queries */
 SHIM_API int shim_rig_get_caps_preamp(hamlib_shim_handle_t h, int* out, int max_count);
 SHIM_API int shim_rig_get_caps_attenuator(hamlib_shim_handle_t h, int* out, int max_count);
+SHIM_API int shim_rig_get_caps_agc_levels(hamlib_shim_handle_t h, int* out, int max_count);
 SHIM_API long shim_rig_get_caps_max_rit(hamlib_shim_handle_t h);
 SHIM_API long shim_rig_get_caps_max_xit(hamlib_shim_handle_t h);
 SHIM_API long shim_rig_get_caps_max_ifshift(hamlib_shim_handle_t h);

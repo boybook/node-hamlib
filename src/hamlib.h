@@ -199,6 +199,7 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
   // Capability queries - batch 2 (sync)
   Napi::Value GetPreampValues(const Napi::CallbackInfo&);
   Napi::Value GetAttenuatorValues(const Napi::CallbackInfo&);
+  Napi::Value GetAgcLevels(const Napi::CallbackInfo&);
   Napi::Value GetMaxRit(const Napi::CallbackInfo&);
   Napi::Value GetMaxXit(const Napi::CallbackInfo&);
   Napi::Value GetMaxIfShift(const Napi::CallbackInfo&);

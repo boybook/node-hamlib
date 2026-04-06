@@ -343,9 +343,9 @@ interface SplitStatusInfo {
 /**
  * Level type
  */
-type LevelType = 'AF' | 'RF' | 'SQL' | 'RFPOWER' | 'MICGAIN' | 'IF' | 'APF' | 'NR' | 
+type LevelType = 'AF' | 'PREAMP' | 'ATT' | 'RF' | 'SQL' | 'RFPOWER' | 'MICGAIN' | 'IF' | 'APF' | 'NR' | 
                  'PBT_IN' | 'PBT_OUT' | 'CWPITCH' | 'KEYSPD' | 'NOTCHF' | 'COMP' | 
-                 'AGC' | 'BKINDL' | 'BALANCE' | 'VOXGAIN' | 'VOXDELAY' | 'ANTIVOX' |
+                 'AGC' | 'BKINDL' | 'BALANCE' | 'VOXGAIN' | 'VOXDELAY' | 'ANTIVOX' | 'MONITOR_GAIN' |
                  'STRENGTH' | 'RAWSTR' | 'SWR' | 'ALC' | 'RFPOWER_METER' | 'RFPOWER_METER_WATTS' |
                  'COMP_METER' | 'VD_METER' | 'ID_METER' | 'TEMP_METER' |
                  'SPECTRUM_MODE' | 'SPECTRUM_SPAN' | 'SPECTRUM_EDGE_LOW' | 'SPECTRUM_EDGE_HIGH' |
@@ -1550,6 +1550,12 @@ declare class HamLib extends EventEmitter {
    * @returns Array of attenuator dB values
    */
   getAttenuatorValues(): number[];
+
+  /**
+   * Get supported AGC mode values
+   * @returns Array of Hamlib AGC enum values
+   */
+  getAgcLevels(): number[];
 
   /**
    * Get maximum RIT offset supported

@@ -3028,6 +3028,10 @@ Napi::Value NodeHamLib::SetLevel(const Napi::CallbackInfo & info) {
   uint64_t levelType;
   if (levelTypeStr == "AF") {
     levelType = SHIM_RIG_LEVEL_AF;
+  } else if (levelTypeStr == "PREAMP") {
+    levelType = SHIM_RIG_LEVEL_PREAMP;
+  } else if (levelTypeStr == "ATT") {
+    levelType = SHIM_RIG_LEVEL_ATT;
   } else if (levelTypeStr == "RF") {
     levelType = SHIM_RIG_LEVEL_RF;
   } else if (levelTypeStr == "SQL") {
@@ -3066,6 +3070,8 @@ Napi::Value NodeHamLib::SetLevel(const Napi::CallbackInfo & info) {
     levelType = SHIM_RIG_LEVEL_VOXDELAY;
   } else if (levelTypeStr == "ANTIVOX") {
     levelType = SHIM_RIG_LEVEL_ANTIVOX;
+  } else if (levelTypeStr == "MONITOR_GAIN") {
+    levelType = SHIM_RIG_LEVEL_MONITOR_GAIN;
   } else if (levelTypeStr == "SPECTRUM_MODE") {
     levelType = SHIM_RIG_LEVEL_SPECTRUM_MODE;
   } else if (levelTypeStr == "SPECTRUM_SPAN") {
@@ -3136,6 +3142,10 @@ Napi::Value NodeHamLib::GetLevel(const Napi::CallbackInfo & info) {
   uint64_t levelType;
   if (levelTypeStr == "AF") {
     levelType = SHIM_RIG_LEVEL_AF;
+  } else if (levelTypeStr == "PREAMP") {
+    levelType = SHIM_RIG_LEVEL_PREAMP;
+  } else if (levelTypeStr == "ATT") {
+    levelType = SHIM_RIG_LEVEL_ATT;
   } else if (levelTypeStr == "RF") {
     levelType = SHIM_RIG_LEVEL_RF;
   } else if (levelTypeStr == "SQL") {
@@ -3192,6 +3202,8 @@ Napi::Value NodeHamLib::GetLevel(const Napi::CallbackInfo & info) {
     levelType = SHIM_RIG_LEVEL_VOXGAIN;
   } else if (levelTypeStr == "ANTIVOX") {
     levelType = SHIM_RIG_LEVEL_ANTIVOX;
+  } else if (levelTypeStr == "MONITOR_GAIN") {
+    levelType = SHIM_RIG_LEVEL_MONITOR_GAIN;
   } else if (levelTypeStr == "SPECTRUM_MODE") {
     levelType = SHIM_RIG_LEVEL_SPECTRUM_MODE;
   } else if (levelTypeStr == "SPECTRUM_SPAN") {
@@ -3237,6 +3249,8 @@ Napi::Value NodeHamLib::GetSupportedLevels(const Napi::CallbackInfo & info) {
   
   // Check each level type
   if (levels & SHIM_RIG_LEVEL_AF) levelArray[index++] = Napi::String::New(env, "AF");
+  if (levels & SHIM_RIG_LEVEL_PREAMP) levelArray[index++] = Napi::String::New(env, "PREAMP");
+  if (levels & SHIM_RIG_LEVEL_ATT) levelArray[index++] = Napi::String::New(env, "ATT");
   if (levels & SHIM_RIG_LEVEL_RF) levelArray[index++] = Napi::String::New(env, "RF");
   if (levels & SHIM_RIG_LEVEL_SQL) levelArray[index++] = Napi::String::New(env, "SQL");
   if (levels & SHIM_RIG_LEVEL_RFPOWER) levelArray[index++] = Napi::String::New(env, "RFPOWER");
@@ -3256,6 +3270,7 @@ Napi::Value NodeHamLib::GetSupportedLevels(const Napi::CallbackInfo & info) {
   if (levels & SHIM_RIG_LEVEL_VOXGAIN) levelArray[index++] = Napi::String::New(env, "VOXGAIN");
   if (levels & SHIM_RIG_LEVEL_VOXDELAY) levelArray[index++] = Napi::String::New(env, "VOXDELAY");
   if (levels & SHIM_RIG_LEVEL_ANTIVOX) levelArray[index++] = Napi::String::New(env, "ANTIVOX");
+  if (levels & SHIM_RIG_LEVEL_MONITOR_GAIN) levelArray[index++] = Napi::String::New(env, "MONITOR_GAIN");
   if (levels & SHIM_RIG_LEVEL_STRENGTH) levelArray[index++] = Napi::String::New(env, "STRENGTH");
   if (levels & SHIM_RIG_LEVEL_RAWSTR) levelArray[index++] = Napi::String::New(env, "RAWSTR");
   if (levels & SHIM_RIG_LEVEL_SWR) levelArray[index++] = Napi::String::New(env, "SWR");
@@ -4028,6 +4043,7 @@ Napi::Function NodeHamLib::GetClass(Napi::Env env) {
       // Capability queries - batch 2 (sync)
       NodeHamLib::InstanceMethod("getPreampValues", & NodeHamLib::GetPreampValues),
       NodeHamLib::InstanceMethod("getAttenuatorValues", & NodeHamLib::GetAttenuatorValues),
+      NodeHamLib::InstanceMethod("getAgcLevels", & NodeHamLib::GetAgcLevels),
       NodeHamLib::InstanceMethod("getMaxRit", & NodeHamLib::GetMaxRit),
       NodeHamLib::InstanceMethod("getMaxXit", & NodeHamLib::GetMaxXit),
       NodeHamLib::InstanceMethod("getMaxIfShift", & NodeHamLib::GetMaxIfShift),
@@ -6600,6 +6616,18 @@ Napi::Value NodeHamLib::GetAttenuatorValues(const Napi::CallbackInfo& info) {
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
   int buf[SHIM_HAMLIB_MAX_MODES];
   int count = shim_rig_get_caps_attenuator(my_rig, buf, SHIM_HAMLIB_MAX_MODES);
+  Napi::Array arr = Napi::Array::New(env, count);
+  for (int i = 0; i < count; i++) {
+    arr[(uint32_t)i] = Napi::Number::New(env, buf[i]);
+  }
+  return arr;
+}
+
+Napi::Value NodeHamLib::GetAgcLevels(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  int buf[SHIM_HAMLIB_MAX_MODES];
+  int count = shim_rig_get_caps_agc_levels(my_rig, buf, SHIM_HAMLIB_MAX_MODES);
   Napi::Array arr = Napi::Array::New(env, count);
   for (int i = 0; i < count; i++) {
     arr[(uint32_t)i] = Napi::Number::New(env, buf[i]);

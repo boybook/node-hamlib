@@ -203,6 +203,7 @@ try {
   console.log('\n🆕 能力查询方法存在性测试 (第二批):');
   const capQueryMethods = [
     'getPreampValues', 'getAttenuatorValues',
+    'getAgcLevels',
     'getMaxRit', 'getMaxXit', 'getMaxIfShift',
     'getAvailableCtcssTones', 'getAvailableDcsCodes',
     'getFrequencyRanges', 'getTuningSteps', 'getFilterList'
