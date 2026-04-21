@@ -98,6 +98,17 @@ static bool hasPositiveValue(int value) {
   return value > 0;
 }
 
+template <typename T>
+static T clampValue(T value, T minValue, T maxValue) {
+  if (value < minValue) {
+    return minValue;
+  }
+  if (value > maxValue) {
+    return maxValue;
+  }
+  return value;
+}
+
 static bool parseLevelTypeString(const std::string& levelTypeStr, uint64_t* outLevelType) {
   if (!outLevelType) {
     return false;
@@ -6770,8 +6781,8 @@ Napi::Value NodeHamLib::GetRfPowerStepTable(const Napi::CallbackInfo& info) {
     return env.Null();
   }
 
-  minValue = std::clamp(minValue, 0.0, 1.0);
-  maxValue = std::clamp(maxValue, 0.0, 1.0);
+  minValue = clampValue(minValue, 0.0, 1.0);
+  maxValue = clampValue(maxValue, 0.0, 1.0);
   if (maxValue <= minValue) {
     return env.Null();
   }
@@ -6779,7 +6790,7 @@ Napi::Value NodeHamLib::GetRfPowerStepTable(const Napi::CallbackInfo& info) {
   std::vector<double> normalizedLevels;
   constexpr double epsilon = 1e-9;
   for (double value = minValue; value <= maxValue + epsilon; value += stepValue) {
-    normalizedLevels.push_back(std::clamp(value, 0.0, 1.0));
+    normalizedLevels.push_back(clampValue(value, 0.0, 1.0));
   }
   normalizedLevels.push_back(minValue);
   normalizedLevels.push_back(maxValue);
@@ -6818,7 +6829,7 @@ Napi::Value NodeHamLib::GetRfPowerStepTable(const Napi::CallbackInfo& info) {
       continue;
     }
 
-    const double normalized = std::clamp(static_cast<double>(roundTripNormalized), 0.0, 1.0);
+    const double normalized = clampValue(static_cast<double>(roundTripNormalized), 0.0, 1.0);
     rows.push_back({normalized, milliwatts});
   }
 
