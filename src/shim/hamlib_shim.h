@@ -759,6 +759,14 @@ typedef struct {
     int value;           /* step Hz or filter width Hz */
 } shim_mode_value_t;
 
+typedef struct {
+    double min_value;
+    double max_value;
+    double step_value;
+    int is_float;
+    int is_defined;
+} shim_granularity_t;
+
 /* Group A: Simple value queries */
 SHIM_API int shim_rig_get_caps_preamp(hamlib_shim_handle_t h, int* out, int max_count);
 SHIM_API int shim_rig_get_caps_attenuator(hamlib_shim_handle_t h, int* out, int max_count);
@@ -776,6 +784,8 @@ SHIM_API int shim_rig_get_caps_rx_range(hamlib_shim_handle_t h, shim_freq_range_
 SHIM_API int shim_rig_get_caps_tx_range(hamlib_shim_handle_t h, shim_freq_range_t* out, int max_count);
 SHIM_API int shim_rig_get_caps_tuning_steps(hamlib_shim_handle_t h, shim_mode_value_t* out, int max_count);
 SHIM_API int shim_rig_get_caps_filters(hamlib_shim_handle_t h, shim_mode_value_t* out, int max_count);
+SHIM_API int shim_rig_get_level_granularity(hamlib_shim_handle_t h, uint64_t level, shim_granularity_t* out);
+SHIM_API int shim_rig_get_rfpower_metadata(hamlib_shim_handle_t h, int* out_current, int* out_min, int* out_max);
 
 /* ===== Lock Mode (Hamlib >= 4.7.0) ===== */
 

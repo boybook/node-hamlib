@@ -11,9 +11,24 @@
 #endif
 #include "hamlib_shim.h"
 #include <hamlib/rig.h>
+#include <hamlib/rig_state.h>
 #include <hamlib/rotator.h>
 #include <string.h>
 #include <stdio.h>
+
+static int shim_setting_to_index(setting_t setting) {
+    int index = 0;
+
+    if (setting == 0 || (setting & (setting - 1)) != 0) {
+        return -1;
+    }
+
+    while ((setting >>= 1) != 0) {
+        index++;
+    }
+
+    return index;
+}
 
 /* ===== Lifecycle ===== */
 
@@ -1952,6 +1967,54 @@ SHIM_API int shim_rig_get_caps_filters(hamlib_shim_handle_t h, shim_mode_value_t
         count++;
     }
     return count;
+}
+
+SHIM_API int shim_rig_get_level_granularity(hamlib_shim_handle_t h, uint64_t level, shim_granularity_t* out) {
+    RIG *rig = (RIG *)h;
+    struct rig_state *state = NULL;
+    setting_t setting = (setting_t)level;
+    int index;
+    gran_t gran;
+
+    if (!rig || !out) return -RIG_EINVAL;
+    state = HAMLIB_STATE(rig);
+    if (!state) return -RIG_EINVAL;
+
+    memset(out, 0, sizeof(*out));
+    index = shim_setting_to_index(setting);
+    if (index < 0 || index >= RIG_SETTING_MAX) return -RIG_EINVAL;
+
+    gran = state->level_gran[index];
+    out->is_float = RIG_LEVEL_IS_FLOAT(setting) ? 1 : 0;
+
+    if (out->is_float) {
+        out->min_value = (double)gran.min.f;
+        out->max_value = (double)gran.max.f;
+        out->step_value = (double)gran.step.f;
+        out->is_defined = (gran.min.f != 0.0f || gran.max.f != 0.0f || gran.step.f != 0.0f) ? 1 : 0;
+        if (out->is_defined && gran.min.f == 0.0f && gran.max.f == 0.0f && gran.step.f != 0.0f) {
+            out->max_value = 1.0;
+        }
+    } else {
+        out->min_value = (double)gran.min.i;
+        out->max_value = (double)gran.max.i;
+        out->step_value = (double)gran.step.i;
+        out->is_defined = (gran.min.i != 0 || gran.max.i != 0 || gran.step.i != 0) ? 1 : 0;
+    }
+
+    return SHIM_RIG_OK;
+}
+
+SHIM_API int shim_rig_get_rfpower_metadata(hamlib_shim_handle_t h, int* out_current, int* out_min, int* out_max) {
+    RIG *rig = (RIG *)h;
+    struct rig_state *state = NULL;
+    if (!rig) return -RIG_EINVAL;
+    state = HAMLIB_STATE(rig);
+    if (!state) return -RIG_EINVAL;
+    if (out_current) *out_current = state->power_now;
+    if (out_min) *out_min = state->power_min;
+    if (out_max) *out_max = state->power_max;
+    return SHIM_RIG_OK;
 }
 
 /* ===== Static info ===== */

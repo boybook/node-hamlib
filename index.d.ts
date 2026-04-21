@@ -194,6 +194,27 @@ interface FilterInfo {
   width: number;
 }
 
+interface LevelGranularityInfo {
+  min: number;
+  max: number;
+  step: number;
+  kind: 'float' | 'int';
+  source: string;
+}
+
+interface RfPowerRigUnitRange {
+  current: number;
+  min: number;
+  max: number;
+}
+
+interface RfPowerStepInfo {
+  normalized: number;
+  milliwatts: number;
+  watts: number;
+  rigUnitRange?: RfPowerRigUnitRange;
+}
+
 /**
  * Hamlib debug level type
  * Controls the verbosity of Hamlib library debug output
@@ -1601,6 +1622,16 @@ declare class HamLib extends EventEmitter {
    * Get supported filter widths per mode
    */
   getFilterList(): FilterInfo[];
+
+  /**
+   * Get granularity metadata for a level setting from Hamlib rig state.
+   */
+  getLevelGranularity(levelType: LevelType): LevelGranularityInfo | null;
+
+  /**
+   * Get a discrete RF power step table for the current rig, frequency, and mode.
+   */
+  getRfPowerStepTable(frequency: number, mode: RadioMode): RfPowerStepInfo[] | null;
 
   // ===== Static: Copyright / License =====
 

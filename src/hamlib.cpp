@@ -5,6 +5,7 @@
 #include <memory>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <exception>
 #include <limits>
@@ -95,6 +96,102 @@ static const char* publicConfTypeName(int type) {
 
 static bool hasPositiveValue(int value) {
   return value > 0;
+}
+
+static bool parseLevelTypeString(const std::string& levelTypeStr, uint64_t* outLevelType) {
+  if (!outLevelType) {
+    return false;
+  }
+
+  uint64_t levelType = 0;
+  if (levelTypeStr == "AF") {
+    levelType = SHIM_RIG_LEVEL_AF;
+  } else if (levelTypeStr == "PREAMP") {
+    levelType = SHIM_RIG_LEVEL_PREAMP;
+  } else if (levelTypeStr == "ATT") {
+    levelType = SHIM_RIG_LEVEL_ATT;
+  } else if (levelTypeStr == "RF") {
+    levelType = SHIM_RIG_LEVEL_RF;
+  } else if (levelTypeStr == "SQL") {
+    levelType = SHIM_RIG_LEVEL_SQL;
+  } else if (levelTypeStr == "RFPOWER") {
+    levelType = SHIM_RIG_LEVEL_RFPOWER;
+  } else if (levelTypeStr == "MICGAIN") {
+    levelType = SHIM_RIG_LEVEL_MICGAIN;
+  } else if (levelTypeStr == "SWR") {
+    levelType = SHIM_RIG_LEVEL_SWR;
+  } else if (levelTypeStr == "ALC") {
+    levelType = SHIM_RIG_LEVEL_ALC;
+  } else if (levelTypeStr == "STRENGTH") {
+    levelType = SHIM_RIG_LEVEL_STRENGTH;
+  } else if (levelTypeStr == "RAWSTR") {
+    levelType = SHIM_RIG_LEVEL_RAWSTR;
+  } else if (levelTypeStr == "RFPOWER_METER") {
+    levelType = SHIM_RIG_LEVEL_RFPOWER_METER;
+  } else if (levelTypeStr == "RFPOWER_METER_WATTS") {
+    levelType = SHIM_RIG_LEVEL_RFPOWER_METER_WATTS;
+  } else if (levelTypeStr == "COMP_METER") {
+    levelType = SHIM_RIG_LEVEL_COMP_METER;
+  } else if (levelTypeStr == "VD_METER") {
+    levelType = SHIM_RIG_LEVEL_VD_METER;
+  } else if (levelTypeStr == "ID_METER") {
+    levelType = SHIM_RIG_LEVEL_ID_METER;
+  } else if (levelTypeStr == "TEMP_METER") {
+    levelType = SHIM_RIG_LEVEL_TEMP_METER;
+  } else if (levelTypeStr == "IF") {
+    levelType = SHIM_RIG_LEVEL_IF;
+  } else if (levelTypeStr == "APF") {
+    levelType = SHIM_RIG_LEVEL_APF;
+  } else if (levelTypeStr == "NR") {
+    levelType = SHIM_RIG_LEVEL_NR;
+  } else if (levelTypeStr == "PBT_IN") {
+    levelType = SHIM_RIG_LEVEL_PBT_IN;
+  } else if (levelTypeStr == "PBT_OUT") {
+    levelType = SHIM_RIG_LEVEL_PBT_OUT;
+  } else if (levelTypeStr == "CWPITCH") {
+    levelType = SHIM_RIG_LEVEL_CWPITCH;
+  } else if (levelTypeStr == "KEYSPD") {
+    levelType = SHIM_RIG_LEVEL_KEYSPD;
+  } else if (levelTypeStr == "NOTCHF") {
+    levelType = SHIM_RIG_LEVEL_NOTCHF;
+  } else if (levelTypeStr == "COMP") {
+    levelType = SHIM_RIG_LEVEL_COMP;
+  } else if (levelTypeStr == "AGC") {
+    levelType = SHIM_RIG_LEVEL_AGC;
+  } else if (levelTypeStr == "BKINDL") {
+    levelType = SHIM_RIG_LEVEL_BKINDL;
+  } else if (levelTypeStr == "BALANCE") {
+    levelType = SHIM_RIG_LEVEL_BALANCE;
+  } else if (levelTypeStr == "VOXGAIN") {
+    levelType = SHIM_RIG_LEVEL_VOXGAIN;
+  } else if (levelTypeStr == "VOXDELAY") {
+    levelType = SHIM_RIG_LEVEL_VOXDELAY;
+  } else if (levelTypeStr == "ANTIVOX") {
+    levelType = SHIM_RIG_LEVEL_ANTIVOX;
+  } else if (levelTypeStr == "MONITOR_GAIN") {
+    levelType = SHIM_RIG_LEVEL_MONITOR_GAIN;
+  } else if (levelTypeStr == "SPECTRUM_MODE") {
+    levelType = SHIM_RIG_LEVEL_SPECTRUM_MODE;
+  } else if (levelTypeStr == "SPECTRUM_SPAN") {
+    levelType = SHIM_RIG_LEVEL_SPECTRUM_SPAN;
+  } else if (levelTypeStr == "SPECTRUM_EDGE_LOW") {
+    levelType = SHIM_RIG_LEVEL_SPECTRUM_EDGE_LOW;
+  } else if (levelTypeStr == "SPECTRUM_EDGE_HIGH") {
+    levelType = SHIM_RIG_LEVEL_SPECTRUM_EDGE_HIGH;
+  } else if (levelTypeStr == "SPECTRUM_SPEED") {
+    levelType = SHIM_RIG_LEVEL_SPECTRUM_SPEED;
+  } else if (levelTypeStr == "SPECTRUM_REF") {
+    levelType = SHIM_RIG_LEVEL_SPECTRUM_REF;
+  } else if (levelTypeStr == "SPECTRUM_AVG") {
+    levelType = SHIM_RIG_LEVEL_SPECTRUM_AVG;
+  } else if (levelTypeStr == "SPECTRUM_ATT") {
+    levelType = SHIM_RIG_LEVEL_SPECTRUM_ATT;
+  } else {
+    return false;
+  }
+
+  *outLevelType = levelType;
+  return true;
 }
 
 static int parseVfoString(Napi::Env env, const std::string& vfoToken) {
@@ -3024,71 +3121,8 @@ Napi::Value NodeHamLib::SetLevel(const Napi::CallbackInfo & info) {
     RETURN_NULL_IF_INVALID_VFO(vfo);
   }
   
-  // Map level type strings to hamlib constants
   uint64_t levelType;
-  if (levelTypeStr == "AF") {
-    levelType = SHIM_RIG_LEVEL_AF;
-  } else if (levelTypeStr == "PREAMP") {
-    levelType = SHIM_RIG_LEVEL_PREAMP;
-  } else if (levelTypeStr == "ATT") {
-    levelType = SHIM_RIG_LEVEL_ATT;
-  } else if (levelTypeStr == "RF") {
-    levelType = SHIM_RIG_LEVEL_RF;
-  } else if (levelTypeStr == "SQL") {
-    levelType = SHIM_RIG_LEVEL_SQL;
-  } else if (levelTypeStr == "RFPOWER") {
-    levelType = SHIM_RIG_LEVEL_RFPOWER;
-  } else if (levelTypeStr == "MICGAIN") {
-    levelType = SHIM_RIG_LEVEL_MICGAIN;
-  } else if (levelTypeStr == "IF") {
-    levelType = SHIM_RIG_LEVEL_IF;
-  } else if (levelTypeStr == "APF") {
-    levelType = SHIM_RIG_LEVEL_APF;
-  } else if (levelTypeStr == "NR") {
-    levelType = SHIM_RIG_LEVEL_NR;
-  } else if (levelTypeStr == "PBT_IN") {
-    levelType = SHIM_RIG_LEVEL_PBT_IN;
-  } else if (levelTypeStr == "PBT_OUT") {
-    levelType = SHIM_RIG_LEVEL_PBT_OUT;
-  } else if (levelTypeStr == "CWPITCH") {
-    levelType = SHIM_RIG_LEVEL_CWPITCH;
-  } else if (levelTypeStr == "KEYSPD") {
-    levelType = SHIM_RIG_LEVEL_KEYSPD;
-  } else if (levelTypeStr == "NOTCHF") {
-    levelType = SHIM_RIG_LEVEL_NOTCHF;
-  } else if (levelTypeStr == "COMP") {
-    levelType = SHIM_RIG_LEVEL_COMP;
-  } else if (levelTypeStr == "AGC") {
-    levelType = SHIM_RIG_LEVEL_AGC;
-  } else if (levelTypeStr == "BKINDL") {
-    levelType = SHIM_RIG_LEVEL_BKINDL;
-  } else if (levelTypeStr == "BALANCE") {
-    levelType = SHIM_RIG_LEVEL_BALANCE;
-  } else if (levelTypeStr == "VOXGAIN") {
-    levelType = SHIM_RIG_LEVEL_VOXGAIN;
-  } else if (levelTypeStr == "VOXDELAY") {
-    levelType = SHIM_RIG_LEVEL_VOXDELAY;
-  } else if (levelTypeStr == "ANTIVOX") {
-    levelType = SHIM_RIG_LEVEL_ANTIVOX;
-  } else if (levelTypeStr == "MONITOR_GAIN") {
-    levelType = SHIM_RIG_LEVEL_MONITOR_GAIN;
-  } else if (levelTypeStr == "SPECTRUM_MODE") {
-    levelType = SHIM_RIG_LEVEL_SPECTRUM_MODE;
-  } else if (levelTypeStr == "SPECTRUM_SPAN") {
-    levelType = SHIM_RIG_LEVEL_SPECTRUM_SPAN;
-  } else if (levelTypeStr == "SPECTRUM_EDGE_LOW") {
-    levelType = SHIM_RIG_LEVEL_SPECTRUM_EDGE_LOW;
-  } else if (levelTypeStr == "SPECTRUM_EDGE_HIGH") {
-    levelType = SHIM_RIG_LEVEL_SPECTRUM_EDGE_HIGH;
-  } else if (levelTypeStr == "SPECTRUM_SPEED") {
-    levelType = SHIM_RIG_LEVEL_SPECTRUM_SPEED;
-  } else if (levelTypeStr == "SPECTRUM_REF") {
-    levelType = SHIM_RIG_LEVEL_SPECTRUM_REF;
-  } else if (levelTypeStr == "SPECTRUM_AVG") {
-    levelType = SHIM_RIG_LEVEL_SPECTRUM_AVG;
-  } else if (levelTypeStr == "SPECTRUM_ATT") {
-    levelType = SHIM_RIG_LEVEL_SPECTRUM_ATT;
-  } else {
+  if (!parseLevelTypeString(levelTypeStr, &levelType)) {
     Napi::TypeError::New(env, "Invalid level type").ThrowAsJavaScriptException();
     return env.Null();
   }
@@ -3138,89 +3172,8 @@ Napi::Value NodeHamLib::GetLevel(const Napi::CallbackInfo & info) {
   
   std::string levelTypeStr = info[0].As<Napi::String>().Utf8Value();
   
-  // Map level type strings to hamlib constants
   uint64_t levelType;
-  if (levelTypeStr == "AF") {
-    levelType = SHIM_RIG_LEVEL_AF;
-  } else if (levelTypeStr == "PREAMP") {
-    levelType = SHIM_RIG_LEVEL_PREAMP;
-  } else if (levelTypeStr == "ATT") {
-    levelType = SHIM_RIG_LEVEL_ATT;
-  } else if (levelTypeStr == "RF") {
-    levelType = SHIM_RIG_LEVEL_RF;
-  } else if (levelTypeStr == "SQL") {
-    levelType = SHIM_RIG_LEVEL_SQL;
-  } else if (levelTypeStr == "RFPOWER") {
-    levelType = SHIM_RIG_LEVEL_RFPOWER;
-  } else if (levelTypeStr == "MICGAIN") {
-    levelType = SHIM_RIG_LEVEL_MICGAIN;
-  } else if (levelTypeStr == "SWR") {
-    levelType = SHIM_RIG_LEVEL_SWR;
-  } else if (levelTypeStr == "ALC") {
-    levelType = SHIM_RIG_LEVEL_ALC;
-  } else if (levelTypeStr == "STRENGTH") {
-    levelType = SHIM_RIG_LEVEL_STRENGTH;
-  } else if (levelTypeStr == "RAWSTR") {
-    levelType = SHIM_RIG_LEVEL_RAWSTR;
-  } else if (levelTypeStr == "RFPOWER_METER") {
-    levelType = SHIM_RIG_LEVEL_RFPOWER_METER;
-  } else if (levelTypeStr == "RFPOWER_METER_WATTS") {
-    levelType = SHIM_RIG_LEVEL_RFPOWER_METER_WATTS;
-  } else if (levelTypeStr == "COMP_METER") {
-    levelType = SHIM_RIG_LEVEL_COMP_METER;
-  } else if (levelTypeStr == "VD_METER") {
-    levelType = SHIM_RIG_LEVEL_VD_METER;
-  } else if (levelTypeStr == "ID_METER") {
-    levelType = SHIM_RIG_LEVEL_ID_METER;
-  } else if (levelTypeStr == "TEMP_METER") {
-    levelType = SHIM_RIG_LEVEL_TEMP_METER;
-  } else if (levelTypeStr == "NR") {
-    levelType = SHIM_RIG_LEVEL_NR;
-  } else if (levelTypeStr == "AF") {
-    levelType = SHIM_RIG_LEVEL_AF;
-  } else if (levelTypeStr == "RF") {
-    levelType = SHIM_RIG_LEVEL_RF;
-  } else if (levelTypeStr == "SQL") {
-    levelType = SHIM_RIG_LEVEL_SQL;
-  } else if (levelTypeStr == "RFPOWER") {
-    levelType = SHIM_RIG_LEVEL_RFPOWER;
-  } else if (levelTypeStr == "MICGAIN") {
-    levelType = SHIM_RIG_LEVEL_MICGAIN;
-  } else if (levelTypeStr == "VOXDELAY") {
-    levelType = SHIM_RIG_LEVEL_VOXDELAY;
-  } else if (levelTypeStr == "PBT_IN") {
-    levelType = SHIM_RIG_LEVEL_PBT_IN;
-  } else if (levelTypeStr == "PBT_OUT") {
-    levelType = SHIM_RIG_LEVEL_PBT_OUT;
-  } else if (levelTypeStr == "CWPITCH") {
-    levelType = SHIM_RIG_LEVEL_CWPITCH;
-  } else if (levelTypeStr == "COMP") {
-    levelType = SHIM_RIG_LEVEL_COMP;
-  } else if (levelTypeStr == "AGC") {
-    levelType = SHIM_RIG_LEVEL_AGC;
-  } else if (levelTypeStr == "VOXGAIN") {
-    levelType = SHIM_RIG_LEVEL_VOXGAIN;
-  } else if (levelTypeStr == "ANTIVOX") {
-    levelType = SHIM_RIG_LEVEL_ANTIVOX;
-  } else if (levelTypeStr == "MONITOR_GAIN") {
-    levelType = SHIM_RIG_LEVEL_MONITOR_GAIN;
-  } else if (levelTypeStr == "SPECTRUM_MODE") {
-    levelType = SHIM_RIG_LEVEL_SPECTRUM_MODE;
-  } else if (levelTypeStr == "SPECTRUM_SPAN") {
-    levelType = SHIM_RIG_LEVEL_SPECTRUM_SPAN;
-  } else if (levelTypeStr == "SPECTRUM_EDGE_LOW") {
-    levelType = SHIM_RIG_LEVEL_SPECTRUM_EDGE_LOW;
-  } else if (levelTypeStr == "SPECTRUM_EDGE_HIGH") {
-    levelType = SHIM_RIG_LEVEL_SPECTRUM_EDGE_HIGH;
-  } else if (levelTypeStr == "SPECTRUM_SPEED") {
-    levelType = SHIM_RIG_LEVEL_SPECTRUM_SPEED;
-  } else if (levelTypeStr == "SPECTRUM_REF") {
-    levelType = SHIM_RIG_LEVEL_SPECTRUM_REF;
-  } else if (levelTypeStr == "SPECTRUM_AVG") {
-    levelType = SHIM_RIG_LEVEL_SPECTRUM_AVG;
-  } else if (levelTypeStr == "SPECTRUM_ATT") {
-    levelType = SHIM_RIG_LEVEL_SPECTRUM_ATT;
-  } else {
+  if (!parseLevelTypeString(levelTypeStr, &levelType)) {
     Napi::TypeError::New(env, "Invalid level type").ThrowAsJavaScriptException();
     return env.Null();
   }
@@ -4052,6 +4005,8 @@ Napi::Function NodeHamLib::GetClass(Napi::Env env) {
       NodeHamLib::InstanceMethod("getFrequencyRanges", & NodeHamLib::GetFrequencyRanges),
       NodeHamLib::InstanceMethod("getTuningSteps", & NodeHamLib::GetTuningSteps),
       NodeHamLib::InstanceMethod("getFilterList", & NodeHamLib::GetFilterList),
+      NodeHamLib::InstanceMethod("getLevelGranularity", & NodeHamLib::GetLevelGranularity),
+      NodeHamLib::InstanceMethod("getRfPowerStepTable", & NodeHamLib::GetRfPowerStepTable),
 
       NodeHamLib::InstanceMethod("close", & NodeHamLib::Close),
       NodeHamLib::InstanceMethod("destroy", & NodeHamLib::Destroy),
@@ -6737,6 +6692,198 @@ Napi::Value NodeHamLib::GetFilterList(const Napi::CallbackInfo& info) {
     arr[(uint32_t)i] = obj;
   }
   return arr;
+}
+
+Napi::Value NodeHamLib::GetLevelGranularity(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
+
+  if (info.Length() < 1 || !info[0].IsString()) {
+    Napi::TypeError::New(env, "Expected (levelType: string)").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+
+  std::string levelTypeStr = info[0].As<Napi::String>().Utf8Value();
+  uint64_t levelType = 0;
+  if (!parseLevelTypeString(levelTypeStr, &levelType)) {
+    Napi::TypeError::New(env, "Invalid level type").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+
+  shim_granularity_t granularity{};
+  const int result = shim_rig_get_level_granularity(my_rig, levelType, &granularity);
+  if (result != SHIM_RIG_OK) {
+    Napi::Error::New(env, shim_rigerror(result)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+
+  if (!granularity.is_defined) {
+    return env.Null();
+  }
+
+  Napi::Object obj = Napi::Object::New(env);
+  obj.Set("min", Napi::Number::New(env, granularity.min_value));
+  obj.Set("max", Napi::Number::New(env, granularity.max_value));
+  obj.Set("step", Napi::Number::New(env, granularity.step_value));
+  obj.Set("kind", Napi::String::New(env, granularity.is_float ? "float" : "int"));
+  obj.Set("source", Napi::String::New(env, "rig_state.level_gran"));
+  return obj;
+}
+
+Napi::Value NodeHamLib::GetRfPowerStepTable(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  RETURN_NULL_IF_RIG_HANDLE_INVALID();
+
+  if (info.Length() < 2 || !info[0].IsNumber() || !info[1].IsString()) {
+    Napi::TypeError::New(env, "Expected (frequency: number, mode: string)").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+
+  const double freq = info[0].As<Napi::Number>().DoubleValue();
+  const std::string modeStr = info[1].As<Napi::String>().Utf8Value();
+  if (freq < 1000 || freq > 10000000000) {
+    Napi::Error::New(env, "Frequency out of range (1 kHz - 10 GHz)").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+
+  const int mode = shim_rig_parse_mode(modeStr.c_str());
+  if (mode == SHIM_RIG_MODE_NONE) {
+    Napi::Error::New(env, "Invalid mode: " + modeStr).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+
+  shim_granularity_t granularity{};
+  int granularityResult = shim_rig_get_level_granularity(my_rig, SHIM_RIG_LEVEL_RFPOWER, &granularity);
+  if (granularityResult != SHIM_RIG_OK || !granularity.is_defined || !granularity.is_float) {
+    return env.Null();
+  }
+
+  int powerNow = 0;
+  int powerMin = 0;
+  int powerMax = 0;
+  (void)shim_rig_get_rfpower_metadata(my_rig, &powerNow, &powerMin, &powerMax);
+
+  double minValue = granularity.min_value;
+  double maxValue = granularity.max_value;
+  const double stepValue = granularity.step_value;
+  if (maxValue <= minValue || stepValue <= 0.0) {
+    return env.Null();
+  }
+
+  minValue = std::clamp(minValue, 0.0, 1.0);
+  maxValue = std::clamp(maxValue, 0.0, 1.0);
+  if (maxValue <= minValue) {
+    return env.Null();
+  }
+
+  std::vector<double> normalizedLevels;
+  constexpr double epsilon = 1e-9;
+  for (double value = minValue; value <= maxValue + epsilon; value += stepValue) {
+    normalizedLevels.push_back(std::clamp(value, 0.0, 1.0));
+  }
+  normalizedLevels.push_back(minValue);
+  normalizedLevels.push_back(maxValue);
+
+  std::sort(normalizedLevels.begin(), normalizedLevels.end());
+  normalizedLevels.erase(
+    std::unique(
+      normalizedLevels.begin(),
+      normalizedLevels.end(),
+      [](double left, double right) { return std::abs(left - right) < 1e-6; }
+    ),
+    normalizedLevels.end()
+  );
+
+  if (normalizedLevels.size() < 2) {
+    return env.Null();
+  }
+
+  struct RfPowerStepRow {
+    double normalized;
+    unsigned int milliwatts;
+  };
+
+  std::vector<RfPowerStepRow> rows;
+  rows.reserve(normalizedLevels.size());
+  for (double candidateNormalized : normalizedLevels) {
+    unsigned int milliwatts = 0;
+    const int powerResult = shim_rig_power2mW(my_rig, &milliwatts, static_cast<float>(candidateNormalized), freq, mode);
+    if (powerResult != SHIM_RIG_OK || milliwatts == 0) {
+      continue;
+    }
+
+    float roundTripNormalized = 0.0f;
+    const int reversePowerResult = shim_rig_mW2power(my_rig, &roundTripNormalized, milliwatts, freq, mode);
+    if (reversePowerResult != SHIM_RIG_OK || !std::isfinite(roundTripNormalized)) {
+      continue;
+    }
+
+    const double normalized = std::clamp(static_cast<double>(roundTripNormalized), 0.0, 1.0);
+    rows.push_back({normalized, milliwatts});
+  }
+
+  if (rows.size() < 2) {
+    return env.Null();
+  }
+
+  std::sort(
+    rows.begin(),
+    rows.end(),
+    [](const RfPowerStepRow& left, const RfPowerStepRow& right) {
+      if (std::abs(left.normalized - right.normalized) >= 1e-6) {
+        return left.normalized < right.normalized;
+      }
+      return left.milliwatts < right.milliwatts;
+    }
+  );
+
+  std::vector<RfPowerStepRow> dedupedRows;
+  dedupedRows.reserve(rows.size());
+  for (const RfPowerStepRow& row : rows) {
+    if (!dedupedRows.empty()) {
+      const RfPowerStepRow& previous = dedupedRows.back();
+      if (std::abs(row.normalized - previous.normalized) < 1e-6) {
+        if (row.milliwatts != previous.milliwatts) {
+          return env.Null();
+        }
+        continue;
+      }
+      if (row.milliwatts == previous.milliwatts) {
+        continue;
+      }
+      if (row.milliwatts < previous.milliwatts) {
+        return env.Null();
+      }
+    }
+    dedupedRows.push_back(row);
+  }
+
+  if (dedupedRows.size() < 2) {
+    return env.Null();
+  }
+
+  Napi::Array table = Napi::Array::New(env);
+  uint32_t index = 0;
+  for (const RfPowerStepRow& row : dedupedRows) {
+    Napi::Object item = Napi::Object::New(env);
+    item.Set("normalized", Napi::Number::New(env, row.normalized));
+    item.Set("milliwatts", Napi::Number::New(env, row.milliwatts));
+    item.Set("watts", Napi::Number::New(env, row.milliwatts / 1000.0));
+    if (powerMin != 0 || powerMax != 0 || powerNow != 0) {
+      item.Set("rigUnitRange", Napi::Object::New(env));
+      Napi::Object range = item.Get("rigUnitRange").As<Napi::Object>();
+      range.Set("current", Napi::Number::New(env, powerNow));
+      range.Set("min", Napi::Number::New(env, powerMin));
+      range.Set("max", Napi::Number::New(env, powerMax));
+    }
+    table[index++] = item;
+  }
+
+  if (index < 2) {
+    return env.Null();
+  }
+
+  return table;
 }
 
 // ===== Static: getCopyright / getLicense =====

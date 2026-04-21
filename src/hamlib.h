@@ -208,6 +208,8 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
   Napi::Value GetFrequencyRanges(const Napi::CallbackInfo&);
   Napi::Value GetTuningSteps(const Napi::CallbackInfo&);
   Napi::Value GetFilterList(const Napi::CallbackInfo&);
+  Napi::Value GetLevelGranularity(const Napi::CallbackInfo&);
+  Napi::Value GetRfPowerStepTable(const Napi::CallbackInfo&);
 
   // Static method to get supported rig models
   static Napi::Value GetSupportedRigs(const Napi::CallbackInfo&);

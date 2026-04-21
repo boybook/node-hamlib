@@ -166,6 +166,11 @@ await rig.setLevel('AF', 0.7);       // Audio 70%
 await rig.setLevel('RFPOWER', 0.5);  // TX power 50%
 const audioLevel = await rig.getLevel('AF');
 
+// Discrete RF power metadata when Hamlib exposes it
+const rfPowerGranularity = rig.getLevelGranularity('RFPOWER');
+const rfPowerSteps = rig.getRfPowerStepTable(14074000, 'USB');
+console.log(rfPowerGranularity, rfPowerSteps);
+
 // Functions
 await rig.setFunction('NB', true);   // Noise blanker on
 const voxEnabled = await rig.getFunction('VOX');

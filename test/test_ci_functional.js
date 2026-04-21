@@ -576,6 +576,42 @@ async function run() {
     }
   });
 
+  await test('getLevelGranularity returns object or null', () => {
+    const granularity = rig.getLevelGranularity('RFPOWER');
+    if (granularity !== null) {
+      assert(typeof granularity === 'object', `expected object, got ${typeof granularity}`);
+      assert(typeof granularity.min === 'number', 'min should be number');
+      assert(typeof granularity.max === 'number', 'max should be number');
+      assert(typeof granularity.step === 'number', 'step should be number');
+      assert(granularity.kind === 'float' || granularity.kind === 'int', `unexpected kind ${granularity.kind}`);
+      assert(typeof granularity.source === 'string' && granularity.source.length > 0, 'source should be non-empty string');
+    }
+  });
+
+  await test('getRfPowerStepTable returns array or null', async () => {
+    const table = rig.getRfPowerStepTable(7100000, 'USB');
+    if (table !== null) {
+      let previousNormalized = -1;
+      let previousMilliwatts = 0;
+      assert(Array.isArray(table), `expected array, got ${typeof table}`);
+      for (const [index, entry] of table.entries()) {
+        assert(typeof entry.normalized === 'number', `entry ${index} normalized should be number`);
+        assert(entry.normalized >= 0 && entry.normalized <= 1, `entry ${index} normalized out of range`);
+        assert(typeof entry.milliwatts === 'number' && entry.milliwatts > 0, `entry ${index} milliwatts invalid`);
+        assert(typeof entry.watts === 'number' && entry.watts > 0, `entry ${index} watts invalid`);
+        assert(entry.normalized > previousNormalized, `entry ${index} normalized should be strictly increasing`);
+        assert(entry.milliwatts > previousMilliwatts, `entry ${index} milliwatts should be strictly increasing`);
+        const roundTripNormalized = await rig.mW2power(entry.milliwatts, 7100000, 'USB');
+        assert(
+          Math.abs(roundTripNormalized - entry.normalized) < 1e-6,
+          `entry ${index} normalized should round-trip via mW2power`,
+        );
+        previousNormalized = entry.normalized;
+        previousMilliwatts = entry.milliwatts;
+      }
+    }
+  });
+
   await test('getMemoryChannel requires explicit readOnly flag', async () => {
     await assertRejects(() => rig.getMemoryChannel(1), /Expected \(channelNumber: number, readOnly: boolean\)/);
   });

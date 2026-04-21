@@ -206,7 +206,8 @@ try {
     'getAgcLevels',
     'getMaxRit', 'getMaxXit', 'getMaxIfShift',
     'getAvailableCtcssTones', 'getAvailableDcsCodes',
-    'getFrequencyRanges', 'getTuningSteps', 'getFilterList'
+    'getFrequencyRanges', 'getTuningSteps', 'getFilterList',
+    'getLevelGranularity', 'getRfPowerStepTable'
   ];
 
   capQueryMethods.forEach(method => {
