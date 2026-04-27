@@ -315,16 +315,76 @@ typedef void* hamlib_shim_handle_t;
 /* ===== Simplified structs for cross-compiler safety ===== */
 
 /* Simplified channel data for set/get memory channel */
+#define SHIM_HAMLIB_MAX_CHANNEL_LEVELS 64
+#define SHIM_HAMLIB_MAX_CHANNEL_RANGES 256
+
+typedef struct {
+    int bank_num;
+    int vfo;
+    int ant;
+    int freq;
+    int mode;
+    int width;
+    int tx_freq;
+    int tx_mode;
+    int tx_width;
+    int split;
+    int tx_vfo;
+    int rptr_shift;
+    int rptr_offs;
+    int tuning_step;
+    int rit;
+    int xit;
+    uint64_t funcs;
+    uint64_t levels;
+    int ctcss_tone;
+    int ctcss_sql;
+    int dcs_code;
+    int dcs_sql;
+    int scan_group;
+    int flags;
+    int channel_desc;
+    int tag;
+} shim_channel_caps_t;
+
+typedef struct {
+    int start;
+    int end;
+    int type;
+    shim_channel_caps_t caps;
+} shim_memory_range_t;
+
 typedef struct {
     int channel_num;
+    int bank_num;
+    int channel_type;
+    int ant;
     double freq;
     double tx_freq;
     int mode;          /* rmode_t as int */
     int width;         /* pbwidth_t as int */
+    int tx_mode;
+    int tx_width;
     int split;         /* split_t as int */
+    int tx_vfo;
+    int rptr_shift;
+    int rptr_offs;
+    int tuning_step;
+    int rit;
+    int xit;
+    uint64_t funcs;
+    int level_count;
+    uint64_t level_tokens[SHIM_HAMLIB_MAX_CHANNEL_LEVELS];
+    double level_values[SHIM_HAMLIB_MAX_CHANNEL_LEVELS];
     int ctcss_tone;
+    int ctcss_sql;
+    int dcs_code;
+    int dcs_sql;
+    int scan_group;
+    unsigned int flags;
     int vfo;
     char channel_desc[64];
+    char tag[32];
 } shim_channel_t;
 
 /* Rig info for rig list enumeration */
@@ -603,6 +663,11 @@ SHIM_API int shim_rig_get_xit(hamlib_shim_handle_t h, int vfo, int* offset);
 
 SHIM_API int shim_rig_set_channel(hamlib_shim_handle_t h, int vfo, const shim_channel_t* chan);
 SHIM_API int shim_rig_get_channel(hamlib_shim_handle_t h, int vfo, shim_channel_t* chan, int read_only);
+SHIM_API int shim_rig_get_memory_range_count(hamlib_shim_handle_t h);
+SHIM_API int shim_rig_get_memory_range(hamlib_shim_handle_t h, int index, shim_memory_range_t* out);
+SHIM_API int shim_rig_lookup_memory_caps(hamlib_shim_handle_t h, int channel_num, shim_memory_range_t* out);
+SHIM_API int shim_rig_get_chan_all(hamlib_shim_handle_t h, int vfo, shim_channel_t* chans, int max_count);
+SHIM_API int shim_rig_set_chan_all(hamlib_shim_handle_t h, int vfo, const shim_channel_t* chans, int count);
 SHIM_API int shim_rig_set_mem(hamlib_shim_handle_t h, int vfo, int ch);
 SHIM_API int shim_rig_get_mem(hamlib_shim_handle_t h, int vfo, int* ch);
 SHIM_API int shim_rig_set_bank(hamlib_shim_handle_t h, int vfo, int bank);

@@ -5,10 +5,12 @@
 #include <memory>
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <exception>
 #include <limits>
+#include <set>
 
 // 安全宏 - 检查RIG指针有效性，防止空指针解引用和已销毁对象访问
 #define CHECK_RIG_VALID() \
@@ -64,6 +66,8 @@ Napi::FunctionReference NodeHamLib::constructor;
 Napi::ThreadSafeFunction tsfn;
 
 constexpr int kInvalidVfoParameter = std::numeric_limits<int>::min();
+
+static int parseVfoString(Napi::Env env, const std::string& vfoToken);
 
 static std::string publicVfoToken(int vfo) {
   const char* rawToken = shim_rig_strvfo(vfo);
@@ -202,6 +206,319 @@ static bool parseLevelTypeString(const std::string& levelTypeStr, uint64_t* outL
   }
 
   *outLevelType = levelType;
+  return true;
+}
+
+struct NamedBit {
+  const char* name;
+  uint64_t bit;
+};
+
+static const NamedBit kMemoryFunctionBits[] = {
+  {"FAGC", SHIM_RIG_FUNC_FAGC}, {"NB", SHIM_RIG_FUNC_NB}, {"COMP", SHIM_RIG_FUNC_COMP},
+  {"VOX", SHIM_RIG_FUNC_VOX}, {"TONE", SHIM_RIG_FUNC_TONE}, {"TSQL", SHIM_RIG_FUNC_TSQL},
+  {"SBKIN", SHIM_RIG_FUNC_SBKIN}, {"FBKIN", SHIM_RIG_FUNC_FBKIN}, {"ANF", SHIM_RIG_FUNC_ANF},
+  {"NR", SHIM_RIG_FUNC_NR}, {"AIP", SHIM_RIG_FUNC_AIP}, {"APF", SHIM_RIG_FUNC_APF},
+  {"MON", SHIM_RIG_FUNC_MON}, {"MN", SHIM_RIG_FUNC_MN}, {"RF", SHIM_RIG_FUNC_RF},
+  {"ARO", SHIM_RIG_FUNC_ARO}, {"LOCK", SHIM_RIG_FUNC_LOCK}, {"MUTE", SHIM_RIG_FUNC_MUTE},
+  {"VSC", SHIM_RIG_FUNC_VSC}, {"REV", SHIM_RIG_FUNC_REV}, {"SQL", SHIM_RIG_FUNC_SQL},
+  {"ABM", SHIM_RIG_FUNC_ABM}, {"BC", SHIM_RIG_FUNC_BC}, {"MBC", SHIM_RIG_FUNC_MBC},
+  {"RIT", SHIM_RIG_FUNC_RIT}, {"AFC", SHIM_RIG_FUNC_AFC}, {"SATMODE", SHIM_RIG_FUNC_SATMODE},
+  {"SCOPE", SHIM_RIG_FUNC_SCOPE}, {"RESUME", SHIM_RIG_FUNC_RESUME}, {"TBURST", SHIM_RIG_FUNC_TBURST},
+  {"TUNER", SHIM_RIG_FUNC_TUNER}, {"XIT", SHIM_RIG_FUNC_XIT}, {"TRANSCEIVE", SHIM_RIG_FUNC_TRANSCEIVE},
+  {"SPECTRUM", SHIM_RIG_FUNC_SPECTRUM}, {"SPECTRUM_HOLD", SHIM_RIG_FUNC_SPECTRUM_HOLD},
+  {"SEND_MORSE", SHIM_RIG_FUNC_SEND_MORSE}, {"SEND_VOICE_MEM", SHIM_RIG_FUNC_SEND_VOICE_MEM},
+  {"OVF_STATUS", SHIM_RIG_FUNC_OVF_STATUS},
+};
+
+static const NamedBit kMemoryLevelBits[] = {
+  {"PREAMP", SHIM_RIG_LEVEL_PREAMP}, {"ATT", SHIM_RIG_LEVEL_ATT}, {"VOXDELAY", SHIM_RIG_LEVEL_VOXDELAY},
+  {"AF", SHIM_RIG_LEVEL_AF}, {"RF", SHIM_RIG_LEVEL_RF}, {"SQL", SHIM_RIG_LEVEL_SQL},
+  {"IF", SHIM_RIG_LEVEL_IF}, {"APF", SHIM_RIG_LEVEL_APF}, {"NR", SHIM_RIG_LEVEL_NR},
+  {"PBT_IN", SHIM_RIG_LEVEL_PBT_IN}, {"PBT_OUT", SHIM_RIG_LEVEL_PBT_OUT}, {"CWPITCH", SHIM_RIG_LEVEL_CWPITCH},
+  {"RFPOWER", SHIM_RIG_LEVEL_RFPOWER}, {"MICGAIN", SHIM_RIG_LEVEL_MICGAIN}, {"KEYSPD", SHIM_RIG_LEVEL_KEYSPD},
+  {"NOTCHF", SHIM_RIG_LEVEL_NOTCHF}, {"COMP", SHIM_RIG_LEVEL_COMP}, {"AGC", SHIM_RIG_LEVEL_AGC},
+  {"BKINDL", SHIM_RIG_LEVEL_BKINDL}, {"BALANCE", SHIM_RIG_LEVEL_BALANCE}, {"METER", SHIM_RIG_LEVEL_METER},
+  {"VOXGAIN", SHIM_RIG_LEVEL_VOXGAIN}, {"ANTIVOX", SHIM_RIG_LEVEL_ANTIVOX},
+  {"SLOPE_LOW", SHIM_RIG_LEVEL_SLOPE_LOW}, {"SLOPE_HIGH", SHIM_RIG_LEVEL_SLOPE_HIGH},
+  {"BKIN_DLYMS", SHIM_RIG_LEVEL_BKIN_DLYMS}, {"RAWSTR", SHIM_RIG_LEVEL_RAWSTR},
+  {"SWR", SHIM_RIG_LEVEL_SWR}, {"ALC", SHIM_RIG_LEVEL_ALC}, {"STRENGTH", SHIM_RIG_LEVEL_STRENGTH},
+  {"RFPOWER_METER", SHIM_RIG_LEVEL_RFPOWER_METER}, {"COMP_METER", SHIM_RIG_LEVEL_COMP_METER},
+  {"VD_METER", SHIM_RIG_LEVEL_VD_METER}, {"ID_METER", SHIM_RIG_LEVEL_ID_METER},
+  {"NOTCHF_RAW", SHIM_RIG_LEVEL_NOTCHF_RAW}, {"MONITOR_GAIN", SHIM_RIG_LEVEL_MONITOR_GAIN},
+  {"NB", SHIM_RIG_LEVEL_NB}, {"RFPOWER_METER_WATTS", SHIM_RIG_LEVEL_RFPOWER_METER_WATTS},
+  {"SPECTRUM_MODE", SHIM_RIG_LEVEL_SPECTRUM_MODE}, {"SPECTRUM_SPAN", SHIM_RIG_LEVEL_SPECTRUM_SPAN},
+  {"SPECTRUM_EDGE_LOW", SHIM_RIG_LEVEL_SPECTRUM_EDGE_LOW}, {"SPECTRUM_EDGE_HIGH", SHIM_RIG_LEVEL_SPECTRUM_EDGE_HIGH},
+  {"SPECTRUM_SPEED", SHIM_RIG_LEVEL_SPECTRUM_SPEED}, {"SPECTRUM_REF", SHIM_RIG_LEVEL_SPECTRUM_REF},
+  {"SPECTRUM_AVG", SHIM_RIG_LEVEL_SPECTRUM_AVG}, {"SPECTRUM_ATT", SHIM_RIG_LEVEL_SPECTRUM_ATT},
+  {"TEMP_METER", SHIM_RIG_LEVEL_TEMP_METER},
+};
+
+static const char* nameForBit(const NamedBit* bits, size_t count, uint64_t bit) {
+  for (size_t i = 0; i < count; ++i) {
+    if (bits[i].bit == bit) return bits[i].name;
+  }
+  return nullptr;
+}
+
+static bool bitForName(const NamedBit* bits, size_t count, const std::string& name, uint64_t* out) {
+  if (!out) return false;
+  for (size_t i = 0; i < count; ++i) {
+    if (name == bits[i].name) {
+      *out = bits[i].bit;
+      return true;
+    }
+  }
+  return false;
+}
+
+static const char* memoryTypeName(int type) {
+  switch (type) {
+    case 1: return "MEM";
+    case 2: return "EDGE";
+    case 3: return "CALL";
+    case 4: return "MEMOPAD";
+    case 5: return "SAT";
+    case 6: return "BAND";
+    case 7: return "PRIO";
+    case 8: return "VOICE";
+    case 9: return "MORSE";
+    case 10: return "SPLIT";
+    default: return "NONE";
+  }
+}
+
+static int parseMemoryTypeName(const std::string& type) {
+  if (type == "MEM") return 1;
+  if (type == "EDGE") return 2;
+  if (type == "CALL") return 3;
+  if (type == "MEMOPAD") return 4;
+  if (type == "SAT") return 5;
+  if (type == "BAND") return 6;
+  if (type == "PRIO") return 7;
+  if (type == "VOICE") return 8;
+  if (type == "MORSE") return 9;
+  if (type == "SPLIT") return 10;
+  return 0;
+}
+
+static int parseRepeaterShiftValue(Napi::Env env, const Napi::Value& value) {
+  if (value.IsUndefined() || value.IsNull()) return SHIM_RIG_RPT_SHIFT_NONE;
+  if (value.IsNumber()) return value.As<Napi::Number>().Int32Value();
+  if (!value.IsString()) {
+    Napi::TypeError::New(env, "repeaterShift must be a string or number").ThrowAsJavaScriptException();
+    return SHIM_RIG_RPT_SHIFT_NONE;
+  }
+  std::string shift = value.As<Napi::String>().Utf8Value();
+  std::transform(shift.begin(), shift.end(), shift.begin(), ::toupper);
+  if (shift == "NONE" || shift == "0") return SHIM_RIG_RPT_SHIFT_NONE;
+  if (shift == "MINUS" || shift == "-") return SHIM_RIG_RPT_SHIFT_MINUS;
+  if (shift == "PLUS" || shift == "+") return SHIM_RIG_RPT_SHIFT_PLUS;
+  Napi::TypeError::New(env, "Invalid repeaterShift").ThrowAsJavaScriptException();
+  return SHIM_RIG_RPT_SHIFT_NONE;
+}
+
+static Napi::Array bitsToStringArray(Napi::Env env, uint64_t value, const NamedBit* bits, size_t count) {
+  Napi::Array arr = Napi::Array::New(env);
+  uint32_t index = 0;
+  for (size_t i = 0; i < count; ++i) {
+    if (value & bits[i].bit) {
+      arr[index++] = Napi::String::New(env, bits[i].name);
+    }
+  }
+  return arr;
+}
+
+static Napi::Object shimMemoryCapsToJsObject(Napi::Env env, const shim_channel_caps_t& caps) {
+  Napi::Object obj = Napi::Object::New(env);
+  obj.Set("bankNumber", Napi::Boolean::New(env, caps.bank_num != 0));
+  obj.Set("vfo", Napi::Boolean::New(env, caps.vfo != 0));
+  obj.Set("antenna", Napi::Boolean::New(env, caps.ant != 0));
+  obj.Set("frequency", Napi::Boolean::New(env, caps.freq != 0));
+  obj.Set("mode", Napi::Boolean::New(env, caps.mode != 0));
+  obj.Set("bandwidth", Napi::Boolean::New(env, caps.width != 0));
+  obj.Set("txFrequency", Napi::Boolean::New(env, caps.tx_freq != 0));
+  obj.Set("txMode", Napi::Boolean::New(env, caps.tx_mode != 0));
+  obj.Set("txBandwidth", Napi::Boolean::New(env, caps.tx_width != 0));
+  obj.Set("split", Napi::Boolean::New(env, caps.split != 0));
+  obj.Set("txVfo", Napi::Boolean::New(env, caps.tx_vfo != 0));
+  obj.Set("repeaterShift", Napi::Boolean::New(env, caps.rptr_shift != 0));
+  obj.Set("repeaterOffset", Napi::Boolean::New(env, caps.rptr_offs != 0));
+  obj.Set("tuningStep", Napi::Boolean::New(env, caps.tuning_step != 0));
+  obj.Set("rit", Napi::Boolean::New(env, caps.rit != 0));
+  obj.Set("xit", Napi::Boolean::New(env, caps.xit != 0));
+  obj.Set("functions", bitsToStringArray(env, caps.funcs, kMemoryFunctionBits, sizeof(kMemoryFunctionBits) / sizeof(kMemoryFunctionBits[0])));
+  obj.Set("levels", bitsToStringArray(env, caps.levels, kMemoryLevelBits, sizeof(kMemoryLevelBits) / sizeof(kMemoryLevelBits[0])));
+  obj.Set("ctcssTone", Napi::Boolean::New(env, caps.ctcss_tone != 0));
+  obj.Set("ctcssSql", Napi::Boolean::New(env, caps.ctcss_sql != 0));
+  obj.Set("dcsCode", Napi::Boolean::New(env, caps.dcs_code != 0));
+  obj.Set("dcsSql", Napi::Boolean::New(env, caps.dcs_sql != 0));
+  obj.Set("scanGroup", Napi::Boolean::New(env, caps.scan_group != 0));
+  obj.Set("flags", Napi::Boolean::New(env, caps.flags != 0));
+  obj.Set("description", Napi::Boolean::New(env, caps.channel_desc != 0));
+  obj.Set("tag", Napi::Boolean::New(env, caps.tag != 0));
+  return obj;
+}
+
+static Napi::Object shimMemoryRangeToJsObject(Napi::Env env, const shim_memory_range_t& range) {
+  Napi::Object obj = Napi::Object::New(env);
+  obj.Set("start", Napi::Number::New(env, range.start));
+  obj.Set("end", Napi::Number::New(env, range.end));
+  obj.Set("type", Napi::String::New(env, memoryTypeName(range.type)));
+  obj.Set("capabilities", shimMemoryCapsToJsObject(env, range.caps));
+  return obj;
+}
+
+static bool shimChannelIsEmpty(const shim_channel_t& chan) {
+  return chan.freq == 0
+      && chan.mode == SHIM_RIG_MODE_NONE
+      && chan.channel_desc[0] == '\0'
+      && chan.tag[0] == '\0'
+      && chan.tx_freq == 0;
+}
+
+static Napi::Object shimChannelToJsObject(Napi::Env env, const shim_channel_t& chan, bool forceEmpty = false) {
+  Napi::Object obj = Napi::Object::New(env);
+  const bool empty = forceEmpty || shimChannelIsEmpty(chan);
+  obj.Set("channelNumber", Napi::Number::New(env, chan.channel_num));
+  obj.Set("bankNumber", Napi::Number::New(env, chan.bank_num));
+  obj.Set("type", Napi::String::New(env, memoryTypeName(chan.channel_type)));
+  obj.Set("empty", Napi::Boolean::New(env, empty));
+  obj.Set("vfo", Napi::String::New(env, publicVfoToken(chan.vfo)));
+  obj.Set("antenna", Napi::Number::New(env, chan.ant));
+  obj.Set("frequency", Napi::Number::New(env, chan.freq));
+  if (chan.mode != SHIM_RIG_MODE_NONE) {
+    obj.Set("mode", Napi::String::New(env, shim_rig_strrmode(chan.mode)));
+  }
+  obj.Set("bandwidth", Napi::Number::New(env, chan.width));
+  obj.Set("txFrequency", Napi::Number::New(env, chan.tx_freq));
+  if (chan.tx_mode != SHIM_RIG_MODE_NONE) {
+    obj.Set("txMode", Napi::String::New(env, shim_rig_strrmode(chan.tx_mode)));
+  }
+  obj.Set("txBandwidth", Napi::Number::New(env, chan.tx_width));
+  obj.Set("split", Napi::Boolean::New(env, chan.split == SHIM_RIG_SPLIT_ON));
+  obj.Set("txVfo", Napi::String::New(env, publicVfoToken(chan.tx_vfo)));
+  obj.Set("repeaterShift", Napi::String::New(env, shim_rig_strptrshift(chan.rptr_shift)));
+  obj.Set("repeaterOffset", Napi::Number::New(env, chan.rptr_offs));
+  obj.Set("tuningStep", Napi::Number::New(env, chan.tuning_step));
+  obj.Set("rit", Napi::Number::New(env, chan.rit));
+  obj.Set("xit", Napi::Number::New(env, chan.xit));
+  obj.Set("ctcssTone", Napi::Number::New(env, chan.ctcss_tone));
+  obj.Set("ctcssSql", Napi::Number::New(env, chan.ctcss_sql));
+  obj.Set("dcsCode", Napi::Number::New(env, chan.dcs_code));
+  obj.Set("dcsSql", Napi::Number::New(env, chan.dcs_sql));
+  obj.Set("scanGroup", Napi::Number::New(env, chan.scan_group));
+  Napi::Object flags = Napi::Object::New(env);
+  flags.Set("skip", Napi::Boolean::New(env, (chan.flags & 1u) != 0));
+  flags.Set("data", Napi::Boolean::New(env, (chan.flags & 2u) != 0));
+  flags.Set("pskip", Napi::Boolean::New(env, (chan.flags & 4u) != 0));
+  flags.Set("raw", Napi::Number::New(env, chan.flags));
+  obj.Set("flags", flags);
+  obj.Set("description", Napi::String::New(env, chan.channel_desc));
+  obj.Set("tag", Napi::String::New(env, chan.tag));
+  obj.Set("functions", bitsToStringArray(env, chan.funcs, kMemoryFunctionBits, sizeof(kMemoryFunctionBits) / sizeof(kMemoryFunctionBits[0])));
+  Napi::Object levels = Napi::Object::New(env);
+  for (int i = 0; i < chan.level_count; ++i) {
+    const char* name = nameForBit(kMemoryLevelBits, sizeof(kMemoryLevelBits) / sizeof(kMemoryLevelBits[0]), chan.level_tokens[i]);
+    if (name) {
+      levels.Set(name, Napi::Number::New(env, chan.level_values[i]));
+    }
+  }
+  obj.Set("levels", levels);
+  return obj;
+}
+
+static bool jsObjectToShimChannel(Napi::Env env, Napi::Object obj, shim_channel_t* out, int defaultChannelNumber = -1) {
+  if (!out) return false;
+  memset(out, 0, sizeof(*out));
+  out->vfo = SHIM_RIG_VFO_MEM;
+  if (defaultChannelNumber >= 0) out->channel_num = defaultChannelNumber;
+  if (obj.Has("channelNumber")) {
+    if (!obj.Get("channelNumber").IsNumber()) {
+      Napi::TypeError::New(env, "channelNumber must be a number").ThrowAsJavaScriptException();
+      return false;
+    }
+    out->channel_num = obj.Get("channelNumber").As<Napi::Number>().Int32Value();
+  } else if (defaultChannelNumber < 0) {
+    Napi::TypeError::New(env, "channelNumber is required").ThrowAsJavaScriptException();
+    return false;
+  }
+  if (out->channel_num < 0) {
+    Napi::RangeError::New(env, "channelNumber must be non-negative").ThrowAsJavaScriptException();
+    return false;
+  }
+  if (obj.Has("bankNumber")) out->bank_num = obj.Get("bankNumber").As<Napi::Number>().Int32Value();
+  if (obj.Has("type") && obj.Get("type").IsString()) out->channel_type = parseMemoryTypeName(obj.Get("type").As<Napi::String>().Utf8Value());
+  if (obj.Has("vfo") && obj.Get("vfo").IsString()) {
+    out->vfo = parseVfoString(env, obj.Get("vfo").As<Napi::String>().Utf8Value());
+    if (out->vfo == kInvalidVfoParameter) return false;
+  }
+  if (obj.Has("antenna")) out->ant = obj.Get("antenna").As<Napi::Number>().Int32Value();
+  if (obj.Has("frequency")) out->freq = obj.Get("frequency").As<Napi::Number>().DoubleValue();
+  if (obj.Has("mode")) out->mode = shim_rig_parse_mode(obj.Get("mode").As<Napi::String>().Utf8Value().c_str());
+  if (obj.Has("bandwidth")) out->width = obj.Get("bandwidth").As<Napi::Number>().Int32Value();
+  else out->width = SHIM_RIG_PASSBAND_NORMAL;
+  if (obj.Has("txFrequency")) {
+    out->tx_freq = obj.Get("txFrequency").As<Napi::Number>().DoubleValue();
+    out->split = SHIM_RIG_SPLIT_ON;
+  }
+  if (obj.Has("txMode")) out->tx_mode = shim_rig_parse_mode(obj.Get("txMode").As<Napi::String>().Utf8Value().c_str());
+  if (obj.Has("txBandwidth")) out->tx_width = obj.Get("txBandwidth").As<Napi::Number>().Int32Value();
+  if (obj.Has("split")) out->split = obj.Get("split").As<Napi::Boolean>().Value() ? SHIM_RIG_SPLIT_ON : SHIM_RIG_SPLIT_OFF;
+  if (obj.Has("txVfo") && obj.Get("txVfo").IsString()) {
+    out->tx_vfo = parseVfoString(env, obj.Get("txVfo").As<Napi::String>().Utf8Value());
+    if (out->tx_vfo == kInvalidVfoParameter) return false;
+  }
+  if (obj.Has("repeaterShift")) out->rptr_shift = parseRepeaterShiftValue(env, obj.Get("repeaterShift"));
+  if (obj.Has("repeaterOffset")) out->rptr_offs = obj.Get("repeaterOffset").As<Napi::Number>().Int32Value();
+  if (obj.Has("tuningStep")) out->tuning_step = obj.Get("tuningStep").As<Napi::Number>().Int32Value();
+  if (obj.Has("rit")) out->rit = obj.Get("rit").As<Napi::Number>().Int32Value();
+  if (obj.Has("xit")) out->xit = obj.Get("xit").As<Napi::Number>().Int32Value();
+  if (obj.Has("ctcssTone")) out->ctcss_tone = obj.Get("ctcssTone").As<Napi::Number>().Int32Value();
+  if (obj.Has("ctcssSql")) out->ctcss_sql = obj.Get("ctcssSql").As<Napi::Number>().Int32Value();
+  if (obj.Has("dcsCode")) out->dcs_code = obj.Get("dcsCode").As<Napi::Number>().Int32Value();
+  if (obj.Has("dcsSql")) out->dcs_sql = obj.Get("dcsSql").As<Napi::Number>().Int32Value();
+  if (obj.Has("scanGroup")) out->scan_group = obj.Get("scanGroup").As<Napi::Number>().Int32Value();
+  if (obj.Has("flags") && obj.Get("flags").IsObject()) {
+    Napi::Object flags = obj.Get("flags").As<Napi::Object>();
+    if (flags.Has("raw")) {
+      out->flags = flags.Get("raw").As<Napi::Number>().Uint32Value();
+    } else {
+      if (flags.Has("skip") && flags.Get("skip").As<Napi::Boolean>().Value()) out->flags |= 1u;
+      if (flags.Has("data") && flags.Get("data").As<Napi::Boolean>().Value()) out->flags |= 2u;
+      if (flags.Has("pskip") && flags.Get("pskip").As<Napi::Boolean>().Value()) out->flags |= 4u;
+    }
+  }
+  if (obj.Has("description")) {
+    std::string desc = obj.Get("description").As<Napi::String>().Utf8Value();
+    strncpy(out->channel_desc, desc.c_str(), sizeof(out->channel_desc) - 1);
+  }
+  if (obj.Has("tag")) {
+    std::string tag = obj.Get("tag").As<Napi::String>().Utf8Value();
+    strncpy(out->tag, tag.c_str(), sizeof(out->tag) - 1);
+  }
+  if (obj.Has("functions") && obj.Get("functions").IsArray()) {
+    Napi::Array funcs = obj.Get("functions").As<Napi::Array>();
+    for (uint32_t i = 0; i < funcs.Length(); ++i) {
+      uint64_t bit = 0;
+      if (bitForName(kMemoryFunctionBits, sizeof(kMemoryFunctionBits) / sizeof(kMemoryFunctionBits[0]), funcs.Get(i).As<Napi::String>().Utf8Value(), &bit)) {
+        out->funcs |= bit;
+      }
+    }
+  }
+  if (obj.Has("levels") && obj.Get("levels").IsObject()) {
+    Napi::Object levels = obj.Get("levels").As<Napi::Object>();
+    Napi::Array names = levels.GetPropertyNames();
+    for (uint32_t i = 0; i < names.Length() && out->level_count < SHIM_HAMLIB_MAX_CHANNEL_LEVELS; ++i) {
+      std::string name = names.Get(i).As<Napi::String>().Utf8Value();
+      uint64_t bit = 0;
+      if (bitForName(kMemoryLevelBits, sizeof(kMemoryLevelBits) / sizeof(kMemoryLevelBits[0]), name, &bit)) {
+        int pos = out->level_count++;
+        out->level_tokens[pos] = bit;
+        out->level_values[pos] = levels.Get(name).As<Napi::Number>().DoubleValue();
+      }
+    }
+  }
   return true;
 }
 
@@ -661,12 +978,21 @@ public:
     GetMemoryChannelAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int channel_num, bool read_only)
         : HamLibAsyncWorker(env, hamlib_instance), channel_num_(channel_num), read_only_(read_only) {
         memset(&chan_, 0, sizeof(chan_));
+        memset(&range_, 0, sizeof(range_));
     }
     
     void Execute() override {
         CHECK_RIG_VALID();
+
+        result_code_ = shim_rig_lookup_memory_caps(hamlib_instance_->my_rig, channel_num_, &range_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
+            return;
+        }
+        caps_found_ = true;
         
         chan_.channel_num = channel_num_;
+        chan_.channel_type = range_.type;
         chan_.vfo = SHIM_RIG_VFO_MEM;
         result_code_ = shim_rig_get_channel(hamlib_instance_->my_rig, SHIM_RIG_VFO_MEM, &chan_, read_only_);
         if (result_code_ != SHIM_RIG_OK) {
@@ -676,31 +1002,15 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        Napi::Object obj = Napi::Object::New(env);
-        
-        obj.Set(Napi::String::New(env, "channelNumber"), chan_.channel_num);
-        obj.Set(Napi::String::New(env, "frequency"), chan_.freq);
-        
-        if (chan_.mode != SHIM_RIG_MODE_NONE) {
-            const char* mode_str = shim_rig_strrmode(chan_.mode);
-            obj.Set(Napi::String::New(env, "mode"), Napi::String::New(env, mode_str));
+        if (result_code_ == SHIM_RIG_ENAVAIL && caps_found_) {
+            chan_.channel_num = channel_num_;
+            chan_.channel_type = range_.type;
+            deferred_.Resolve(shimChannelToJsObject(env, chan_, true));
+        } else if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(shimChannelToJsObject(env, chan_));
         }
-        
-        obj.Set(Napi::String::New(env, "bandwidth"), chan_.width);
-        
-        if (chan_.channel_desc[0] != '\0') {
-            obj.Set(Napi::String::New(env, "description"), Napi::String::New(env, chan_.channel_desc));
-        }
-        
-        if (chan_.split == SHIM_RIG_SPLIT_ON) {
-            obj.Set(Napi::String::New(env, "txFrequency"), chan_.tx_freq);
-        }
-        
-        if (chan_.ctcss_tone != 0) {
-            obj.Set(Napi::String::New(env, "ctcssTone"), chan_.ctcss_tone);
-        }
-        
-        deferred_.Resolve(obj);
     }
     
     void OnError(const Napi::Error& e) override {
@@ -711,18 +1021,20 @@ public:
 private:
     int channel_num_;
     bool read_only_;
+    bool caps_found_ = false;
     shim_channel_t chan_;
+    shim_memory_range_t range_;
 };
 
 class SelectMemoryChannelAsyncWorker : public HamLibAsyncWorker {
 public:
-    SelectMemoryChannelAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int channel_num)
-        : HamLibAsyncWorker(env, hamlib_instance), channel_num_(channel_num) {}
+    SelectMemoryChannelAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int channel_num, int vfo = SHIM_RIG_VFO_CURR)
+        : HamLibAsyncWorker(env, hamlib_instance), channel_num_(channel_num), vfo_(vfo) {}
     
     void Execute() override {
         CHECK_RIG_VALID();
         
-        result_code_ = shim_rig_set_mem(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, channel_num_);
+        result_code_ = shim_rig_set_mem(hamlib_instance_->my_rig, vfo_, channel_num_);
         if (result_code_ != SHIM_RIG_OK) {
             error_message_ = shim_rigerror(result_code_);
         }
@@ -744,6 +1056,316 @@ public:
     
 private:
     int channel_num_;
+    int vfo_;
+};
+
+struct MemoryChannelErrorInfo {
+    int channelNumber;
+    int code;
+    std::string message;
+};
+
+static Napi::Object memoryErrorToJsObject(Napi::Env env, const MemoryChannelErrorInfo& err) {
+    Napi::Object obj = Napi::Object::New(env);
+    obj.Set("channelNumber", Napi::Number::New(env, err.channelNumber));
+    obj.Set("code", Napi::Number::New(env, err.code));
+    obj.Set("message", Napi::String::New(env, err.message));
+    return obj;
+}
+
+static Napi::Object buildMemoryLayoutObject(Napi::Env env, const std::vector<shim_memory_range_t>& ranges) {
+    Napi::Object obj = Napi::Object::New(env);
+    Napi::Array arr = Napi::Array::New(env, ranges.size());
+    int count = 0;
+    for (size_t i = 0; i < ranges.size(); ++i) {
+        arr[static_cast<uint32_t>(i)] = shimMemoryRangeToJsObject(env, ranges[i]);
+        count += ranges[i].end - ranges[i].start + 1;
+    }
+    obj.Set("count", Napi::Number::New(env, count));
+    obj.Set("ranges", arr);
+    return obj;
+}
+
+class MemoryLayoutAsyncWorker : public HamLibAsyncWorker {
+public:
+    MemoryLayoutAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
+        : HamLibAsyncWorker(env, hamlib_instance) {}
+
+    void Execute() override {
+        CHECK_RIG_VALID();
+        int range_count = shim_rig_get_memory_range_count(hamlib_instance_->my_rig);
+        if (range_count < 0) {
+            result_code_ = range_count;
+            error_message_ = shim_rigerror(result_code_);
+            return;
+        }
+        ranges_.resize(range_count);
+        for (int i = 0; i < range_count; ++i) {
+            result_code_ = shim_rig_get_memory_range(hamlib_instance_->my_rig, i, &ranges_[i]);
+            if (result_code_ != SHIM_RIG_OK) {
+                error_message_ = shim_rigerror(result_code_);
+                return;
+            }
+        }
+        result_code_ = SHIM_RIG_OK;
+    }
+
+    void OnOK() override {
+        Napi::Env env = Env();
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(buildMemoryLayoutObject(env, ranges_));
+        }
+    }
+
+    void OnError(const Napi::Error& e) override {
+        deferred_.Reject(Napi::Error::New(Env(), error_message_).Value());
+    }
+
+private:
+    std::vector<shim_memory_range_t> ranges_;
+};
+
+class MemoryCapabilitiesAsyncWorker : public HamLibAsyncWorker {
+public:
+    MemoryCapabilitiesAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int channel_num)
+        : HamLibAsyncWorker(env, hamlib_instance), channel_num_(channel_num) {
+        memset(&range_, 0, sizeof(range_));
+    }
+
+    void Execute() override {
+        CHECK_RIG_VALID();
+        result_code_ = shim_rig_lookup_memory_caps(hamlib_instance_->my_rig, channel_num_, &range_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
+        }
+    }
+
+    void OnOK() override {
+        Napi::Env env = Env();
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(shimMemoryCapsToJsObject(env, range_.caps));
+        }
+    }
+
+    void OnError(const Napi::Error& e) override {
+        deferred_.Reject(Napi::Error::New(Env(), error_message_).Value());
+    }
+
+private:
+    int channel_num_;
+    shim_memory_range_t range_;
+};
+
+class MemoryListAsyncWorker : public HamLibAsyncWorker {
+public:
+    MemoryListAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, bool read_only, bool include_empty, bool continue_on_error)
+        : HamLibAsyncWorker(env, hamlib_instance), read_only_(read_only), include_empty_(include_empty), continue_on_error_(continue_on_error) {}
+
+    void Execute() override {
+        CHECK_RIG_VALID();
+        int range_count = shim_rig_get_memory_range_count(hamlib_instance_->my_rig);
+        if (range_count < 0) {
+            result_code_ = range_count;
+            error_message_ = shim_rigerror(result_code_);
+            return;
+        }
+        ranges_.resize(range_count);
+        for (int i = 0; i < range_count; ++i) {
+            int ret = shim_rig_get_memory_range(hamlib_instance_->my_rig, i, &ranges_[i]);
+            if (ret != SHIM_RIG_OK) {
+                result_code_ = ret;
+                error_message_ = shim_rigerror(result_code_);
+                return;
+            }
+            for (int ch = ranges_[i].start; ch <= ranges_[i].end; ++ch) {
+                shim_channel_t chan;
+                memset(&chan, 0, sizeof(chan));
+                chan.channel_num = ch;
+                chan.vfo = SHIM_RIG_VFO_MEM;
+                int get_ret = shim_rig_get_channel(hamlib_instance_->my_rig, SHIM_RIG_VFO_MEM, &chan, read_only_ ? 1 : 0);
+                if (get_ret == SHIM_RIG_ENAVAIL) {
+                    chan.channel_num = ch;
+                    chan.channel_type = ranges_[i].type;
+                    if (include_empty_) {
+                        channels_.push_back(chan);
+                    }
+                    continue;
+                }
+                if (get_ret != SHIM_RIG_OK) {
+                    errors_.push_back({ch, get_ret, shim_rigerror(get_ret)});
+                    if (!continue_on_error_) {
+                        result_code_ = get_ret;
+                        error_message_ = shim_rigerror(result_code_);
+                        return;
+                    }
+                    continue;
+                }
+                if (include_empty_ || !shimChannelIsEmpty(chan)) {
+                    channels_.push_back(chan);
+                }
+            }
+        }
+        result_code_ = SHIM_RIG_OK;
+    }
+
+    void OnOK() override {
+        Napi::Env env = Env();
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+            return;
+        }
+        Napi::Object obj = Napi::Object::New(env);
+        obj.Set("layout", buildMemoryLayoutObject(env, ranges_));
+        Napi::Array channels = Napi::Array::New(env, channels_.size());
+        for (size_t i = 0; i < channels_.size(); ++i) {
+            channels[static_cast<uint32_t>(i)] = shimChannelToJsObject(env, channels_[i], shimChannelIsEmpty(channels_[i]));
+        }
+        obj.Set("channels", channels);
+        Napi::Array errors = Napi::Array::New(env, errors_.size());
+        for (size_t i = 0; i < errors_.size(); ++i) {
+            errors[static_cast<uint32_t>(i)] = memoryErrorToJsObject(env, errors_[i]);
+        }
+        obj.Set("errors", errors);
+        deferred_.Resolve(obj);
+    }
+
+    void OnError(const Napi::Error& e) override {
+        deferred_.Reject(Napi::Error::New(Env(), error_message_).Value());
+    }
+
+private:
+    bool read_only_;
+    bool include_empty_;
+    bool continue_on_error_;
+    std::vector<shim_memory_range_t> ranges_;
+    std::vector<shim_channel_t> channels_;
+    std::vector<MemoryChannelErrorInfo> errors_;
+};
+
+class SetMemoryChannelsAsyncWorker : public HamLibAsyncWorker {
+public:
+    SetMemoryChannelsAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, std::vector<shim_channel_t> channels, bool continue_on_error)
+        : HamLibAsyncWorker(env, hamlib_instance), channels_(std::move(channels)), continue_on_error_(continue_on_error) {}
+
+    void Execute() override {
+        CHECK_RIG_VALID();
+        for (const auto& chan : channels_) {
+            int ret = shim_rig_set_channel(hamlib_instance_->my_rig, SHIM_RIG_VFO_MEM, &chan);
+            if (ret != SHIM_RIG_OK) {
+                errors_.push_back({chan.channel_num, ret, shim_rigerror(ret)});
+                if (!continue_on_error_) {
+                    result_code_ = ret;
+                    error_message_ = shim_rigerror(ret);
+                    return;
+                }
+            } else {
+                written_++;
+            }
+        }
+        result_code_ = SHIM_RIG_OK;
+    }
+
+    void OnOK() override {
+        Napi::Env env = Env();
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+            return;
+        }
+        Napi::Object obj = Napi::Object::New(env);
+        obj.Set("written", Napi::Number::New(env, written_));
+        Napi::Array errors = Napi::Array::New(env, errors_.size());
+        for (size_t i = 0; i < errors_.size(); ++i) {
+            errors[static_cast<uint32_t>(i)] = memoryErrorToJsObject(env, errors_[i]);
+        }
+        obj.Set("errors", errors);
+        deferred_.Resolve(obj);
+    }
+
+    void OnError(const Napi::Error& e) override {
+        deferred_.Reject(Napi::Error::New(Env(), error_message_).Value());
+    }
+
+private:
+    std::vector<shim_channel_t> channels_;
+    bool continue_on_error_;
+    int written_ = 0;
+    std::vector<MemoryChannelErrorInfo> errors_;
+};
+
+class ReplaceMemoryChannelsAsyncWorker : public HamLibAsyncWorker {
+public:
+    ReplaceMemoryChannelsAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, std::vector<shim_channel_t> channels)
+        : HamLibAsyncWorker(env, hamlib_instance), channels_(std::move(channels)) {}
+
+    void Execute() override {
+        CHECK_RIG_VALID();
+        std::set<int> expected;
+        int range_count = shim_rig_get_memory_range_count(hamlib_instance_->my_rig);
+        if (range_count < 0) {
+            result_code_ = range_count;
+            error_message_ = shim_rigerror(result_code_);
+            return;
+        }
+        for (int i = 0; i < range_count; ++i) {
+            shim_memory_range_t range;
+            int ret = shim_rig_get_memory_range(hamlib_instance_->my_rig, i, &range);
+            if (ret != SHIM_RIG_OK) {
+                result_code_ = ret;
+                error_message_ = shim_rigerror(ret);
+                return;
+            }
+            for (int ch = range.start; ch <= range.end; ++ch) expected.insert(ch);
+        }
+        std::set<int> provided;
+        for (const auto& chan : channels_) {
+            if (expected.find(chan.channel_num) == expected.end()) {
+                result_code_ = SHIM_RIG_EINVAL;
+                error_message_ = "replaceAll channelNumber is outside the rig memory layout";
+                return;
+            }
+            if (!provided.insert(chan.channel_num).second) {
+                result_code_ = SHIM_RIG_EINVAL;
+                error_message_ = "replaceAll received duplicate channelNumber entries";
+                return;
+            }
+        }
+        for (int channel_num : provided) expected.erase(channel_num);
+        if (!expected.empty()) {
+            result_code_ = SHIM_RIG_EINVAL;
+            error_message_ = "replaceAll requires a channel entry for every memory slot in the rig layout";
+            return;
+        }
+        result_code_ = shim_rig_set_chan_all(hamlib_instance_->my_rig, SHIM_RIG_VFO_MEM, channels_.data(), static_cast<int>(channels_.size()));
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
+            return;
+        }
+        written_ = static_cast<int>(channels_.size());
+    }
+
+    void OnOK() override {
+        Napi::Env env = Env();
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+            return;
+        }
+        Napi::Object obj = Napi::Object::New(env);
+        obj.Set("written", Napi::Number::New(env, written_));
+        obj.Set("errors", Napi::Array::New(env));
+        deferred_.Resolve(obj);
+    }
+
+    void OnError(const Napi::Error& e) override {
+        deferred_.Reject(Napi::Error::New(Env(), error_message_).Value());
+    }
+
+private:
+    std::vector<shim_channel_t> channels_;
+    int written_ = 0;
 };
 
 class SetRitAsyncWorker : public HamLibAsyncWorker {
@@ -2880,48 +3502,10 @@ Napi::Value NodeHamLib::SetMemoryChannel(const Napi::CallbackInfo & info) {
   
   int channel_num = info[0].As<Napi::Number>().Int32Value();
   Napi::Object chanObj = info[1].As<Napi::Object>();
-  
-  // Create channel structure
+
   shim_channel_t chan;
-  memset(&chan, 0, sizeof(chan));
-  
-  chan.channel_num = channel_num;
-  chan.vfo = SHIM_RIG_VFO_MEM;
-  
-  // Extract frequency
-  if (chanObj.Has("frequency")) {
-    chan.freq = chanObj.Get("frequency").As<Napi::Number>().DoubleValue();
-  }
-  
-  // Extract mode
-  if (chanObj.Has("mode")) {
-    std::string modeStr = chanObj.Get("mode").As<Napi::String>().Utf8Value();
-    chan.mode = shim_rig_parse_mode(modeStr.c_str());
-  }
-  
-  // Extract bandwidth
-  if (chanObj.Has("bandwidth")) {
-    chan.width = chanObj.Get("bandwidth").As<Napi::Number>().Int32Value();
-  } else {
-    chan.width = SHIM_RIG_PASSBAND_NORMAL;
-  }
-  
-  // Extract channel description
-  if (chanObj.Has("description")) {
-    std::string desc = chanObj.Get("description").As<Napi::String>().Utf8Value();
-    strncpy(chan.channel_desc, desc.c_str(), sizeof(chan.channel_desc) - 1);
-    chan.channel_desc[sizeof(chan.channel_desc) - 1] = '\0';
-  }
-  
-  // Extract TX frequency for split operation
-  if (chanObj.Has("txFrequency")) {
-    chan.tx_freq = chanObj.Get("txFrequency").As<Napi::Number>().DoubleValue();
-    chan.split = SHIM_RIG_SPLIT_ON;
-  }
-  
-  // Extract CTCSS tone
-  if (chanObj.Has("ctcssTone")) {
-    chan.ctcss_tone = chanObj.Get("ctcssTone").As<Napi::Number>().Int32Value();
+  if (!jsObjectToShimChannel(env, chanObj, &chan, channel_num)) {
+    return env.Null();
   }
   
   SetMemoryChannelAsyncWorker* worker = new SetMemoryChannelAsyncWorker(env, this, chan);
@@ -2966,10 +3550,125 @@ Napi::Value NodeHamLib::SelectMemoryChannel(const Napi::CallbackInfo & info) {
   }
   
   int channel_num = info[0].As<Napi::Number>().Int32Value();
+  int vfo = parseVfoParameter(info, 1, SHIM_RIG_VFO_CURR);
+  RETURN_NULL_IF_INVALID_VFO(vfo);
   
-  SelectMemoryChannelAsyncWorker* worker = new SelectMemoryChannelAsyncWorker(env, this, channel_num);
+  SelectMemoryChannelAsyncWorker* worker = new SelectMemoryChannelAsyncWorker(env, this, channel_num, vfo);
   worker->Queue();
   
+  return worker->GetPromise();
+}
+
+Napi::Value NodeHamLib::GetMemoryLayout(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  MemoryLayoutAsyncWorker* worker = new MemoryLayoutAsyncWorker(env, this);
+  worker->Queue();
+  return worker->GetPromise();
+}
+
+Napi::Value NodeHamLib::GetMemoryCapabilities(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  int channel_num = -1;
+  if (info.Length() >= 1 && !info[0].IsUndefined() && !info[0].IsNull()) {
+    if (!info[0].IsNumber()) {
+      Napi::TypeError::New(env, "Expected optional channel number").ThrowAsJavaScriptException();
+      return env.Null();
+    }
+    channel_num = info[0].As<Napi::Number>().Int32Value();
+  }
+  MemoryCapabilitiesAsyncWorker* worker = new MemoryCapabilitiesAsyncWorker(env, this, channel_num);
+  worker->Queue();
+  return worker->GetPromise();
+}
+
+Napi::Value NodeHamLib::GetMemoryList(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  bool read_only = true;
+  bool include_empty = false;
+  bool continue_on_error = true;
+  if (info.Length() >= 1 && info[0].IsObject()) {
+    Napi::Object options = info[0].As<Napi::Object>();
+    if (options.Has("readOnly")) read_only = options.Get("readOnly").As<Napi::Boolean>().Value();
+    if (options.Has("includeEmpty")) include_empty = options.Get("includeEmpty").As<Napi::Boolean>().Value();
+    if (options.Has("continueOnError")) continue_on_error = options.Get("continueOnError").As<Napi::Boolean>().Value();
+  }
+  MemoryListAsyncWorker* worker = new MemoryListAsyncWorker(env, this, read_only, include_empty, continue_on_error);
+  worker->Queue();
+  return worker->GetPromise();
+}
+
+Napi::Value NodeHamLib::SetMemoryChannels(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  if (info.Length() < 1 || !info[0].IsArray()) {
+    Napi::TypeError::New(env, "Expected channels array").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  bool continue_on_error = false;
+  if (info.Length() >= 2 && info[1].IsObject()) {
+    Napi::Object options = info[1].As<Napi::Object>();
+    if (options.Has("continueOnError")) continue_on_error = options.Get("continueOnError").As<Napi::Boolean>().Value();
+  }
+  Napi::Array input = info[0].As<Napi::Array>();
+  std::vector<shim_channel_t> channels;
+  channels.reserve(input.Length());
+  for (uint32_t i = 0; i < input.Length(); ++i) {
+    if (!input.Get(i).IsObject()) {
+      Napi::TypeError::New(env, "Each channel must be an object").ThrowAsJavaScriptException();
+      return env.Null();
+    }
+    shim_channel_t chan;
+    if (!jsObjectToShimChannel(env, input.Get(i).As<Napi::Object>(), &chan)) {
+      return env.Null();
+    }
+    channels.push_back(chan);
+  }
+  SetMemoryChannelsAsyncWorker* worker = new SetMemoryChannelsAsyncWorker(env, this, std::move(channels), continue_on_error);
+  worker->Queue();
+  return worker->GetPromise();
+}
+
+Napi::Value NodeHamLib::ReplaceMemoryChannels(const Napi::CallbackInfo & info) {
+  Napi::Env env = info.Env();
+  if (!rig_is_open) {
+    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  if (info.Length() < 1 || !info[0].IsArray()) {
+    Napi::TypeError::New(env, "Expected complete channels array").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  Napi::Array input = info[0].As<Napi::Array>();
+  std::vector<shim_channel_t> channels;
+  channels.reserve(input.Length());
+  for (uint32_t i = 0; i < input.Length(); ++i) {
+    if (!input.Get(i).IsObject()) {
+      Napi::TypeError::New(env, "Each channel must be an object").ThrowAsJavaScriptException();
+      return env.Null();
+    }
+    shim_channel_t chan;
+    if (!jsObjectToShimChannel(env, input.Get(i).As<Napi::Object>(), &chan)) {
+      return env.Null();
+    }
+    channels.push_back(chan);
+  }
+  ReplaceMemoryChannelsAsyncWorker* worker = new ReplaceMemoryChannelsAsyncWorker(env, this, std::move(channels));
+  worker->Queue();
   return worker->GetPromise();
 }
 
@@ -3859,6 +4558,11 @@ Napi::Function NodeHamLib::GetClass(Napi::Env env) {
       NodeHamLib::InstanceMethod("setMemoryChannel", & NodeHamLib::SetMemoryChannel),
       NodeHamLib::InstanceMethod("getMemoryChannel", & NodeHamLib::GetMemoryChannel),
       NodeHamLib::InstanceMethod("selectMemoryChannel", & NodeHamLib::SelectMemoryChannel),
+      NodeHamLib::InstanceMethod("getMemoryLayout", & NodeHamLib::GetMemoryLayout),
+      NodeHamLib::InstanceMethod("getMemoryCapabilities", & NodeHamLib::GetMemoryCapabilities),
+      NodeHamLib::InstanceMethod("getMemoryList", & NodeHamLib::GetMemoryList),
+      NodeHamLib::InstanceMethod("setMemoryChannels", & NodeHamLib::SetMemoryChannels),
+      NodeHamLib::InstanceMethod("replaceMemoryChannels", & NodeHamLib::ReplaceMemoryChannels),
       
       // RIT/XIT Control
       NodeHamLib::InstanceMethod("setRit", & NodeHamLib::SetRit),

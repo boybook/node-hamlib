@@ -15,6 +15,7 @@
 #include <hamlib/rotator.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 static int shim_setting_to_index(setting_t setting) {
     int index = 0;
@@ -943,40 +944,237 @@ SHIM_API int shim_rig_get_xit(hamlib_shim_handle_t h, int vfo, int* offset) {
 
 /* ===== Memory channel operations ===== */
 
+static void shim_copy_channel_caps(shim_channel_caps_t* out, const channel_cap_t* caps) {
+    if (!out || !caps) return;
+    memset(out, 0, sizeof(*out));
+    out->bank_num = caps->bank_num;
+    out->vfo = caps->vfo;
+    out->ant = caps->ant;
+    out->freq = caps->freq;
+    out->mode = caps->mode;
+    out->width = caps->width;
+    out->tx_freq = caps->tx_freq;
+    out->tx_mode = caps->tx_mode;
+    out->tx_width = caps->tx_width;
+    out->split = caps->split;
+    out->tx_vfo = caps->tx_vfo;
+    out->rptr_shift = caps->rptr_shift;
+    out->rptr_offs = caps->rptr_offs;
+    out->tuning_step = caps->tuning_step;
+    out->rit = caps->rit;
+    out->xit = caps->xit;
+    out->funcs = (uint64_t)caps->funcs;
+    out->levels = (uint64_t)caps->levels;
+    out->ctcss_tone = caps->ctcss_tone;
+    out->ctcss_sql = caps->ctcss_sql;
+    out->dcs_code = caps->dcs_code;
+    out->dcs_sql = caps->dcs_sql;
+    out->scan_group = caps->scan_group;
+    out->flags = caps->flags;
+    out->channel_desc = caps->channel_desc;
+    out->tag = caps->tag;
+}
+
+static void shim_copy_range(shim_memory_range_t* out, const chan_t* range) {
+    if (!out || !range) return;
+    memset(out, 0, sizeof(*out));
+    out->start = range->startc;
+    out->end = range->endc;
+    out->type = (int)range->type;
+    shim_copy_channel_caps(&out->caps, &range->mem_caps);
+}
+
+static void shim_copy_to_hamlib_channel(channel_t* chan, const shim_channel_t* schan) {
+    int i;
+    if (!chan || !schan) return;
+    memset(chan, 0, sizeof(*chan));
+    chan->channel_num = schan->channel_num;
+    chan->bank_num = schan->bank_num;
+    chan->vfo = (vfo_t)schan->vfo;
+    chan->ant = (ant_t)schan->ant;
+    chan->freq = (freq_t)schan->freq;
+    chan->mode = (rmode_t)schan->mode;
+    chan->width = (pbwidth_t)schan->width;
+    chan->tx_freq = (freq_t)schan->tx_freq;
+    chan->tx_mode = (rmode_t)schan->tx_mode;
+    chan->tx_width = (pbwidth_t)schan->tx_width;
+    chan->split = (split_t)schan->split;
+    chan->tx_vfo = (vfo_t)schan->tx_vfo;
+    chan->rptr_shift = (rptr_shift_t)schan->rptr_shift;
+    chan->rptr_offs = (shortfreq_t)schan->rptr_offs;
+    chan->tuning_step = (shortfreq_t)schan->tuning_step;
+    chan->rit = (shortfreq_t)schan->rit;
+    chan->xit = (shortfreq_t)schan->xit;
+    chan->funcs = (setting_t)schan->funcs;
+    for (i = 0; i < schan->level_count && i < SHIM_HAMLIB_MAX_CHANNEL_LEVELS; i++) {
+        int idx = shim_setting_to_index((setting_t)schan->level_tokens[i]);
+        if (idx >= 0 && idx < RIG_SETTING_MAX) {
+            if (RIG_LEVEL_IS_FLOAT((setting_t)schan->level_tokens[i])) {
+                chan->levels[idx].f = (float)schan->level_values[i];
+            } else {
+                chan->levels[idx].i = (int)schan->level_values[i];
+            }
+        }
+    }
+    chan->ctcss_tone = (tone_t)schan->ctcss_tone;
+    chan->ctcss_sql = (tone_t)schan->ctcss_sql;
+    chan->dcs_code = (tone_t)schan->dcs_code;
+    chan->dcs_sql = (tone_t)schan->dcs_sql;
+    chan->scan_group = schan->scan_group;
+    chan->flags = schan->flags;
+    strncpy(chan->channel_desc, schan->channel_desc, sizeof(chan->channel_desc) - 1);
+    chan->channel_desc[sizeof(chan->channel_desc) - 1] = '\0';
+    strncpy(chan->tag, schan->tag, sizeof(chan->tag) - 1);
+    chan->tag[sizeof(chan->tag) - 1] = '\0';
+}
+
+static void shim_copy_from_hamlib_channel(shim_channel_t* schan, const channel_t* chan, const chan_t* range) {
+    int i;
+    if (!schan || !chan) return;
+    memset(schan, 0, sizeof(*schan));
+    schan->channel_num = chan->channel_num;
+    schan->bank_num = chan->bank_num;
+    schan->channel_type = range ? (int)range->type : 0;
+    schan->vfo = (int)chan->vfo;
+    schan->ant = (int)chan->ant;
+    schan->freq = (double)chan->freq;
+    schan->mode = (int)chan->mode;
+    schan->width = (int)chan->width;
+    schan->tx_freq = (double)chan->tx_freq;
+    schan->tx_mode = (int)chan->tx_mode;
+    schan->tx_width = (int)chan->tx_width;
+    schan->split = (int)chan->split;
+    schan->tx_vfo = (int)chan->tx_vfo;
+    schan->rptr_shift = (int)chan->rptr_shift;
+    schan->rptr_offs = (int)chan->rptr_offs;
+    schan->tuning_step = (int)chan->tuning_step;
+    schan->rit = (int)chan->rit;
+    schan->xit = (int)chan->xit;
+    schan->funcs = (uint64_t)chan->funcs;
+    schan->level_count = 0;
+    for (i = 0; i < RIG_SETTING_MAX && schan->level_count < SHIM_HAMLIB_MAX_CHANNEL_LEVELS; i++) {
+        setting_t setting = ((setting_t)1) << i;
+        double value = RIG_LEVEL_IS_FLOAT(setting) ? (double)chan->levels[i].f : (double)chan->levels[i].i;
+        if (value != 0) {
+            int pos = schan->level_count++;
+            schan->level_tokens[pos] = (uint64_t)setting;
+            schan->level_values[pos] = value;
+        }
+    }
+    schan->ctcss_tone = (int)chan->ctcss_tone;
+    schan->ctcss_sql = (int)chan->ctcss_sql;
+    schan->dcs_code = (int)chan->dcs_code;
+    schan->dcs_sql = (int)chan->dcs_sql;
+    schan->scan_group = chan->scan_group;
+    schan->flags = chan->flags;
+    strncpy(schan->channel_desc, chan->channel_desc, sizeof(schan->channel_desc) - 1);
+    schan->channel_desc[sizeof(schan->channel_desc) - 1] = '\0';
+    strncpy(schan->tag, chan->tag, sizeof(schan->tag) - 1);
+    schan->tag[sizeof(schan->tag) - 1] = '\0';
+}
+
 SHIM_API int shim_rig_set_channel(hamlib_shim_handle_t h, int vfo, const shim_channel_t* schan) {
     channel_t chan;
-    memset(&chan, 0, sizeof(chan));
-    chan.channel_num = schan->channel_num;
-    chan.freq = (freq_t)schan->freq;
-    chan.tx_freq = (freq_t)schan->tx_freq;
-    chan.mode = (rmode_t)schan->mode;
-    chan.width = (pbwidth_t)schan->width;
-    chan.split = (split_t)schan->split;
-    chan.ctcss_tone = (tone_t)schan->ctcss_tone;
-    chan.vfo = (vfo_t)schan->vfo;
-    strncpy(chan.channel_desc, schan->channel_desc, sizeof(chan.channel_desc) - 1);
-    chan.channel_desc[sizeof(chan.channel_desc) - 1] = '\0';
+    if (!h || !schan) return -RIG_EINVAL;
+    shim_copy_to_hamlib_channel(&chan, schan);
     return rig_set_channel((RIG*)h, (vfo_t)vfo, &chan);
 }
 
 SHIM_API int shim_rig_get_channel(hamlib_shim_handle_t h, int vfo, shim_channel_t* schan, int read_only) {
     channel_t chan;
+    const chan_t* range;
+    int ret;
+    if (!h || !schan) return -RIG_EINVAL;
     memset(&chan, 0, sizeof(chan));
     chan.channel_num = schan->channel_num;
     chan.vfo = (vfo_t)schan->vfo;
-    int ret = rig_get_channel((RIG*)h, (vfo_t)vfo, &chan, read_only);
+    ret = rig_get_channel((RIG*)h, (vfo_t)vfo, &chan, read_only);
     if (ret == RIG_OK) {
-        schan->channel_num = chan.channel_num;
-        schan->freq = (double)chan.freq;
-        schan->tx_freq = (double)chan.tx_freq;
-        schan->mode = (int)chan.mode;
-        schan->width = (int)chan.width;
-        schan->split = (int)chan.split;
-        schan->ctcss_tone = (int)chan.ctcss_tone;
-        schan->vfo = (int)chan.vfo;
-        strncpy(schan->channel_desc, chan.channel_desc, sizeof(schan->channel_desc) - 1);
-        schan->channel_desc[sizeof(schan->channel_desc) - 1] = '\0';
+        range = rig_lookup_mem_caps((RIG*)h, chan.channel_num);
+        shim_copy_from_hamlib_channel(schan, &chan, range);
     }
+    free(chan.ext_levels);
+    return ret;
+}
+
+SHIM_API int shim_rig_get_memory_range_count(hamlib_shim_handle_t h) {
+    RIG* rig = (RIG*)h;
+    int count = 0;
+    if (!rig) return -RIG_EINVAL;
+    while (count < HAMLIB_CHANLSTSIZ && !RIG_IS_CHAN_END(rig->state.chan_list[count])) {
+        count++;
+    }
+    return count;
+}
+
+SHIM_API int shim_rig_get_memory_range(hamlib_shim_handle_t h, int index, shim_memory_range_t* out) {
+    RIG* rig = (RIG*)h;
+    int count;
+    if (!rig || !out || index < 0) return -RIG_EINVAL;
+    count = shim_rig_get_memory_range_count(h);
+    if (count < 0) return count;
+    if (index >= count) return -RIG_EINVAL;
+    shim_copy_range(out, &rig->state.chan_list[index]);
+    return RIG_OK;
+}
+
+SHIM_API int shim_rig_lookup_memory_caps(hamlib_shim_handle_t h, int channel_num, shim_memory_range_t* out) {
+    const chan_t* range;
+    if (!h || !out) return -RIG_EINVAL;
+    range = rig_lookup_mem_caps((RIG*)h, channel_num);
+    if (!range) return -RIG_ENAVAIL;
+    shim_copy_range(out, range);
+    return RIG_OK;
+}
+
+SHIM_API int shim_rig_get_chan_all(hamlib_shim_handle_t h, int vfo, shim_channel_t* chans, int max_count) {
+    RIG* rig = (RIG*)h;
+    int i, j, out_count = 0;
+    if (!rig || !chans || max_count < 0) return -RIG_EINVAL;
+
+    for (i = 0; i < HAMLIB_CHANLSTSIZ && !RIG_IS_CHAN_END(rig->state.chan_list[i]); i++) {
+        const chan_t* range = &rig->state.chan_list[i];
+        for (j = range->startc; j <= range->endc; j++) {
+            channel_t chan;
+            int ret;
+            if (out_count >= max_count) return -RIG_EINVAL;
+            memset(&chan, 0, sizeof(chan));
+            chan.vfo = RIG_VFO_MEM;
+            chan.channel_num = j;
+            ret = rig_get_channel(rig, (vfo_t)vfo, &chan, 1);
+            if (ret == -RIG_ENAVAIL) {
+                memset(&chans[out_count], 0, sizeof(chans[out_count]));
+                chans[out_count].channel_num = j;
+                chans[out_count].channel_type = (int)range->type;
+                out_count++;
+                continue;
+            }
+            if (ret != RIG_OK) {
+                free(chan.ext_levels);
+                return ret;
+            }
+            shim_copy_from_hamlib_channel(&chans[out_count], &chan, range);
+            free(chan.ext_levels);
+            out_count++;
+        }
+    }
+    return out_count;
+}
+
+SHIM_API int shim_rig_set_chan_all(hamlib_shim_handle_t h, int vfo, const shim_channel_t* schans, int count) {
+    channel_t* chans;
+    int i, max_channel = 0, ret;
+    if (!h || !schans || count < 0) return -RIG_EINVAL;
+    for (i = 0; i < count; i++) {
+        if (schans[i].channel_num > max_channel) max_channel = schans[i].channel_num;
+    }
+    chans = (channel_t*)calloc((size_t)max_channel + 1, sizeof(channel_t));
+    if (!chans) return -RIG_ENOMEM;
+    for (i = 0; i < count; i++) {
+        shim_copy_to_hamlib_channel(&chans[schans[i].channel_num], &schans[i]);
+    }
+    ret = rig_set_chan_all((RIG*)h, (vfo_t)vfo, chans);
+    free(chans);
     return ret;
 }
 

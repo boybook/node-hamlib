@@ -51,6 +51,11 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
   Napi::Value SetMemoryChannel(const Napi::CallbackInfo&);
   Napi::Value GetMemoryChannel(const Napi::CallbackInfo&);
   Napi::Value SelectMemoryChannel(const Napi::CallbackInfo&);
+  Napi::Value GetMemoryLayout(const Napi::CallbackInfo&);
+  Napi::Value GetMemoryCapabilities(const Napi::CallbackInfo&);
+  Napi::Value GetMemoryList(const Napi::CallbackInfo&);
+  Napi::Value SetMemoryChannels(const Napi::CallbackInfo&);
+  Napi::Value ReplaceMemoryChannels(const Napi::CallbackInfo&);
 
   // RIT/XIT Control
   Napi::Value SetRit(const Napi::CallbackInfo&);

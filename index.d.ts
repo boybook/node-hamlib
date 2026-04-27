@@ -221,44 +221,140 @@ interface RfPowerStepInfo {
  */
 type RigDebugLevel = 0 | 1 | 2 | 3 | 4 | 5;
 
-/**
- * Memory channel data interface
- */
-interface MemoryChannelData {
-  /** Channel frequency in Hz */
-  frequency?: number;
-  /** Radio mode */
-  mode?: RadioMode;
-  /** Bandwidth */
-  bandwidth?: number;
-  /** Channel description */
-  description?: string;
-  /** TX frequency for split operation */
-  txFrequency?: number;
-  /** CTCSS tone frequency */
-  ctcssTone?: number;
+type MemoryType = 'NONE' | 'MEM' | 'EDGE' | 'CALL' | 'MEMOPAD' | 'SAT' | 'BAND' | 'PRIO' | 'VOICE' | 'MORSE' | 'SPLIT';
+type RepeaterShift = 'None' | 'Minus' | 'Plus' | 'NONE' | 'MINUS' | 'PLUS' | '-' | '+' | string;
+
+interface MemoryChannelFlags {
+  skip: boolean;
+  data: boolean;
+  pskip: boolean;
+  raw: number;
 }
 
-/**
- * Memory channel info interface
- */
-interface MemoryChannelInfo {
-  /** Channel number */
-  channelNumber: number;
-  /** Channel frequency */
-  frequency: number;
-  /** Radio mode */
-  mode: string;
-  /** Bandwidth */
-  bandwidth: number;
-  /** Channel description */
-  description: string;
-  /** Split operation enabled */
+interface MemoryCapabilities {
+  bankNumber: boolean;
+  vfo: boolean;
+  antenna: boolean;
+  frequency: boolean;
+  mode: boolean;
+  bandwidth: boolean;
+  txFrequency: boolean;
+  txMode: boolean;
+  txBandwidth: boolean;
   split: boolean;
-  /** TX frequency (if split enabled) */
-  txFrequency?: number;
-  /** CTCSS tone frequency */
-  ctcssTone?: number;
+  txVfo: boolean;
+  repeaterShift: boolean;
+  repeaterOffset: boolean;
+  tuningStep: boolean;
+  rit: boolean;
+  xit: boolean;
+  functions: FunctionType[];
+  levels: LevelType[];
+  ctcssTone: boolean;
+  ctcssSql: boolean;
+  dcsCode: boolean;
+  dcsSql: boolean;
+  scanGroup: boolean;
+  flags: boolean;
+  description: boolean;
+  tag: boolean;
+}
+
+interface MemoryRange {
+  start: number;
+  end: number;
+  type: MemoryType;
+  capabilities: MemoryCapabilities;
+}
+
+interface MemoryLayout {
+  count: number;
+  ranges: MemoryRange[];
+}
+
+interface MemoryChannel {
+  channelNumber: number;
+  bankNumber: number;
+  type: MemoryType;
+  empty: boolean;
+  vfo: VFO | string;
+  antenna: number;
+  frequency: number;
+  mode?: RadioMode;
+  bandwidth: number;
+  txFrequency: number;
+  txMode?: RadioMode;
+  txBandwidth: number;
+  split: boolean;
+  txVfo: VFO | string;
+  repeaterShift: RepeaterShift;
+  repeaterOffset: number;
+  tuningStep: number;
+  rit: number;
+  xit: number;
+  ctcssTone: number;
+  ctcssSql: number;
+  dcsCode: number;
+  dcsSql: number;
+  scanGroup: number;
+  flags: MemoryChannelFlags;
+  description: string;
+  tag: string;
+  functions: FunctionType[];
+  levels: Partial<Record<LevelType | string, number>>;
+}
+
+type MemoryChannelInput = Partial<Omit<MemoryChannel, 'empty' | 'channelNumber' | 'flags' | 'levels'>> & {
+  channelNumber: number;
+  flags?: Partial<MemoryChannelFlags>;
+  levels?: Partial<Record<LevelType | string, number>>;
+};
+
+/**
+ * @deprecated Use MemoryChannelInput.
+ */
+interface MemoryChannelData extends MemoryChannelInput {}
+
+/**
+ * @deprecated Use MemoryChannel.
+ */
+interface MemoryChannelInfo extends MemoryChannel {}
+
+interface MemoryListOptions {
+  readOnly?: boolean;
+  includeEmpty?: boolean;
+  continueOnError?: boolean;
+}
+
+interface MemoryChannelError {
+  channelNumber: number;
+  code: number;
+  message: string;
+}
+
+interface MemoryListResult {
+  layout: MemoryLayout;
+  channels: MemoryChannel[];
+  errors: MemoryChannelError[];
+}
+
+interface MemoryWriteResult {
+  written: number;
+  errors: MemoryChannelError[];
+}
+
+interface MemoryFacade {
+  layout(): Promise<MemoryLayout>;
+  capabilities(channelNumber?: number): Promise<MemoryCapabilities>;
+  count(): Promise<number>;
+  get(channelNumber: number, options?: { readOnly?: boolean }): Promise<MemoryChannel>;
+  set(channel: MemoryChannelInput): Promise<number>;
+  list(options?: MemoryListOptions): Promise<MemoryListResult>;
+  setMany(channels: MemoryChannelInput[], options?: { continueOnError?: boolean }): Promise<MemoryWriteResult>;
+  replaceAll(channels: MemoryChannelInput[]): Promise<MemoryWriteResult>;
+  current(vfo?: VFO): Promise<number>;
+  select(channelNumber: number, vfo?: VFO): Promise<number>;
+  setBank(bank: number, vfo?: VFO): Promise<number>;
 }
 
 interface SpectrumScopeInfo {
@@ -546,6 +642,9 @@ declare class HamLib extends EventEmitter {
    */
   constructor(model: number, port?: string);
 
+  /** Unified memory-channel API. */
+  readonly memory: MemoryFacade;
+
   /**
    * Get list of all supported radio models
    * @returns Array of supported radio models with details
@@ -706,6 +805,7 @@ declare class HamLib extends EventEmitter {
 
   /**
    * Set memory channel data
+   * @deprecated Use rig.memory.set({ channelNumber, ...channelData }).
    * @param channelNumber Memory channel number
    * @param channelData Channel data (frequency, mode, description, etc.)
    */
@@ -713,6 +813,7 @@ declare class HamLib extends EventEmitter {
 
   /**
    * Get memory channel data
+   * @deprecated Use rig.memory.get(channelNumber, { readOnly }).
    * @param channelNumber Memory channel number
    * @param readOnly Whether to read in read-only mode
    * @returns Channel data
@@ -721,9 +822,10 @@ declare class HamLib extends EventEmitter {
 
   /**
    * Select memory channel for operation
+   * @deprecated Use rig.memory.select(channelNumber, vfo).
    * @param channelNumber Memory channel number to select
    */
-  selectMemoryChannel(channelNumber: number): Promise<number>;
+  selectMemoryChannel(channelNumber: number, vfo?: VFO): Promise<number>;
 
   // RIT/XIT Control
 
@@ -1271,6 +1373,7 @@ declare class HamLib extends EventEmitter {
 
   /**
    * Get current memory channel number
+   * @deprecated Use rig.memory.current(vfo).
    * @param vfo Optional VFO to get memory channel from ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Current memory channel number
    * @example
@@ -1281,6 +1384,7 @@ declare class HamLib extends EventEmitter {
 
   /**
    * Set memory bank
+   * @deprecated Use rig.memory.setBank(bank, vfo).
    * @param bank Bank number to select
    * @param vfo Optional VFO to set bank on ('VFOA' or 'VFOB'). If not specified, uses current VFO
    * @returns Success status
@@ -1292,6 +1396,7 @@ declare class HamLib extends EventEmitter {
 
   /**
    * Get total number of memory channels available
+   * @deprecated Use rig.memory.count().
    * @returns Total number of memory channels
    * @example
    * const totalChannels = await rig.memCount();
@@ -1765,7 +1870,9 @@ declare const PASSBAND: PassbandConstants;
 // Export types for use elsewhere
 export { ConnectionInfo, ModeInfo, SupportedRigInfo, SupportedRotatorInfo, AntennaInfo, RotatorConnectionInfo,
          RotatorPosition, RotatorStatus, RotatorDirection, RotatorResetType, RotatorCaps, VFO, RadioMode, MemoryChannelData,
-         MemoryChannelInfo, SplitModeInfo, SplitStatusInfo, LevelType, FunctionType,
+         MemoryChannelInfo, MemoryType, RepeaterShift, MemoryChannelFlags, MemoryCapabilities, MemoryRange,
+         MemoryLayout, MemoryChannel, MemoryChannelInput, MemoryListOptions, MemoryChannelError,
+         MemoryListResult, MemoryWriteResult, MemoryFacade, SplitModeInfo, SplitStatusInfo, LevelType, FunctionType,
          ScanType, VfoOperationType, SerialConfigParam, SerialBaudRate, SerialParity,
          SerialHandshake, SerialControlState, PttType, DcdType, SerialConfigOptions,
          HamlibConfigFieldType, HamlibConfigFieldDescriptor, HamlibPortType, HamlibPortCaps,
