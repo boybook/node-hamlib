@@ -59,6 +59,7 @@
     "rebuild": "node scripts/build-shim.js && node-gyp rebuild",
     "clean": "node-gyp clean",
     "test": "node test/test_loader.js",
+    "test:loader": "node test/test_loader.js",
     "test:version": "node test/test_version.js",
     "test:network": "node test/test_network.js",
     "test:curr-vfo": "node test/test_curr_vfo_probe.js",

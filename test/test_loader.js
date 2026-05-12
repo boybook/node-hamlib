@@ -3,6 +3,7 @@
  * Tests module loading, instantiation, method existence, and static methods
  */
 
+const { spawnSync } = require('child_process');
 const { HamLib, Rotator, PASSBAND } = require('../index.js');
 const { SpectrumController } = require('../spectrum.js');
 
@@ -34,6 +35,27 @@ function test(description, testFn) {
     console.log(`❌ ${description} - ${error.message}`);
     testsFailed++;
   }
+}
+
+function readGlobalLockEnabledFromChild(value) {
+  const env = { ...process.env };
+  if (value === undefined) {
+    delete env.NODE_HAMLIB_GLOBAL_LOCK;
+  } else {
+    env.NODE_HAMLIB_GLOBAL_LOCK = value;
+  }
+
+  const result = spawnSync(
+    process.execPath,
+    ['-e', "const { HamLib } = require('./index.js'); process.stdout.write(String(HamLib.isGlobalLockEnabled()));"],
+    { cwd: require('path').join(__dirname, '..'), env, encoding: 'utf8' }
+  );
+
+  if (result.status !== 0) {
+    throw new Error(result.stderr || `child exited with ${result.status}`);
+  }
+
+  return result.stdout.trim();
 }
 
 try {
@@ -199,6 +221,21 @@ try {
     test(`静态方法 ${method} 存在`, () => typeof HamLib[method] === 'function');
   });
 
+  console.log('\n🔒 HamLib 全局串行锁开关测试:');
+  test('setGlobalLockEnabled 静态方法存在', () => typeof HamLib.setGlobalLockEnabled === 'function');
+  test('isGlobalLockEnabled 静态方法存在', () => typeof HamLib.isGlobalLockEnabled === 'function');
+  test('全局串行锁默认开启', () => HamLib.isGlobalLockEnabled() === true);
+  test('全局串行锁可运行时关闭和重新开启', () => {
+    HamLib.setGlobalLockEnabled(false);
+    const disabled = HamLib.isGlobalLockEnabled() === false;
+    HamLib.setGlobalLockEnabled(true);
+    return disabled && HamLib.isGlobalLockEnabled() === true;
+  });
+  test('无环境变量时子进程默认开启全局串行锁', () => readGlobalLockEnabledFromChild(undefined) === 'true');
+  ['0', 'false', 'off', 'no'].forEach(value => {
+    test(`NODE_HAMLIB_GLOBAL_LOCK=${value} 时默认关闭`, () => readGlobalLockEnabledFromChild(value) === 'false');
+  });
+
   // Capability Query Batch 2 方法存在性测试
   console.log('\n🆕 能力查询方法存在性测试 (第二批):');
   const capQueryMethods = [
@@ -249,7 +286,7 @@ try {
   const totalMethods = instanceMethods.length + staticMethods.length;
 
   test('实例方法数量不少于97个', () => instanceMethods.length >= 97);
-  test(`静态方法数量正确 (6个)`, () => staticMethods.length === 6);
+  test('静态方法数量不少于8个', () => staticMethods.length >= 8);
   test('总方法数量不少于103个', () => totalMethods >= 103);
 
   console.log(`   📊 实例方法: ${instanceMethods.length}个`);

@@ -22,6 +22,9 @@ public:
     Napi::Promise GetPromise() { return deferred_.Promise(); }
 
 protected:
+    void Execute() final;
+    virtual void ExecuteWithRigLock() = 0;
+
     NodeHamLib* hamlib_instance_;
     int result_code_;
     std::string error_message_;
@@ -226,6 +229,13 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
   static Napi::Value SetDebugLevel(const Napi::CallbackInfo&);
   static Napi::Value GetDebugLevel(const Napi::CallbackInfo&);
 
+  // Static methods to control process-wide HamLib radio serialization.
+  static Napi::Value SetGlobalLockEnabled(const Napi::CallbackInfo&);
+  static Napi::Value IsGlobalLockEnabled(const Napi::CallbackInfo&);
+  static void SetGlobalRigLockEnabled(bool enabled);
+  static bool IsGlobalRigLockEnabled();
+  static std::unique_lock<std::mutex> AcquireGlobalRigLockIfEnabled();
+
   // Static copyright/license
   static Napi::Value GetCopyright(const Napi::CallbackInfo&);
   static Napi::Value GetLicense(const Napi::CallbackInfo&);
@@ -259,4 +269,8 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
   std::atomic<bool> spectrum_stream_running_{false};
   Napi::ThreadSafeFunction spectrum_tsfn_;
   std::mutex spectrum_mutex_;
+
+ private:
+  static std::mutex global_rig_mutex_;
+  static std::atomic<bool> global_rig_lock_enabled_;
 };

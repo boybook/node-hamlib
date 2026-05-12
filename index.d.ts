@@ -704,6 +704,22 @@ declare class HamLib extends EventEmitter {
   static getDebugLevel(): never;
 
   /**
+   * Enable or disable process-wide serialization for native HamLib radio calls.
+   *
+   * Enabled by default. Set NODE_HAMLIB_GLOBAL_LOCK=0, false, off, or no before
+   * loading the package to start with the current no-lock behavior.
+   *
+   * Runtime changes only affect later lock checks; calls that have already
+   * entered Hamlib are not interrupted.
+   */
+  static setGlobalLockEnabled(enabled: boolean): void;
+
+  /**
+   * Returns whether process-wide native HamLib radio call serialization is enabled.
+   */
+  static isGlobalLockEnabled(): boolean;
+
+  /**
    * Open connection to device
    * Must be called before other operations
    * @throws Throws error when connection fails

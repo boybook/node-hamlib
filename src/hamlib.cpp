@@ -8,6 +8,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <limits>
 #include <set>
@@ -62,8 +63,24 @@ struct RigConfigSchemaData {
 
 using namespace Napi;
 
+static bool readGlobalRigLockDefault() {
+  const char* rawValue = std::getenv("NODE_HAMLIB_GLOBAL_LOCK");
+  if (!rawValue || !*rawValue) {
+    return true;
+  }
+
+  std::string value(rawValue);
+  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+    return static_cast<char>(std::tolower(ch));
+  });
+
+  return value != "0" && value != "false" && value != "off" && value != "no";
+}
+
 Napi::FunctionReference NodeHamLib::constructor;
 Napi::ThreadSafeFunction tsfn;
+std::mutex NodeHamLib::global_rig_mutex_;
+std::atomic<bool> NodeHamLib::global_rig_lock_enabled_{readGlobalRigLockDefault()};
 
 constexpr int kInvalidVfoParameter = std::numeric_limits<int>::min();
 
@@ -556,13 +573,18 @@ static int antennaMaskToOrdinal(int antennaMask) {
 HamLibAsyncWorker::HamLibAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
     : AsyncWorker(env), hamlib_instance_(hamlib_instance), result_code_(0), error_message_(""), deferred_(Napi::Promise::Deferred::New(env)) {}
 
+void HamLibAsyncWorker::Execute() {
+    auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
+    ExecuteWithRigLock();
+}
+
 // Specific AsyncWorker classes for each operation
 class OpenAsyncWorker : public HamLibAsyncWorker {
 public:
     OpenAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_open(hamlib_instance_->my_rig);
@@ -603,7 +625,7 @@ public:
     SetFrequencyAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, double freq, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), freq_(freq), vfo_(vfo) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_set_freq(hamlib_instance_->my_rig, vfo_, freq_);
@@ -636,7 +658,7 @@ public:
     GetFrequencyAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), freq_(0) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_get_freq(hamlib_instance_->my_rig, vfo_, &freq_);
@@ -669,7 +691,7 @@ public:
     SetModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int mode, int width, int vfo = SHIM_RIG_VFO_CURR)
         : HamLibAsyncWorker(env, hamlib_instance), mode_(mode), width_(width), vfo_(vfo) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_set_mode(hamlib_instance_->my_rig, vfo_, mode_, width_);
@@ -703,7 +725,7 @@ public:
     GetModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance), mode_(0), width_(0) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_get_mode(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, &mode_, &width_);
@@ -741,7 +763,7 @@ public:
     SetPttAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int ptt)
         : HamLibAsyncWorker(env, hamlib_instance), ptt_(ptt) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_set_ptt(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, ptt_);
@@ -773,7 +795,7 @@ public:
     GetStrengthAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), strength_(0) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_get_strength(hamlib_instance_->my_rig, vfo_, &strength_);
@@ -806,7 +828,7 @@ public:
     SetLevelAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, uint64_t level_type, float value, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), level_type_(level_type), value_(value), vfo_(vfo) {}
 
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
 
         if (shim_rig_level_is_float(level_type_)) {
@@ -844,7 +866,7 @@ public:
     GetLevelAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, uint64_t level_type, int vfo = SHIM_RIG_VFO_CURR)
         : HamLibAsyncWorker(env, hamlib_instance), level_type_(level_type), vfo_(vfo), value_(0.0) {}
 
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
 
         // Use auto-detect to handle int levels (STRENGTH, RAWSTR) and
@@ -880,7 +902,7 @@ public:
     SetFunctionAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, uint64_t func_type, int enable)
         : HamLibAsyncWorker(env, hamlib_instance), func_type_(func_type), enable_(enable) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_set_func(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, func_type_, enable_);
@@ -913,7 +935,7 @@ public:
     GetFunctionAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, uint64_t func_type)
         : HamLibAsyncWorker(env, hamlib_instance), func_type_(func_type), state_(0) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_get_func(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, func_type_, &state_);
@@ -946,7 +968,7 @@ public:
     SetMemoryChannelAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, const shim_channel_t& chan)
         : HamLibAsyncWorker(env, hamlib_instance), chan_(chan) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_set_channel(hamlib_instance_->my_rig, SHIM_RIG_VFO_MEM, &chan_);
@@ -981,7 +1003,7 @@ public:
         memset(&range_, 0, sizeof(range_));
     }
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
 
         result_code_ = shim_rig_lookup_memory_caps(hamlib_instance_->my_rig, channel_num_, &range_);
@@ -1031,7 +1053,7 @@ public:
     SelectMemoryChannelAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int channel_num, int vfo = SHIM_RIG_VFO_CURR)
         : HamLibAsyncWorker(env, hamlib_instance), channel_num_(channel_num), vfo_(vfo) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_set_mem(hamlib_instance_->my_rig, vfo_, channel_num_);
@@ -1091,7 +1113,7 @@ public:
     MemoryLayoutAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance) {}
 
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         int range_count = shim_rig_get_memory_range_count(hamlib_instance_->my_rig);
         if (range_count < 0) {
@@ -1134,7 +1156,7 @@ public:
         memset(&range_, 0, sizeof(range_));
     }
 
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         result_code_ = shim_rig_lookup_memory_caps(hamlib_instance_->my_rig, channel_num_, &range_);
         if (result_code_ != SHIM_RIG_OK) {
@@ -1165,7 +1187,7 @@ public:
     MemoryListAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, bool read_only, bool include_empty, bool continue_on_error)
         : HamLibAsyncWorker(env, hamlib_instance), read_only_(read_only), include_empty_(include_empty), continue_on_error_(continue_on_error) {}
 
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         int range_count = shim_rig_get_memory_range_count(hamlib_instance_->my_rig);
         if (range_count < 0) {
@@ -1251,7 +1273,7 @@ public:
     SetMemoryChannelsAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, std::vector<shim_channel_t> channels, bool continue_on_error)
         : HamLibAsyncWorker(env, hamlib_instance), channels_(std::move(channels)), continue_on_error_(continue_on_error) {}
 
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         for (const auto& chan : channels_) {
             int ret = shim_rig_set_channel(hamlib_instance_->my_rig, SHIM_RIG_VFO_MEM, &chan);
@@ -1301,7 +1323,7 @@ public:
     ReplaceMemoryChannelsAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, std::vector<shim_channel_t> channels)
         : HamLibAsyncWorker(env, hamlib_instance), channels_(std::move(channels)) {}
 
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         std::set<int> expected;
         int range_count = shim_rig_get_memory_range_count(hamlib_instance_->my_rig);
@@ -1373,7 +1395,7 @@ public:
     SetRitAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int rit_offset)
         : HamLibAsyncWorker(env, hamlib_instance), rit_offset_(rit_offset) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_set_rit(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, rit_offset_);
@@ -1405,7 +1427,7 @@ public:
     GetRitAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance), rit_offset_(0) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_get_rit(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, &rit_offset_);
@@ -1437,7 +1459,7 @@ public:
     SetXitAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int xit_offset)
         : HamLibAsyncWorker(env, hamlib_instance), xit_offset_(xit_offset) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_set_xit(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, xit_offset_);
@@ -1469,7 +1491,7 @@ public:
     GetXitAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance), xit_offset_(0) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_get_xit(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, &xit_offset_);
@@ -1501,7 +1523,7 @@ public:
     ClearRitXitAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         int ritCode = shim_rig_set_rit(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, 0);
@@ -1538,7 +1560,7 @@ public:
     SetSplitFreqAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, double tx_freq, int vfo = SHIM_RIG_VFO_CURR)
         : HamLibAsyncWorker(env, hamlib_instance), tx_freq_(tx_freq), vfo_(vfo) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_set_split_freq(hamlib_instance_->my_rig, vfo_, tx_freq_);
@@ -1571,7 +1593,7 @@ public:
     GetSplitFreqAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo = SHIM_RIG_VFO_CURR)
         : HamLibAsyncWorker(env, hamlib_instance), tx_freq_(0), vfo_(vfo) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_get_split_freq(hamlib_instance_->my_rig, vfo_, &tx_freq_);
@@ -1604,7 +1626,7 @@ public:
     SetSplitAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int rx_vfo, int split, int tx_vfo)
         : HamLibAsyncWorker(env, hamlib_instance), rx_vfo_(rx_vfo), split_(split), tx_vfo_(tx_vfo) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_set_split_vfo(hamlib_instance_->my_rig, rx_vfo_, split_, tx_vfo_);
@@ -1638,7 +1660,7 @@ public:
     GetSplitAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo = SHIM_RIG_VFO_CURR)
         : HamLibAsyncWorker(env, hamlib_instance), split_(SHIM_RIG_SPLIT_OFF), tx_vfo_(SHIM_RIG_VFO_CURR), vfo_(vfo) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_get_split_vfo(hamlib_instance_->my_rig, vfo_, &split_, &tx_vfo_);
@@ -1676,7 +1698,7 @@ public:
     SetVfoAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_set_vfo(hamlib_instance_->my_rig, vfo_);
@@ -1708,7 +1730,7 @@ public:
     GetVfoAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(0) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_get_vfo(hamlib_instance_->my_rig, &vfo_);
@@ -1760,7 +1782,7 @@ public:
     CloseAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         // 检查rig是否已经关闭
@@ -1797,7 +1819,7 @@ public:
     DestroyAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         // rig_cleanup会自动调用rig_close，所以我们不需要重复调用
@@ -1831,7 +1853,7 @@ public:
     StartScanAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int intype, int channel)
         : HamLibAsyncWorker(env, hamlib_instance), intype_(intype), channel_(channel) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_scan(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, intype_, channel_);
@@ -1865,7 +1887,7 @@ public:
     StopScanAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_scan(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, SHIM_RIG_SCAN_STOP, 0);
@@ -1895,7 +1917,7 @@ public:
     VfoOperationAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo_op)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_op_(vfo_op) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_vfo_op(hamlib_instance_->my_rig, SHIM_RIG_VFO_CURR, vfo_op_);
@@ -1928,7 +1950,7 @@ public:
     SetAntennaAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int antenna, int vfo, float option)
         : HamLibAsyncWorker(env, hamlib_instance), antenna_(antenna), vfo_(vfo), option_(option) {}
 
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
 
         result_code_ = shim_rig_set_ant(hamlib_instance_->my_rig, vfo_, antenna_, option_);
@@ -1963,7 +1985,7 @@ public:
     GetAntennaAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, int antenna)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), antenna_(antenna), antenna_curr_(0), antenna_tx_(0), antenna_rx_(0) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         option_ = 0.0f;
@@ -2010,7 +2032,7 @@ public:
     Power2mWAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, float power, double freq, int mode)
         : HamLibAsyncWorker(env, hamlib_instance), power_(power), freq_(freq), mode_(mode), mwpower_(0) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_power2mW(hamlib_instance_->my_rig, &mwpower_, power_, freq_, mode_);
@@ -2046,7 +2068,7 @@ public:
     MW2PowerAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, unsigned int mwpower, double freq, int mode)
         : HamLibAsyncWorker(env, hamlib_instance), mwpower_(mwpower), freq_(freq), mode_(mode), power_(0.0) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_mW2power(hamlib_instance_->my_rig, &power_, mwpower_, freq_, mode_);
@@ -2082,7 +2104,7 @@ public:
     SetSplitModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int tx_mode, int tx_width, int vfo = SHIM_RIG_VFO_CURR)
         : HamLibAsyncWorker(env, hamlib_instance), tx_mode_(tx_mode), tx_width_(tx_width), vfo_(vfo) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_set_split_mode(hamlib_instance_->my_rig, vfo_, tx_mode_, tx_width_);
@@ -2117,7 +2139,7 @@ public:
     GetSplitModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo = SHIM_RIG_VFO_CURR)
         : HamLibAsyncWorker(env, hamlib_instance), tx_mode_(0), tx_width_(0), vfo_(vfo) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_get_split_mode(hamlib_instance_->my_rig, vfo_, &tx_mode_, &tx_width_);
@@ -2157,7 +2179,7 @@ public:
     SetSerialConfigAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, const std::string& param_name, const std::string& param_value)
         : HamLibAsyncWorker(env, hamlib_instance), param_name_(param_name), param_value_(param_value) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         // Apply serial configuration parameter
@@ -2316,7 +2338,7 @@ public:
     GetSerialConfigAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, const std::string& param_name)
         : HamLibAsyncWorker(env, hamlib_instance), param_name_(param_name) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         // Get serial configuration parameter
@@ -2433,7 +2455,7 @@ public:
     SetPttTypeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, const std::string& intype)
         : HamLibAsyncWorker(env, hamlib_instance), intype_(intype) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         int intype;
@@ -2487,7 +2509,7 @@ public:
     GetPttTypeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         int intype = shim_rig_get_ptt_type(hamlib_instance_->my_rig);
@@ -2548,7 +2570,7 @@ public:
     SetDcdTypeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, const std::string& intype)
         : HamLibAsyncWorker(env, hamlib_instance), intype_(intype) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         int intype;
@@ -2604,7 +2626,7 @@ public:
     GetDcdTypeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         int intype = shim_rig_get_dcd_type(hamlib_instance_->my_rig);
@@ -2668,7 +2690,7 @@ public:
     SetPowerstatAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int status)
         : HamLibAsyncWorker(env, hamlib_instance), status_(status) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_set_powerstat(hamlib_instance_->my_rig, status_);
@@ -2700,7 +2722,7 @@ public:
     GetPowerstatAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance), status_(SHIM_RIG_POWER_UNKNOWN) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_get_powerstat(hamlib_instance_->my_rig, &status_);
@@ -2733,7 +2755,7 @@ public:
     GetPttAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), ptt_(SHIM_RIG_PTT_OFF) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_get_ptt(hamlib_instance_->my_rig, vfo_, &ptt_);
@@ -2767,7 +2789,7 @@ public:
     GetDcdAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), dcd_(SHIM_RIG_DCD_OFF) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_get_dcd(hamlib_instance_->my_rig, vfo_, &dcd_);
@@ -2801,7 +2823,7 @@ public:
     SetTuningStepAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, int ts)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), ts_(ts) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_set_ts(hamlib_instance_->my_rig, vfo_, ts_);
@@ -2834,7 +2856,7 @@ public:
     GetTuningStepAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), ts_(0) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_get_ts(hamlib_instance_->my_rig, vfo_, &ts_);
@@ -2868,7 +2890,7 @@ public:
     SetRepeaterShiftAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, int shift)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), shift_(shift) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_set_rptr_shift(hamlib_instance_->my_rig, vfo_, shift_);
@@ -2901,7 +2923,7 @@ public:
     GetRepeaterShiftAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), shift_(SHIM_RIG_RPT_SHIFT_NONE) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_get_rptr_shift(hamlib_instance_->my_rig, vfo_, &shift_);
@@ -2931,7 +2953,7 @@ public:
     SetRepeaterOffsetAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, int offset)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), offset_(offset) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_set_rptr_offs(hamlib_instance_->my_rig, vfo_, offset_);
@@ -2964,7 +2986,7 @@ public:
     GetRepeaterOffsetAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), offset_(0) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_get_rptr_offs(hamlib_instance_->my_rig, vfo_, &offset_);
@@ -3058,6 +3080,7 @@ NodeHamLib::NodeHamLib(const Napi::CallbackInfo & info): ObjectWrap(info) {
     // Network connection will be established on open()
   }
 
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
   my_rig = shim_rig_init(myrig_model);
   //int retcode = 0;
   if (!my_rig) {
@@ -3093,6 +3116,7 @@ NodeHamLib::NodeHamLib(const Napi::CallbackInfo & info): ObjectWrap(info) {
 
 // 析构函数 - 确保资源正确清理
 NodeHamLib::~NodeHamLib() {
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
   StopSpectrumStreamInternal();
 
   // 如果rig指针存在，执行清理
@@ -3302,10 +3326,11 @@ Napi::Value NodeHamLib::SetMode(const Napi::CallbackInfo & info) {
       bandwidth = info[1].As<Napi::Number>().Int32Value();
     } else if (info[1].IsString()) {
       std::string bandstr = info[1].As<Napi::String>().Utf8Value();
-      if (bandstr == "narrow") {
-        bandwidth = shim_rig_passband_narrow(my_rig, mode);
-      } else if (bandstr == "wide") {
-        bandwidth = shim_rig_passband_wide(my_rig, mode);
+      if (bandstr == "narrow" || bandstr == "wide") {
+        auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
+        bandwidth = bandstr == "narrow"
+          ? shim_rig_passband_narrow(my_rig, mode)
+          : shim_rig_passband_wide(my_rig, mode);
       } else if (bandstr == "normal") {
         bandwidth = SHIM_RIG_PASSBAND_NORMAL;
       } else if (bandstr == "nochange") {
@@ -3449,7 +3474,10 @@ Napi::Value NodeHamLib::Close(const Napi::CallbackInfo & info) {
     return env.Null();
   }
 
-  StopSpectrumStreamInternal();
+  {
+    auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
+    StopSpectrumStreamInternal();
+  }
   
   CloseAsyncWorker* worker = new CloseAsyncWorker(env, this);
   worker->Queue();
@@ -3460,7 +3488,10 @@ Napi::Value NodeHamLib::Close(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::Destroy(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
 
-  StopSpectrumStreamInternal();
+  {
+    auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
+    StopSpectrumStreamInternal();
+  }
   
   DestroyAsyncWorker* worker = new DestroyAsyncWorker(env, this);
   worker->Queue();
@@ -3849,6 +3880,7 @@ Napi::Value NodeHamLib::SetLevel(const Napi::CallbackInfo & info) {
 
   if (isSpectrumLevel) {
     Napi::Promise::Deferred deferred = Napi::Promise::Deferred::New(env);
+    auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
     int result = shim_rig_level_is_float(levelType)
       ? shim_rig_set_level_f(my_rig, vfo, levelType, static_cast<float>(levelValue))
       : shim_rig_set_level_i(my_rig, vfo, levelType, static_cast<int>(levelValue));
@@ -3904,6 +3936,7 @@ Napi::Value NodeHamLib::GetLevel(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::GetSupportedLevels(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
   
   // Get capabilities from rig caps instead of state (doesn't require rig to be open)
   uint64_t levels = shim_rig_get_caps_has_get_level(my_rig) | shim_rig_get_caps_has_set_level(my_rig);
@@ -4141,6 +4174,7 @@ Napi::Value NodeHamLib::GetFunction(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::GetSupportedFunctions(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
   
   // Get capabilities from rig caps instead of state (doesn't require rig to be open)
   uint64_t functions = shim_rig_get_caps_has_get_func(my_rig) | shim_rig_get_caps_has_set_func(my_rig);
@@ -4187,6 +4221,7 @@ Napi::Value NodeHamLib::GetSupportedFunctions(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::GetSupportedModes(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
 
   // Get mode list from rig state (populated during rig_open from rx/tx range lists)
   uint64_t modes = shim_rig_get_mode_list(my_rig);
@@ -4732,6 +4767,8 @@ Napi::Function NodeHamLib::GetClass(Napi::Env env) {
       NodeHamLib::StaticMethod("getHamlibVersion", & NodeHamLib::GetHamlibVersion),
       NodeHamLib::StaticMethod("setDebugLevel", & NodeHamLib::SetDebugLevel),
       NodeHamLib::StaticMethod("getDebugLevel", & NodeHamLib::GetDebugLevel),
+      NodeHamLib::StaticMethod("setGlobalLockEnabled", & NodeHamLib::SetGlobalLockEnabled),
+      NodeHamLib::StaticMethod("isGlobalLockEnabled", & NodeHamLib::IsGlobalLockEnabled),
       NodeHamLib::StaticMethod("getCopyright", & NodeHamLib::GetCopyright),
       NodeHamLib::StaticMethod("getLicense", & NodeHamLib::GetLicense),
     });
@@ -4860,6 +4897,38 @@ Napi::Value NodeHamLib::GetDebugLevel(const Napi::CallbackInfo& info) {
     "Getting debug level is not supported by Hamlib API. "
     "Please track the debug level you set using setDebugLevel().").ThrowAsJavaScriptException();
   return env.Undefined();
+}
+
+void NodeHamLib::SetGlobalRigLockEnabled(bool enabled) {
+  global_rig_lock_enabled_.store(enabled, std::memory_order_release);
+}
+
+bool NodeHamLib::IsGlobalRigLockEnabled() {
+  return global_rig_lock_enabled_.load(std::memory_order_acquire);
+}
+
+std::unique_lock<std::mutex> NodeHamLib::AcquireGlobalRigLockIfEnabled() {
+  std::unique_lock<std::mutex> lock(global_rig_mutex_, std::defer_lock);
+  if (IsGlobalRigLockEnabled()) {
+    lock.lock();
+  }
+  return lock;
+}
+
+Napi::Value NodeHamLib::SetGlobalLockEnabled(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+
+  if (info.Length() < 1 || !info[0].IsBoolean()) {
+    Napi::TypeError::New(env, "Expected (enabled: boolean)").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+
+  SetGlobalRigLockEnabled(info[0].As<Napi::Boolean>().Value());
+  return env.Undefined();
+}
+
+Napi::Value NodeHamLib::IsGlobalLockEnabled(const Napi::CallbackInfo& info) {
+  return Napi::Boolean::New(info.Env(), IsGlobalRigLockEnabled());
 }
 
 // Serial Port Configuration Methods
@@ -5051,6 +5120,7 @@ int NodeHamLib::rig_config_callback(const shim_confparam_info_t* info, void* dat
 Napi::Value NodeHamLib::GetConfigSchema(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
 
   RigConfigSchemaData schemaData{};
   int result = shim_rig_cfgparams_foreach(my_rig, rig_config_callback, &schemaData);
@@ -5097,6 +5167,7 @@ Napi::Value NodeHamLib::GetConfigSchema(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetPortCaps(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
 
   shim_rig_port_caps_t caps{};
   int result = shim_rig_get_port_caps(my_rig, &caps);
@@ -5289,7 +5360,7 @@ public:
     SetCtcssToneAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, unsigned int tone)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tone_(tone) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_set_ctcss_tone(hamlib_instance_->my_rig, vfo_, tone_);
@@ -5322,7 +5393,7 @@ public:
     GetCtcssToneAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tone_(0) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_get_ctcss_tone(hamlib_instance_->my_rig, vfo_, &tone_);
@@ -5355,7 +5426,7 @@ public:
     SetDcsCodeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, unsigned int code)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), code_(code) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_set_dcs_code(hamlib_instance_->my_rig, vfo_, code_);
@@ -5388,7 +5459,7 @@ public:
     GetDcsCodeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), code_(0) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_get_dcs_code(hamlib_instance_->my_rig, vfo_, &code_);
@@ -5421,7 +5492,7 @@ public:
     SetCtcssSqlAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, unsigned int tone)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tone_(tone) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_set_ctcss_sql(hamlib_instance_->my_rig, vfo_, tone_);
@@ -5454,7 +5525,7 @@ public:
     GetCtcssSqlAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tone_(0) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_get_ctcss_sql(hamlib_instance_->my_rig, vfo_, &tone_);
@@ -5487,7 +5558,7 @@ public:
     SetDcsSqlAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, unsigned int code)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), code_(code) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_set_dcs_sql(hamlib_instance_->my_rig, vfo_, code_);
@@ -5520,7 +5591,7 @@ public:
     GetDcsSqlAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), code_(0) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_get_dcs_sql(hamlib_instance_->my_rig, vfo_, &code_);
@@ -5554,7 +5625,7 @@ public:
     SetParmAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, uint64_t parm, float value)
         : HamLibAsyncWorker(env, hamlib_instance), parm_(parm), value_(value) {}
 
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
 
         result_code_ = shim_rig_set_parm_f(hamlib_instance_->my_rig, parm_, value_);
@@ -5587,7 +5658,7 @@ public:
     GetParmAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, uint64_t parm)
         : HamLibAsyncWorker(env, hamlib_instance), parm_(parm), value_(0.0f) {}
 
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
 
         result_code_ = shim_rig_get_parm_f(hamlib_instance_->my_rig, parm_, &value_);
@@ -5621,7 +5692,7 @@ public:
     SendDtmfAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, const std::string& digits)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), digits_(digits) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_send_dtmf(hamlib_instance_->my_rig, vfo_, digits_.c_str());
@@ -5656,7 +5727,7 @@ public:
         digits_.resize(maxLength + 1, '\0');
     }
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         length_ = max_length_;
@@ -5697,7 +5768,7 @@ public:
     GetMemAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), ch_(0) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_get_mem(hamlib_instance_->my_rig, vfo_, &ch_);
@@ -5730,7 +5801,7 @@ public:
     SetBankAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, int bank)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), bank_(bank) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_set_bank(hamlib_instance_->my_rig, vfo_, bank_);
@@ -5763,7 +5834,7 @@ public:
     MemCountAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance), count_(0) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         count_ = shim_rig_mem_count(hamlib_instance_->my_rig);
@@ -5799,7 +5870,7 @@ public:
     SendMorseAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, const std::string& msg)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), msg_(msg) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_send_morse(hamlib_instance_->my_rig, vfo_, msg_.c_str());
@@ -5832,7 +5903,7 @@ public:
     StopMorseAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_stop_morse(hamlib_instance_->my_rig, vfo_);
@@ -5864,7 +5935,7 @@ public:
     WaitMorseAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_wait_morse(hamlib_instance_->my_rig, vfo_);
@@ -5897,7 +5968,7 @@ public:
     SendVoiceMemAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, int ch)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), ch_(ch) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_send_voice_mem(hamlib_instance_->my_rig, vfo_, ch_);
@@ -5930,7 +6001,7 @@ public:
     StopVoiceMemAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_stop_voice_mem(hamlib_instance_->my_rig, vfo_);
@@ -5965,7 +6036,7 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tx_freq_(tx_freq), 
           tx_mode_(tx_mode), tx_width_(tx_width) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_set_split_freq_mode(hamlib_instance_->my_rig, vfo_, tx_freq_, tx_mode_, tx_width_);
@@ -6000,7 +6071,7 @@ public:
     GetSplitFreqModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tx_freq_(0), tx_mode_(SHIM_RIG_MODE_NONE), tx_width_(0) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_get_split_freq_mode(hamlib_instance_->my_rig, vfo_, &tx_freq_, &tx_mode_, &tx_width_);
@@ -6040,7 +6111,7 @@ public:
     ResetAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int reset)
         : HamLibAsyncWorker(env, hamlib_instance), reset_(reset) {}
     
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         
         result_code_ = shim_rig_reset(hamlib_instance_->my_rig, reset_);
@@ -6533,7 +6604,7 @@ public:
     SetLockModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int lock)
         : HamLibAsyncWorker(env, hamlib_instance), lock_(lock) {}
 
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         result_code_ = shim_rig_set_lock_mode(hamlib_instance_->my_rig, lock_);
         if (result_code_ != SHIM_RIG_OK) {
@@ -6563,7 +6634,7 @@ public:
     GetLockModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance), lock_(0) {}
 
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         result_code_ = shim_rig_get_lock_mode(hamlib_instance_->my_rig, &lock_);
         if (result_code_ != SHIM_RIG_OK) {
@@ -6622,7 +6693,7 @@ public:
           year_(year), month_(month), day_(day),
           hour_(hour), min_(min), sec_(sec), msec_(msec), utc_offset_(utc_offset) {}
 
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         result_code_ = shim_rig_set_clock(hamlib_instance_->my_rig,
                                            year_, month_, day_,
@@ -6658,7 +6729,7 @@ public:
           year_(0), month_(0), day_(0),
           hour_(0), min_(0), sec_(0), msec_(0.0), utc_offset_(0) {}
 
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         result_code_ = shim_rig_get_clock(hamlib_instance_->my_rig,
                                            &year_, &month_, &day_,
@@ -6750,7 +6821,7 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance),
           vfo_(vfo), freq_(0.0), mode_(0), width_(0), split_(0), satmode_(0) {}
 
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         result_code_ = shim_rig_get_vfo_info(hamlib_instance_->my_rig, vfo_,
                                               &freq_, &mode_, &width_, &split_, &satmode_);
@@ -6805,7 +6876,7 @@ public:
     GetInfoAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance) {}
 
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         const char* info = shim_rig_get_info(hamlib_instance_->my_rig);
         info_str_ = info ? info : "";
@@ -6851,7 +6922,7 @@ public:
         reply_buf_.resize(reply_max_len > 0 ? reply_max_len : 1);
     }
 
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         const unsigned char* term = has_terminator_ ? terminator_.data() : nullptr;
         result_code_ = shim_rig_send_raw(hamlib_instance_->my_rig,
@@ -6920,6 +6991,7 @@ Napi::Value NodeHamLib::SendRaw(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetSpectrumCapabilities(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
   Napi::Object result = Napi::Object::New(env);
 
   result.Set("asyncDataSupported", Napi::Boolean::New(env, shim_rig_is_async_data_supported(my_rig) != 0));
@@ -6991,6 +7063,7 @@ Napi::Value NodeHamLib::StartSpectrumStream(const Napi::CallbackInfo& info) {
     return env.Null();
   }
 
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
   std::lock_guard<std::mutex> lock(spectrum_mutex_);
   if (spectrum_stream_running_) {
     Napi::Error::New(env, "Spectrum stream is already running").ThrowAsJavaScriptException();
@@ -7012,6 +7085,7 @@ Napi::Value NodeHamLib::StartSpectrumStream(const Napi::CallbackInfo& info) {
 
 Napi::Value NodeHamLib::StopSpectrumStream(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
   StopSpectrumStreamInternal();
   return Napi::Boolean::New(env, true);
 }
@@ -7025,7 +7099,7 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance),
           name_(std::move(name)), value_(std::move(value)) {}
 
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         result_code_ = shim_rig_set_conf(hamlib_instance_->my_rig, name_.c_str(), value_.c_str());
         if (result_code_ != SHIM_RIG_OK) {
@@ -7054,6 +7128,7 @@ private:
 Napi::Value NodeHamLib::SetConf(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
 
   if (info.Length() < 2 || !info[0].IsString() || !info[1].IsString()) {
     Napi::TypeError::New(env, "Expected (name: string, value: string)").ThrowAsJavaScriptException();
@@ -7077,7 +7152,7 @@ public:
         memset(buf_, 0, sizeof(buf_));
     }
 
-    void Execute() override {
+    void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         result_code_ = shim_rig_get_conf(hamlib_instance_->my_rig, name_.c_str(), buf_, sizeof(buf_));
         if (result_code_ != SHIM_RIG_OK) {
@@ -7106,6 +7181,7 @@ private:
 Napi::Value NodeHamLib::GetConf(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
 
   if (info.Length() < 1 || !info[0].IsString()) {
     Napi::TypeError::New(env, "Expected (name: string)").ThrowAsJavaScriptException();
@@ -7124,6 +7200,7 @@ Napi::Value NodeHamLib::GetConf(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetPassbandNormal(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
 
   if (info.Length() < 1 || !info[0].IsString()) {
     Napi::TypeError::New(env, "Expected (mode: string)").ThrowAsJavaScriptException();
@@ -7139,6 +7216,7 @@ Napi::Value NodeHamLib::GetPassbandNormal(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetPassbandNarrow(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
 
   if (info.Length() < 1 || !info[0].IsString()) {
     Napi::TypeError::New(env, "Expected (mode: string)").ThrowAsJavaScriptException();
@@ -7154,6 +7232,7 @@ Napi::Value NodeHamLib::GetPassbandNarrow(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetPassbandWide(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
 
   if (info.Length() < 1 || !info[0].IsString()) {
     Napi::TypeError::New(env, "Expected (mode: string)").ThrowAsJavaScriptException();
@@ -7171,6 +7250,7 @@ Napi::Value NodeHamLib::GetPassbandWide(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetResolution(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
 
   if (info.Length() < 1 || !info[0].IsString()) {
     Napi::TypeError::New(env, "Expected (mode: string)").ThrowAsJavaScriptException();
@@ -7188,6 +7268,7 @@ Napi::Value NodeHamLib::GetResolution(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetSupportedParms(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
 
   uint64_t parms = shim_rig_get_caps_has_get_parm(my_rig) | shim_rig_get_caps_has_set_parm(my_rig);
   Napi::Array parmArray = Napi::Array::New(env);
@@ -7210,6 +7291,7 @@ Napi::Value NodeHamLib::GetSupportedParms(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetSupportedVfoOps(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
 
   int ops = shim_rig_get_caps_vfo_ops(my_rig);
   Napi::Array opsArray = Napi::Array::New(env);
@@ -7237,6 +7319,7 @@ Napi::Value NodeHamLib::GetSupportedVfoOps(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetSupportedScanTypes(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
 
   int scan = shim_rig_get_caps_has_scan(my_rig);
   Napi::Array scanArray = Napi::Array::New(env);
@@ -7272,6 +7355,7 @@ static Napi::Array ModeBitmaskToArray(Napi::Env env, uint64_t modes) {
 Napi::Value NodeHamLib::GetPreampValues(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
   int buf[SHIM_HAMLIB_MAX_MODES];
   int count = shim_rig_get_caps_preamp(my_rig, buf, SHIM_HAMLIB_MAX_MODES);
   Napi::Array arr = Napi::Array::New(env, count);
@@ -7284,6 +7368,7 @@ Napi::Value NodeHamLib::GetPreampValues(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetAttenuatorValues(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
   int buf[SHIM_HAMLIB_MAX_MODES];
   int count = shim_rig_get_caps_attenuator(my_rig, buf, SHIM_HAMLIB_MAX_MODES);
   Napi::Array arr = Napi::Array::New(env, count);
@@ -7296,6 +7381,7 @@ Napi::Value NodeHamLib::GetAttenuatorValues(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetAgcLevels(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
   int buf[SHIM_HAMLIB_MAX_MODES];
   int count = shim_rig_get_caps_agc_levels(my_rig, buf, SHIM_HAMLIB_MAX_MODES);
   Napi::Array arr = Napi::Array::New(env, count);
@@ -7308,24 +7394,28 @@ Napi::Value NodeHamLib::GetAgcLevels(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetMaxRit(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
   return Napi::Number::New(info.Env(), (double)shim_rig_get_caps_max_rit(my_rig));
 }
 
 Napi::Value NodeHamLib::GetMaxXit(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
   return Napi::Number::New(info.Env(), (double)shim_rig_get_caps_max_xit(my_rig));
 }
 
 Napi::Value NodeHamLib::GetMaxIfShift(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
   return Napi::Number::New(info.Env(), (double)shim_rig_get_caps_max_ifshift(my_rig));
 }
 
 Napi::Value NodeHamLib::GetAvailableCtcssTones(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
   unsigned int buf[256];
   int count = shim_rig_get_caps_ctcss_list(my_rig, buf, 256);
   Napi::Array arr = Napi::Array::New(env, count);
@@ -7339,6 +7429,7 @@ Napi::Value NodeHamLib::GetAvailableCtcssTones(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetAvailableDcsCodes(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
   unsigned int buf[256];
   int count = shim_rig_get_caps_dcs_list(my_rig, buf, 256);
   Napi::Array arr = Napi::Array::New(env, count);
@@ -7351,6 +7442,7 @@ Napi::Value NodeHamLib::GetAvailableDcsCodes(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetFrequencyRanges(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
 
   shim_freq_range_t rx_buf[30];
   shim_freq_range_t tx_buf[30];
@@ -7382,6 +7474,7 @@ Napi::Value NodeHamLib::GetFrequencyRanges(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetTuningSteps(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
   shim_mode_value_t buf[20];
   int count = shim_rig_get_caps_tuning_steps(my_rig, buf, 20);
   Napi::Array arr = Napi::Array::New(env, count);
@@ -7397,6 +7490,7 @@ Napi::Value NodeHamLib::GetTuningSteps(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetFilterList(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
   shim_mode_value_t buf[60];
   int count = shim_rig_get_caps_filters(my_rig, buf, 60);
   Napi::Array arr = Napi::Array::New(env, count);
@@ -7412,6 +7506,7 @@ Napi::Value NodeHamLib::GetFilterList(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetLevelGranularity(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
 
   if (info.Length() < 1 || !info[0].IsString()) {
     Napi::TypeError::New(env, "Expected (levelType: string)").ThrowAsJavaScriptException();
@@ -7448,6 +7543,7 @@ Napi::Value NodeHamLib::GetLevelGranularity(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::GetRfPowerStepTable(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   RETURN_NULL_IF_RIG_HANDLE_INVALID();
+  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
 
   if (info.Length() < 2 || !info[0].IsNumber() || !info[1].IsString()) {
     Napi::TypeError::New(env, "Expected (frequency: number, mode: string)").ThrowAsJavaScriptException();
