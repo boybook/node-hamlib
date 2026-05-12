@@ -101,16 +101,16 @@ async function run() {
     assert(info.originalModel === 1, `model should be 1, got ${info.originalModel}`);
   });
 
-  await test('getConfigSchema works before open', () => {
-    const schema = rig.getConfigSchema();
+  await test('getConfigSchema works before open', async () => {
+    const schema = await rig.getConfigSchema();
     assert(Array.isArray(schema), 'schema should be an array');
     assert(schema.length > 0, 'schema should not be empty');
     assert(typeof schema[0].name === 'string', 'schema item missing name');
     assert(schema.some((field) => field.name === 'rig_pathname'), 'schema should include rig_pathname');
   });
 
-  await test('getPortCaps works before open', () => {
-    const caps = rig.getPortCaps();
+  await test('getPortCaps works before open', async () => {
+    const caps = await rig.getPortCaps();
     assert(caps && typeof caps === 'object', 'caps should be an object');
     assert(typeof caps.portType === 'string', 'caps.portType should be a string');
     assert(typeof caps.timeout === 'number', 'caps.timeout should be a number');
@@ -119,8 +119,8 @@ async function run() {
   await test('FlexRadio direct backend schema exposes network endpoint fields', async () => {
     const flexRig = new HamLib(2036);
     try {
-      const schema = flexRig.getConfigSchema();
-      const caps = flexRig.getPortCaps();
+      const schema = await flexRig.getConfigSchema();
+      const caps = await flexRig.getPortCaps();
       assert(schema.some((field) => field.name === 'rig_pathname'), 'Flex schema should include rig_pathname');
       assert(schema.some((field) => field.name === 'client'), 'Flex schema should include client');
       assert(caps.portType === 'network', `Flex port type should be network, got ${caps.portType}`);
@@ -132,7 +132,7 @@ async function run() {
   await test('IC-705 port caps expose serial defaults', async () => {
     const ic705 = new HamLib(3085);
     try {
-      const caps = ic705.getPortCaps();
+      const caps = await ic705.getPortCaps();
       assert(caps.portType === 'serial', `IC-705 port type should be serial, got ${caps.portType}`);
       assert(caps.serialRateMax === 19200, `IC-705 serialRateMax should be 19200, got ${caps.serialRateMax}`);
       assert(caps.serialDataBits === 8, `IC-705 serialDataBits should be 8, got ${caps.serialDataBits}`);
@@ -418,18 +418,18 @@ async function run() {
   // --- New API: Passband methods ---
   console.log('\n[Passband / Resolution]');
 
-  await test('getPassbandNormal returns number for USB', () => {
-    const pb = rig.getPassbandNormal('USB');
+  await test('getPassbandNormal returns number for USB', async () => {
+    const pb = await rig.getPassbandNormal('USB');
     assert(typeof pb === 'number', `expected number, got ${typeof pb}`);
   });
 
-  await test('getPassbandNarrow returns number for USB', () => {
-    const pb = rig.getPassbandNarrow('USB');
+  await test('getPassbandNarrow returns number for USB', async () => {
+    const pb = await rig.getPassbandNarrow('USB');
     assert(typeof pb === 'number', `expected number, got ${typeof pb}`);
   });
 
-  await test('getPassbandWide returns number for USB', () => {
-    const pb = rig.getPassbandWide('USB');
+  await test('getPassbandWide returns number for USB', async () => {
+    const pb = await rig.getPassbandWide('USB');
     assert(typeof pb === 'number', `expected number, got ${typeof pb}`);
   });
 
@@ -446,7 +446,7 @@ async function run() {
   });
 
   await test('setMode accepts numeric passband width', async () => {
-    await rig.setMode('USB', rig.getPassbandNormal('USB'));
+    await rig.setMode('USB', await rig.getPassbandNormal('USB'));
   });
 
   await test('getMode returns mode and numeric bandwidth', async () => {
@@ -455,26 +455,26 @@ async function run() {
     assert(typeof mode.bandwidth === 'number', `expected numeric bandwidth, got ${typeof mode.bandwidth}`);
   });
 
-  await test('getResolution returns number for USB', () => {
-    const res = rig.getResolution('USB');
+  await test('getResolution returns number for USB', async () => {
+    const res = await rig.getResolution('USB');
     assert(typeof res === 'number', `expected number, got ${typeof res}`);
   });
 
   // --- New API: Capability queries ---
   console.log('\n[Capability Queries]');
 
-  await test('getSupportedParms returns array', () => {
-    const parms = rig.getSupportedParms();
+  await test('getSupportedParms returns array', async () => {
+    const parms = await rig.getSupportedParms();
     assert(Array.isArray(parms), `expected array, got ${typeof parms}`);
   });
 
-  await test('getSupportedVfoOps returns array', () => {
-    const ops = rig.getSupportedVfoOps();
+  await test('getSupportedVfoOps returns array', async () => {
+    const ops = await rig.getSupportedVfoOps();
     assert(Array.isArray(ops), `expected array, got ${typeof ops}`);
   });
 
-  await test('getSupportedScanTypes returns array', () => {
-    const types = rig.getSupportedScanTypes();
+  await test('getSupportedScanTypes returns array', async () => {
+    const types = await rig.getSupportedScanTypes();
     assert(Array.isArray(types), `expected array, got ${typeof types}`);
   });
 
@@ -494,57 +494,57 @@ async function run() {
   // --- Capability Query Batch 2 ---
   console.log('\n[Capability Query - Batch 2]');
 
-  await test('getPreampValues returns number[]', () => {
-    const vals = rig.getPreampValues();
+  await test('getPreampValues returns number[]', async () => {
+    const vals = await rig.getPreampValues();
     assert(Array.isArray(vals), `expected array, got ${typeof vals}`);
     vals.forEach((v, i) => assert(typeof v === 'number', `element ${i} not number`));
   });
 
-  await test('getAttenuatorValues returns number[]', () => {
-    const vals = rig.getAttenuatorValues();
+  await test('getAttenuatorValues returns number[]', async () => {
+    const vals = await rig.getAttenuatorValues();
     assert(Array.isArray(vals), `expected array, got ${typeof vals}`);
     vals.forEach((v, i) => assert(typeof v === 'number', `element ${i} not number`));
   });
 
-  await test('getAgcLevels returns number[]', () => {
-    const vals = rig.getAgcLevels();
+  await test('getAgcLevels returns number[]', async () => {
+    const vals = await rig.getAgcLevels();
     assert(Array.isArray(vals), `expected array, got ${typeof vals}`);
     vals.forEach((v, i) => assert(typeof v === 'number', `element ${i} not number`));
   });
 
-  await test('getMaxRit returns number >= 0', () => {
-    const val = rig.getMaxRit();
+  await test('getMaxRit returns number >= 0', async () => {
+    const val = await rig.getMaxRit();
     assert(typeof val === 'number' && val >= 0, `expected number >= 0, got ${val}`);
   });
 
-  await test('getMaxXit returns number >= 0', () => {
-    const val = rig.getMaxXit();
+  await test('getMaxXit returns number >= 0', async () => {
+    const val = await rig.getMaxXit();
     assert(typeof val === 'number' && val >= 0, `expected number >= 0, got ${val}`);
   });
 
-  await test('getMaxIfShift returns number >= 0', () => {
-    const val = rig.getMaxIfShift();
+  await test('getMaxIfShift returns number >= 0', async () => {
+    const val = await rig.getMaxIfShift();
     assert(typeof val === 'number' && val >= 0, `expected number >= 0, got ${val}`);
   });
 
-  await test('getAvailableCtcssTones returns number[]', () => {
-    const tones = rig.getAvailableCtcssTones();
+  await test('getAvailableCtcssTones returns number[]', async () => {
+    const tones = await rig.getAvailableCtcssTones();
     assert(Array.isArray(tones), `expected array, got ${typeof tones}`);
     if (tones.length > 0) {
       assert(tones[0] > 0, `first tone should be > 0, got ${tones[0]}`);
     }
   });
 
-  await test('getAvailableDcsCodes returns number[]', () => {
-    const codes = rig.getAvailableDcsCodes();
+  await test('getAvailableDcsCodes returns number[]', async () => {
+    const codes = await rig.getAvailableDcsCodes();
     assert(Array.isArray(codes), `expected array, got ${typeof codes}`);
     if (codes.length > 0) {
       assert(codes[0] > 0, `first code should be > 0, got ${codes[0]}`);
     }
   });
 
-  await test('getFrequencyRanges returns {rx, tx}', () => {
-    const ranges = rig.getFrequencyRanges();
+  await test('getFrequencyRanges returns {rx, tx}', async () => {
+    const ranges = await rig.getFrequencyRanges();
     assert(typeof ranges === 'object', `expected object, got ${typeof ranges}`);
     assert(Array.isArray(ranges.rx), `expected rx array, got ${typeof ranges.rx}`);
     assert(Array.isArray(ranges.tx), `expected tx array, got ${typeof ranges.tx}`);
@@ -556,8 +556,8 @@ async function run() {
     }
   });
 
-  await test('getTuningSteps returns TuningStepInfo[]', () => {
-    const steps = rig.getTuningSteps();
+  await test('getTuningSteps returns TuningStepInfo[]', async () => {
+    const steps = await rig.getTuningSteps();
     assert(Array.isArray(steps), `expected array, got ${typeof steps}`);
     if (steps.length > 0) {
       const s = steps[0];
@@ -566,8 +566,8 @@ async function run() {
     }
   });
 
-  await test('getFilterList returns FilterInfo[]', () => {
-    const filters = rig.getFilterList();
+  await test('getFilterList returns FilterInfo[]', async () => {
+    const filters = await rig.getFilterList();
     assert(Array.isArray(filters), `expected array, got ${typeof filters}`);
     if (filters.length > 0) {
       const f = filters[0];
@@ -576,8 +576,8 @@ async function run() {
     }
   });
 
-  await test('getLevelGranularity returns object or null', () => {
-    const granularity = rig.getLevelGranularity('RFPOWER');
+  await test('getLevelGranularity returns object or null', async () => {
+    const granularity = await rig.getLevelGranularity('RFPOWER');
     if (granularity !== null) {
       assert(typeof granularity === 'object', `expected object, got ${typeof granularity}`);
       assert(typeof granularity.min === 'number', 'min should be number');
@@ -589,7 +589,7 @@ async function run() {
   });
 
   await test('getRfPowerStepTable returns array or null', async () => {
-    const table = rig.getRfPowerStepTable(7100000, 'USB');
+    const table = await rig.getRfPowerStepTable(7100000, 'USB');
     if (table !== null) {
       let previousNormalized = -1;
       let previousMilliwatts = 0;
@@ -741,8 +741,8 @@ async function run() {
     await rig.destroy();
   });
 
-  await test('sync capability query after destroy throws instead of crashing', () => {
-    assertThrows(() => rig.getSupportedModes(), /destroyed|initialized/);
+  await test('async capability query after destroy rejects instead of crashing', async () => {
+    await assertRejects(() => rig.getSupportedModes(), /destroyed|initialized/);
   });
 
   await test('rotator close() succeeds', async () => {
