@@ -5,30 +5,57 @@
 #include <memory>
 #include <string>
 #include <atomic>
+#include <chrono>
 #include <mutex>
 #include <vector>
 #include <cstdint>
 
 // Forward declaration
 class NodeHamLib;
+class HamLibAsyncWorker;
+
+using GlobalRigLock = std::unique_lock<std::timed_mutex>;
+
+class HamLibPromiseController {
+public:
+    HamLibPromiseController(Napi::Env env, HamLibAsyncWorker* owner);
+
+    Napi::Promise Promise() const { return deferred_.Promise(); }
+    void Resolve(Napi::Value value);
+    void Reject(Napi::Value value);
+
+private:
+    Napi::Promise::Deferred deferred_;
+    HamLibAsyncWorker* owner_;
+};
 
 // Base AsyncWorker class for hamlib operations with Promise support
 class HamLibAsyncWorker : public Napi::AsyncWorker {
 public:
     HamLibAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance);
-    virtual ~HamLibAsyncWorker() = default;
+    ~HamLibAsyncWorker() override;
 
     // Get the promise that will be resolved/rejected
     Napi::Promise GetPromise() { return deferred_.Promise(); }
 
 protected:
+    friend class HamLibPromiseController;
+
     void Execute() final;
     virtual void ExecuteWithRigLock() = 0;
+    virtual const char* OperationName() const { return "HamLibAsyncWorker"; }
+    virtual bool RequiresOpenRig() const { return true; }
+    std::string GetOperationName() const;
+    Napi::Value DecorateErrorValue(Napi::Value value) const;
+    void ReleaseObjectReference();
 
     NodeHamLib* hamlib_instance_;
     int result_code_;
+    std::string error_code_;
     std::string error_message_;
-    Napi::Promise::Deferred deferred_;
+    int lock_timeout_ms_;
+    bool object_ref_held_;
+    HamLibPromiseController deferred_;
 };
 
 
@@ -193,18 +220,18 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
   Napi::Value SetConf(const Napi::CallbackInfo&);
   Napi::Value GetConf(const Napi::CallbackInfo&);
 
-  // Passband / Resolution (sync)
+  // Passband / Resolution (async)
   Napi::Value GetPassbandNormal(const Napi::CallbackInfo&);
   Napi::Value GetPassbandNarrow(const Napi::CallbackInfo&);
   Napi::Value GetPassbandWide(const Napi::CallbackInfo&);
   Napi::Value GetResolution(const Napi::CallbackInfo&);
 
-  // Capability queries (sync)
+  // Capability queries (async)
   Napi::Value GetSupportedParms(const Napi::CallbackInfo&);
   Napi::Value GetSupportedVfoOps(const Napi::CallbackInfo&);
   Napi::Value GetSupportedScanTypes(const Napi::CallbackInfo&);
 
-  // Capability queries - batch 2 (sync)
+  // Capability queries - batch 2 (async)
   Napi::Value GetPreampValues(const Napi::CallbackInfo&);
   Napi::Value GetAttenuatorValues(const Napi::CallbackInfo&);
   Napi::Value GetAgcLevels(const Napi::CallbackInfo&);
@@ -234,7 +261,7 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
   static Napi::Value IsGlobalLockEnabled(const Napi::CallbackInfo&);
   static void SetGlobalRigLockEnabled(bool enabled);
   static bool IsGlobalRigLockEnabled();
-  static std::unique_lock<std::mutex> AcquireGlobalRigLockIfEnabled();
+  static GlobalRigLock TryAcquireGlobalRigLockIfEnabled(std::chrono::milliseconds timeout);
 
   // Static copyright/license
   static Napi::Value GetCopyright(const Napi::CallbackInfo&);
@@ -247,15 +274,15 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
   static int spectrum_line_cb(void* handle, const shim_spectrum_line_t* line, void* arg);
 
  public:
-  hamlib_shim_handle_t my_rig;  // Opaque handle instead of RIG*
-  bool rig_is_open = false;
+  hamlib_shim_handle_t my_rig = nullptr;  // Opaque handle instead of RIG*
+  std::atomic<bool> rig_is_open{false};
   bool is_network_rig = false;     // Flag to indicate if using network connection
   unsigned int original_model = 0;  // Store original model when using network
   int count = 0;
-  void* freq_emit_cb;
-  char port_path[SHIM_HAMLIB_FILPATHLEN];  // Store the port path
+  void* freq_emit_cb = nullptr;
+  char port_path[SHIM_HAMLIB_FILPATHLEN]{};  // Store the port path
   static Napi::FunctionReference constructor;
-  Napi::CallbackInfo * m_currentInfo;
+  Napi::CallbackInfo * m_currentInfo = nullptr;
 
   // Helper method to detect network address format
   bool isNetworkAddress(const char* path);
@@ -271,6 +298,6 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
   std::mutex spectrum_mutex_;
 
  private:
-  static std::mutex global_rig_mutex_;
+  static std::timed_mutex global_rig_mutex_;
   static std::atomic<bool> global_rig_lock_enabled_;
 };

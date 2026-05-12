@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <functional>
 #include <limits>
 #include <set>
 
@@ -26,14 +27,6 @@
 #define RETURN_NULL_IF_INVALID_VFO(vfo) \
   do { \
     if ((vfo) == kInvalidVfoParameter) { \
-      return env.Null(); \
-    } \
-  } while(0)
-
-#define RETURN_NULL_IF_RIG_HANDLE_INVALID() \
-  do { \
-    if (!my_rig) { \
-      Napi::Error::New(env, "RIG is not initialized or has been destroyed").ThrowAsJavaScriptException(); \
       return env.Null(); \
     } \
   } while(0)
@@ -77,10 +70,26 @@ static bool readGlobalRigLockDefault() {
   return value != "0" && value != "false" && value != "off" && value != "no";
 }
 
+static int readGlobalRigLockTimeoutMs() {
+  const char* rawValue = std::getenv("NODE_HAMLIB_GLOBAL_LOCK_TIMEOUT_MS");
+  if (!rawValue || !*rawValue) {
+    return 5000;
+  }
+
+  char* end = nullptr;
+  const long parsed = std::strtol(rawValue, &end, 10);
+  if (end == rawValue || parsed <= 0 || parsed > 600000) {
+    return 5000;
+  }
+  return static_cast<int>(parsed);
+}
+
 Napi::FunctionReference NodeHamLib::constructor;
 Napi::ThreadSafeFunction tsfn;
-std::mutex NodeHamLib::global_rig_mutex_;
+std::timed_mutex NodeHamLib::global_rig_mutex_;
 std::atomic<bool> NodeHamLib::global_rig_lock_enabled_{readGlobalRigLockDefault()};
+
+constexpr const char* kGlobalLockTimeoutCode = "HAMLIB_GLOBAL_LOCK_TIMEOUT";
 
 constexpr int kInvalidVfoParameter = std::numeric_limits<int>::min();
 
@@ -569,13 +578,205 @@ static int antennaMaskToOrdinal(int antennaMask) {
   return 0;
 }
 
+HamLibPromiseController::HamLibPromiseController(Napi::Env env, HamLibAsyncWorker* owner)
+    : deferred_(Napi::Promise::Deferred::New(env)), owner_(owner) {}
+
+void HamLibPromiseController::Resolve(Napi::Value value) {
+    if (owner_) {
+        owner_->ReleaseObjectReference();
+    }
+    deferred_.Resolve(value);
+}
+
+void HamLibPromiseController::Reject(Napi::Value value) {
+    if (owner_) {
+        value = owner_->DecorateErrorValue(value);
+        owner_->ReleaseObjectReference();
+    }
+    deferred_.Reject(value);
+}
+
 // Base AsyncWorker implementation with Promise support
 HamLibAsyncWorker::HamLibAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
-    : AsyncWorker(env), hamlib_instance_(hamlib_instance), result_code_(0), error_message_(""), deferred_(Napi::Promise::Deferred::New(env)) {}
+    : AsyncWorker(env),
+      hamlib_instance_(hamlib_instance),
+      result_code_(0),
+      error_code_(""),
+      error_message_(""),
+      lock_timeout_ms_(0),
+      object_ref_held_(false),
+      deferred_(env, this) {
+    if (hamlib_instance_) {
+        hamlib_instance_->Ref();
+        object_ref_held_ = true;
+    }
+}
+
+HamLibAsyncWorker::~HamLibAsyncWorker() {
+    ReleaseObjectReference();
+}
+
+void HamLibAsyncWorker::ReleaseObjectReference() {
+    if (object_ref_held_ && hamlib_instance_) {
+        hamlib_instance_->Unref();
+        object_ref_held_ = false;
+    }
+}
+
+std::string HamLibAsyncWorker::GetOperationName() const {
+    const char* explicitName = OperationName();
+    return explicitName && *explicitName ? explicitName : "HamLibAsyncWorker";
+}
+
+Napi::Value HamLibAsyncWorker::DecorateErrorValue(Napi::Value value) const {
+    if (!value.IsObject()) {
+        return value;
+    }
+
+    Napi::Object error = value.As<Napi::Object>();
+    Napi::Env env = value.Env();
+    const bool hasCode = error.Has("code");
+    bool isLockTimeout = error_code_ == kGlobalLockTimeoutCode;
+    std::string message;
+    if (error.Has("message")) {
+        message = error.Get("message").ToString().Utf8Value();
+        isLockTimeout = isLockTimeout || message.find(kGlobalLockTimeoutCode) != std::string::npos;
+    }
+
+    error.Set("operation", Napi::String::New(env, GetOperationName()));
+    if (isLockTimeout && lock_timeout_ms_ > 0) {
+        error.Set("timeoutMs", Napi::Number::New(env, lock_timeout_ms_));
+    }
+    if (hasCode) {
+        return error;
+    }
+    if (!error_code_.empty()) {
+        error.Set("code", Napi::String::New(env, error_code_));
+    } else if (isLockTimeout) {
+        error.Set("code", Napi::String::New(env, kGlobalLockTimeoutCode));
+    } else if (result_code_ != SHIM_RIG_OK) {
+        error.Set("code", Napi::String::New(env, "HAMLIB_ERROR"));
+        error.Set("hamlibCode", Napi::Number::New(env, result_code_));
+    }
+    return error;
+}
 
 void HamLibAsyncWorker::Execute() {
-    auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-    ExecuteWithRigLock();
+    const int timeoutMs = readGlobalRigLockTimeoutMs();
+    lock_timeout_ms_ = timeoutMs;
+    auto rigLock = NodeHamLib::TryAcquireGlobalRigLockIfEnabled(std::chrono::milliseconds(timeoutMs));
+    if (!rigLock.owns_lock() && NodeHamLib::IsGlobalRigLockEnabled()) {
+        result_code_ = SHIM_RIG_ETIMEOUT;
+        error_code_ = kGlobalLockTimeoutCode;
+        error_message_ = std::string(kGlobalLockTimeoutCode)
+            + ": timed out waiting for Hamlib global lock"
+            + " operation=" + GetOperationName()
+            + " timeoutMs=" + std::to_string(timeoutMs);
+        return;
+    }
+    try {
+        if (!hamlib_instance_ || !hamlib_instance_->my_rig) {
+            result_code_ = SHIM_RIG_EINVAL;
+            error_message_ = "RIG is not initialized or has been destroyed";
+            return;
+        }
+        if (RequiresOpenRig() && !hamlib_instance_->rig_is_open.load(std::memory_order_acquire)) {
+            result_code_ = SHIM_RIG_EINVAL;
+            error_message_ = "Rig is not open!";
+            return;
+        }
+        ExecuteWithRigLock();
+    } catch (const std::exception& error) {
+        result_code_ = SHIM_RIG_EINVAL;
+        error_message_ = error.what();
+    } catch (...) {
+        result_code_ = SHIM_RIG_EINVAL;
+        error_message_ = "Unexpected native exception in Hamlib worker";
+    }
+}
+
+class LockedCallbackWorker : public HamLibAsyncWorker {
+public:
+    using ExecuteFn = std::function<void(NodeHamLib*, int&, std::string&)>;
+    using ResolveFn = std::function<Napi::Value(Napi::Env)>;
+
+    LockedCallbackWorker(
+        Napi::Env env,
+        NodeHamLib* hamlib_instance,
+        std::string operation,
+        ExecuteFn execute,
+        ResolveFn resolve)
+        : HamLibAsyncWorker(env, hamlib_instance),
+          operation_(std::move(operation)),
+          execute_(std::move(execute)),
+          resolve_(std::move(resolve)) {}
+
+    const char* OperationName() const override { return operation_.c_str(); }
+    bool RequiresOpenRig() const override { return false; }
+
+    void ExecuteWithRigLock() override {
+        CHECK_RIG_VALID();
+        try {
+            execute_(hamlib_instance_, result_code_, error_message_);
+        } catch (const std::exception& error) {
+            result_code_ = SHIM_RIG_EINVAL;
+            error_message_ = error.what();
+        }
+    }
+
+    void OnOK() override {
+        Napi::Env env = Env();
+        if (result_code_ != SHIM_RIG_OK || !error_message_.empty()) {
+            const std::string message = error_message_.empty() ? shim_rigerror(result_code_) : error_message_;
+            deferred_.Reject(Napi::Error::New(env, message).Value());
+            return;
+        }
+        deferred_.Resolve(resolve_(env));
+    }
+
+    void OnError(const Napi::Error& e) override {
+        deferred_.Reject(Napi::Error::New(Env(), error_message_.empty() ? e.Message() : error_message_).Value());
+    }
+
+private:
+    std::string operation_;
+    ExecuteFn execute_;
+    ResolveFn resolve_;
+};
+
+static Napi::Promise QueueLockedCallbackWorker(
+    Napi::Env env,
+    NodeHamLib* hamlib_instance,
+    std::string operation,
+    LockedCallbackWorker::ExecuteFn execute,
+    LockedCallbackWorker::ResolveFn resolve) {
+  auto* worker = new LockedCallbackWorker(env, hamlib_instance, std::move(operation), std::move(execute), std::move(resolve));
+  worker->Queue();
+  return worker->GetPromise();
+}
+
+static Napi::Array StringVectorToArray(Napi::Env env, const std::vector<std::string>& values) {
+  Napi::Array array = Napi::Array::New(env, values.size());
+  for (size_t i = 0; i < values.size(); ++i) {
+    array[static_cast<uint32_t>(i)] = Napi::String::New(env, values[i]);
+  }
+  return array;
+}
+
+static Napi::Array IntVectorToArray(Napi::Env env, const std::vector<int>& values) {
+  Napi::Array array = Napi::Array::New(env, values.size());
+  for (size_t i = 0; i < values.size(); ++i) {
+    array[static_cast<uint32_t>(i)] = Napi::Number::New(env, values[i]);
+  }
+  return array;
+}
+
+static Napi::Array DoubleVectorToArray(Napi::Env env, const std::vector<double>& values) {
+  Napi::Array array = Napi::Array::New(env, values.size());
+  for (size_t i = 0; i < values.size(); ++i) {
+    array[static_cast<uint32_t>(i)] = Napi::Number::New(env, values[i]);
+  }
+  return array;
 }
 
 // Specific AsyncWorker classes for each operation
@@ -583,6 +784,9 @@ class OpenAsyncWorker : public HamLibAsyncWorker {
 public:
     OpenAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance) {}
+
+    const char* OperationName() const override { return "Open"; }
+    bool RequiresOpenRig() const override { return false; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -601,7 +805,7 @@ public:
             };
             shim_rig_set_ptt_callback(hamlib_instance_->my_rig, ppt_cb, NULL);
             shim_rig_set_trn(hamlib_instance_->my_rig, SHIM_RIG_TRN_POLL);
-            hamlib_instance_->rig_is_open = true;
+            hamlib_instance_->rig_is_open.store(true, std::memory_order_release);
         }
     }
 
@@ -624,6 +828,8 @@ class SetFrequencyAsyncWorker : public HamLibAsyncWorker {
 public:
     SetFrequencyAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, double freq, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), freq_(freq), vfo_(vfo) {}
+
+    const char* OperationName() const override { return "SetFrequency"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -657,6 +863,8 @@ class GetFrequencyAsyncWorker : public HamLibAsyncWorker {
 public:
     GetFrequencyAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), freq_(0) {}
+
+    const char* OperationName() const override { return "GetFrequency"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -688,12 +896,18 @@ private:
 
 class SetModeAsyncWorker : public HamLibAsyncWorker {
 public:
-    SetModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int mode, int width, int vfo = SHIM_RIG_VFO_CURR)
-        : HamLibAsyncWorker(env, hamlib_instance), mode_(mode), width_(width), vfo_(vfo) {}
+    SetModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int mode, int width, int vfo = SHIM_RIG_VFO_CURR, int passband_selector = 0)
+        : HamLibAsyncWorker(env, hamlib_instance), mode_(mode), width_(width), vfo_(vfo), passband_selector_(passband_selector) {}
+
+    const char* OperationName() const override { return "SetMode"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
-        
+        if (passband_selector_ == 1) {
+            width_ = shim_rig_passband_narrow(hamlib_instance_->my_rig, mode_);
+        } else if (passband_selector_ == 2) {
+            width_ = shim_rig_passband_wide(hamlib_instance_->my_rig, mode_);
+        }
         result_code_ = shim_rig_set_mode(hamlib_instance_->my_rig, vfo_, mode_, width_);
         if (result_code_ != SHIM_RIG_OK) {
             error_message_ = shim_rigerror(result_code_);
@@ -718,12 +932,15 @@ private:
     int mode_;
     int width_;
     int vfo_;
+    int passband_selector_;
 };
 
 class GetModeAsyncWorker : public HamLibAsyncWorker {
 public:
     GetModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance), mode_(0), width_(0) {}
+
+    const char* OperationName() const override { return "GetMode"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -762,6 +979,8 @@ class SetPttAsyncWorker : public HamLibAsyncWorker {
 public:
     SetPttAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int ptt)
         : HamLibAsyncWorker(env, hamlib_instance), ptt_(ptt) {}
+
+    const char* OperationName() const override { return "SetPtt"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -794,6 +1013,8 @@ class GetStrengthAsyncWorker : public HamLibAsyncWorker {
 public:
     GetStrengthAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), strength_(0) {}
+
+    const char* OperationName() const override { return "GetStrength"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -827,6 +1048,8 @@ class SetLevelAsyncWorker : public HamLibAsyncWorker {
 public:
     SetLevelAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, uint64_t level_type, float value, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), level_type_(level_type), value_(value), vfo_(vfo) {}
+
+    const char* OperationName() const override { return "SetLevel"; }
 
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -866,6 +1089,8 @@ public:
     GetLevelAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, uint64_t level_type, int vfo = SHIM_RIG_VFO_CURR)
         : HamLibAsyncWorker(env, hamlib_instance), level_type_(level_type), vfo_(vfo), value_(0.0) {}
 
+    const char* OperationName() const override { return "GetLevel"; }
+
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
 
@@ -901,6 +1126,8 @@ class SetFunctionAsyncWorker : public HamLibAsyncWorker {
 public:
     SetFunctionAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, uint64_t func_type, int enable)
         : HamLibAsyncWorker(env, hamlib_instance), func_type_(func_type), enable_(enable) {}
+
+    const char* OperationName() const override { return "SetFunction"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -934,6 +1161,8 @@ class GetFunctionAsyncWorker : public HamLibAsyncWorker {
 public:
     GetFunctionAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, uint64_t func_type)
         : HamLibAsyncWorker(env, hamlib_instance), func_type_(func_type), state_(0) {}
+
+    const char* OperationName() const override { return "GetFunction"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -967,6 +1196,8 @@ class SetMemoryChannelAsyncWorker : public HamLibAsyncWorker {
 public:
     SetMemoryChannelAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, const shim_channel_t& chan)
         : HamLibAsyncWorker(env, hamlib_instance), chan_(chan) {}
+
+    const char* OperationName() const override { return "SetMemoryChannel"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -1002,6 +1233,8 @@ public:
         memset(&chan_, 0, sizeof(chan_));
         memset(&range_, 0, sizeof(range_));
     }
+
+    const char* OperationName() const override { return "GetMemoryChannel"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -1052,6 +1285,8 @@ class SelectMemoryChannelAsyncWorker : public HamLibAsyncWorker {
 public:
     SelectMemoryChannelAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int channel_num, int vfo = SHIM_RIG_VFO_CURR)
         : HamLibAsyncWorker(env, hamlib_instance), channel_num_(channel_num), vfo_(vfo) {}
+
+    const char* OperationName() const override { return "SelectMemoryChannel"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -1113,6 +1348,8 @@ public:
     MemoryLayoutAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance) {}
 
+    const char* OperationName() const override { return "MemoryLayout"; }
+
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         int range_count = shim_rig_get_memory_range_count(hamlib_instance_->my_rig);
@@ -1156,6 +1393,8 @@ public:
         memset(&range_, 0, sizeof(range_));
     }
 
+    const char* OperationName() const override { return "MemoryCapabilities"; }
+
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         result_code_ = shim_rig_lookup_memory_caps(hamlib_instance_->my_rig, channel_num_, &range_);
@@ -1186,6 +1425,8 @@ class MemoryListAsyncWorker : public HamLibAsyncWorker {
 public:
     MemoryListAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, bool read_only, bool include_empty, bool continue_on_error)
         : HamLibAsyncWorker(env, hamlib_instance), read_only_(read_only), include_empty_(include_empty), continue_on_error_(continue_on_error) {}
+
+    const char* OperationName() const override { return "MemoryList"; }
 
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -1273,6 +1514,8 @@ public:
     SetMemoryChannelsAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, std::vector<shim_channel_t> channels, bool continue_on_error)
         : HamLibAsyncWorker(env, hamlib_instance), channels_(std::move(channels)), continue_on_error_(continue_on_error) {}
 
+    const char* OperationName() const override { return "SetMemoryChannels"; }
+
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         for (const auto& chan : channels_) {
@@ -1322,6 +1565,8 @@ class ReplaceMemoryChannelsAsyncWorker : public HamLibAsyncWorker {
 public:
     ReplaceMemoryChannelsAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, std::vector<shim_channel_t> channels)
         : HamLibAsyncWorker(env, hamlib_instance), channels_(std::move(channels)) {}
+
+    const char* OperationName() const override { return "ReplaceMemoryChannels"; }
 
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -1394,6 +1639,8 @@ class SetRitAsyncWorker : public HamLibAsyncWorker {
 public:
     SetRitAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int rit_offset)
         : HamLibAsyncWorker(env, hamlib_instance), rit_offset_(rit_offset) {}
+
+    const char* OperationName() const override { return "SetRit"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -1426,6 +1673,8 @@ class GetRitAsyncWorker : public HamLibAsyncWorker {
 public:
     GetRitAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance), rit_offset_(0) {}
+
+    const char* OperationName() const override { return "GetRit"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -1458,6 +1707,8 @@ class SetXitAsyncWorker : public HamLibAsyncWorker {
 public:
     SetXitAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int xit_offset)
         : HamLibAsyncWorker(env, hamlib_instance), xit_offset_(xit_offset) {}
+
+    const char* OperationName() const override { return "SetXit"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -1490,6 +1741,8 @@ class GetXitAsyncWorker : public HamLibAsyncWorker {
 public:
     GetXitAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance), xit_offset_(0) {}
+
+    const char* OperationName() const override { return "GetXit"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -1522,6 +1775,8 @@ class ClearRitXitAsyncWorker : public HamLibAsyncWorker {
 public:
     ClearRitXitAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance) {}
+
+    const char* OperationName() const override { return "ClearRitXit"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -1559,6 +1814,8 @@ class SetSplitFreqAsyncWorker : public HamLibAsyncWorker {
 public:
     SetSplitFreqAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, double tx_freq, int vfo = SHIM_RIG_VFO_CURR)
         : HamLibAsyncWorker(env, hamlib_instance), tx_freq_(tx_freq), vfo_(vfo) {}
+
+    const char* OperationName() const override { return "SetSplitFreq"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -1592,6 +1849,8 @@ class GetSplitFreqAsyncWorker : public HamLibAsyncWorker {
 public:
     GetSplitFreqAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo = SHIM_RIG_VFO_CURR)
         : HamLibAsyncWorker(env, hamlib_instance), tx_freq_(0), vfo_(vfo) {}
+
+    const char* OperationName() const override { return "GetSplitFreq"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -1625,6 +1884,8 @@ class SetSplitAsyncWorker : public HamLibAsyncWorker {
 public:
     SetSplitAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int rx_vfo, int split, int tx_vfo)
         : HamLibAsyncWorker(env, hamlib_instance), rx_vfo_(rx_vfo), split_(split), tx_vfo_(tx_vfo) {}
+
+    const char* OperationName() const override { return "SetSplit"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -1659,6 +1920,8 @@ class GetSplitAsyncWorker : public HamLibAsyncWorker {
 public:
     GetSplitAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo = SHIM_RIG_VFO_CURR)
         : HamLibAsyncWorker(env, hamlib_instance), split_(SHIM_RIG_SPLIT_OFF), tx_vfo_(SHIM_RIG_VFO_CURR), vfo_(vfo) {}
+
+    const char* OperationName() const override { return "GetSplit"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -1697,6 +1960,8 @@ class SetVfoAsyncWorker : public HamLibAsyncWorker {
 public:
     SetVfoAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo) {}
+
+    const char* OperationName() const override { return "SetVfo"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -1729,6 +1994,8 @@ class GetVfoAsyncWorker : public HamLibAsyncWorker {
 public:
     GetVfoAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(0) {}
+
+    const char* OperationName() const override { return "GetVfo"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -1781,12 +2048,16 @@ class CloseAsyncWorker : public HamLibAsyncWorker {
 public:
     CloseAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance) {}
+
+    const char* OperationName() const override { return "Close"; }
+    bool RequiresOpenRig() const override { return false; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
+        hamlib_instance_->StopSpectrumStreamInternal();
         
         // 检查rig是否已经关闭
-        if (!hamlib_instance_->rig_is_open) {
+        if (!hamlib_instance_->rig_is_open.load(std::memory_order_acquire)) {
             result_code_ = SHIM_RIG_OK;  // 已经关闭，返回成功
             return;
         }
@@ -1795,7 +2066,7 @@ public:
         if (result_code_ != SHIM_RIG_OK) {
             error_message_ = shim_rigerror(result_code_);
         } else {
-            hamlib_instance_->rig_is_open = false;
+            hamlib_instance_->rig_is_open.store(false, std::memory_order_release);
         }
     }
     
@@ -1818,16 +2089,20 @@ class DestroyAsyncWorker : public HamLibAsyncWorker {
 public:
     DestroyAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance) {}
+
+    const char* OperationName() const override { return "Destroy"; }
+    bool RequiresOpenRig() const override { return false; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
+        hamlib_instance_->StopSpectrumStreamInternal();
         
         // rig_cleanup会自动调用rig_close，所以我们不需要重复调用
         result_code_ = shim_rig_cleanup(hamlib_instance_->my_rig);
         if (result_code_ != SHIM_RIG_OK) {
             error_message_ = shim_rigerror(result_code_);
         } else {
-            hamlib_instance_->rig_is_open = false;
+            hamlib_instance_->rig_is_open.store(false, std::memory_order_release);
             hamlib_instance_->my_rig = nullptr;  // 重要：清空指针防止重复释放
         }
     }
@@ -1852,6 +2127,8 @@ class StartScanAsyncWorker : public HamLibAsyncWorker {
 public:
     StartScanAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int intype, int channel)
         : HamLibAsyncWorker(env, hamlib_instance), intype_(intype), channel_(channel) {}
+
+    const char* OperationName() const override { return "StartScan"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -1886,6 +2163,8 @@ class StopScanAsyncWorker : public HamLibAsyncWorker {
 public:
     StopScanAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance) {}
+
+    const char* OperationName() const override { return "StopScan"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -1916,6 +2195,8 @@ class VfoOperationAsyncWorker : public HamLibAsyncWorker {
 public:
     VfoOperationAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo_op)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_op_(vfo_op) {}
+
+    const char* OperationName() const override { return "VfoOperation"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -1949,6 +2230,8 @@ class SetAntennaAsyncWorker : public HamLibAsyncWorker {
 public:
     SetAntennaAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int antenna, int vfo, float option)
         : HamLibAsyncWorker(env, hamlib_instance), antenna_(antenna), vfo_(vfo), option_(option) {}
+
+    const char* OperationName() const override { return "SetAntenna"; }
 
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -1984,6 +2267,8 @@ class GetAntennaAsyncWorker : public HamLibAsyncWorker {
 public:
     GetAntennaAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, int antenna)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), antenna_(antenna), antenna_curr_(0), antenna_tx_(0), antenna_rx_(0) {}
+
+    const char* OperationName() const override { return "GetAntenna"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -2031,6 +2316,8 @@ class Power2mWAsyncWorker : public HamLibAsyncWorker {
 public:
     Power2mWAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, float power, double freq, int mode)
         : HamLibAsyncWorker(env, hamlib_instance), power_(power), freq_(freq), mode_(mode), mwpower_(0) {}
+
+    const char* OperationName() const override { return "Power2mW"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -2067,6 +2354,8 @@ class MW2PowerAsyncWorker : public HamLibAsyncWorker {
 public:
     MW2PowerAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, unsigned int mwpower, double freq, int mode)
         : HamLibAsyncWorker(env, hamlib_instance), mwpower_(mwpower), freq_(freq), mode_(mode), power_(0.0) {}
+
+    const char* OperationName() const override { return "MW2Power"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -2103,6 +2392,8 @@ class SetSplitModeAsyncWorker : public HamLibAsyncWorker {
 public:
     SetSplitModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int tx_mode, int tx_width, int vfo = SHIM_RIG_VFO_CURR)
         : HamLibAsyncWorker(env, hamlib_instance), tx_mode_(tx_mode), tx_width_(tx_width), vfo_(vfo) {}
+
+    const char* OperationName() const override { return "SetSplitMode"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -2138,6 +2429,8 @@ class GetSplitModeAsyncWorker : public HamLibAsyncWorker {
 public:
     GetSplitModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo = SHIM_RIG_VFO_CURR)
         : HamLibAsyncWorker(env, hamlib_instance), tx_mode_(0), tx_width_(0), vfo_(vfo) {}
+
+    const char* OperationName() const override { return "GetSplitMode"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -2178,6 +2471,9 @@ class SetSerialConfigAsyncWorker : public HamLibAsyncWorker {
 public:
     SetSerialConfigAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, const std::string& param_name, const std::string& param_value)
         : HamLibAsyncWorker(env, hamlib_instance), param_name_(param_name), param_value_(param_value) {}
+
+    const char* OperationName() const override { return "SetSerialConfig"; }
+    bool RequiresOpenRig() const override { return false; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -2337,6 +2633,9 @@ class GetSerialConfigAsyncWorker : public HamLibAsyncWorker {
 public:
     GetSerialConfigAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, const std::string& param_name)
         : HamLibAsyncWorker(env, hamlib_instance), param_name_(param_name) {}
+
+    const char* OperationName() const override { return "GetSerialConfig"; }
+    bool RequiresOpenRig() const override { return false; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -2454,6 +2753,9 @@ class SetPttTypeAsyncWorker : public HamLibAsyncWorker {
 public:
     SetPttTypeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, const std::string& intype)
         : HamLibAsyncWorker(env, hamlib_instance), intype_(intype) {}
+
+    const char* OperationName() const override { return "SetPttType"; }
+    bool RequiresOpenRig() const override { return false; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -2508,6 +2810,9 @@ class GetPttTypeAsyncWorker : public HamLibAsyncWorker {
 public:
     GetPttTypeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance) {}
+
+    const char* OperationName() const override { return "GetPttType"; }
+    bool RequiresOpenRig() const override { return false; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -2569,6 +2874,9 @@ class SetDcdTypeAsyncWorker : public HamLibAsyncWorker {
 public:
     SetDcdTypeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, const std::string& intype)
         : HamLibAsyncWorker(env, hamlib_instance), intype_(intype) {}
+
+    const char* OperationName() const override { return "SetDcdType"; }
+    bool RequiresOpenRig() const override { return false; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -2625,6 +2933,9 @@ class GetDcdTypeAsyncWorker : public HamLibAsyncWorker {
 public:
     GetDcdTypeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance) {}
+
+    const char* OperationName() const override { return "GetDcdType"; }
+    bool RequiresOpenRig() const override { return false; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -2689,6 +3000,8 @@ class SetPowerstatAsyncWorker : public HamLibAsyncWorker {
 public:
     SetPowerstatAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int status)
         : HamLibAsyncWorker(env, hamlib_instance), status_(status) {}
+
+    const char* OperationName() const override { return "SetPowerstat"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -2721,6 +3034,8 @@ class GetPowerstatAsyncWorker : public HamLibAsyncWorker {
 public:
     GetPowerstatAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance), status_(SHIM_RIG_POWER_UNKNOWN) {}
+
+    const char* OperationName() const override { return "GetPowerstat"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -2754,6 +3069,8 @@ class GetPttAsyncWorker : public HamLibAsyncWorker {
 public:
     GetPttAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), ptt_(SHIM_RIG_PTT_OFF) {}
+
+    const char* OperationName() const override { return "GetPtt"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -2788,6 +3105,8 @@ class GetDcdAsyncWorker : public HamLibAsyncWorker {
 public:
     GetDcdAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), dcd_(SHIM_RIG_DCD_OFF) {}
+
+    const char* OperationName() const override { return "GetDcd"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -2822,6 +3141,8 @@ class SetTuningStepAsyncWorker : public HamLibAsyncWorker {
 public:
     SetTuningStepAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, int ts)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), ts_(ts) {}
+
+    const char* OperationName() const override { return "SetTuningStep"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -2855,6 +3176,8 @@ class GetTuningStepAsyncWorker : public HamLibAsyncWorker {
 public:
     GetTuningStepAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), ts_(0) {}
+
+    const char* OperationName() const override { return "GetTuningStep"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -2889,6 +3212,8 @@ class SetRepeaterShiftAsyncWorker : public HamLibAsyncWorker {
 public:
     SetRepeaterShiftAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, int shift)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), shift_(shift) {}
+
+    const char* OperationName() const override { return "SetRepeaterShift"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -2922,6 +3247,8 @@ class GetRepeaterShiftAsyncWorker : public HamLibAsyncWorker {
 public:
     GetRepeaterShiftAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), shift_(SHIM_RIG_RPT_SHIFT_NONE) {}
+
+    const char* OperationName() const override { return "GetRepeaterShift"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -2934,8 +3261,12 @@ public:
     
     void OnOK() override {
         Napi::Env env = Env();
-        const char* shift_str = shim_rig_strptrshift(shift_);
-        deferred_.Resolve(Napi::String::New(env, shift_str));
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            const char* shift_str = shim_rig_strptrshift(shift_);
+            deferred_.Resolve(Napi::String::New(env, shift_str));
+        }
     }
     
     void OnError(const Napi::Error& e) override {
@@ -2952,6 +3283,8 @@ class SetRepeaterOffsetAsyncWorker : public HamLibAsyncWorker {
 public:
     SetRepeaterOffsetAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, int offset)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), offset_(offset) {}
+
+    const char* OperationName() const override { return "SetRepeaterOffset"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -2985,6 +3318,8 @@ class GetRepeaterOffsetAsyncWorker : public HamLibAsyncWorker {
 public:
     GetRepeaterOffsetAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), offset_(0) {}
+
+    const char* OperationName() const override { return "GetRepeaterOffset"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -3030,7 +3365,11 @@ int parseVfoParameter(const Napi::CallbackInfo& info, int index, int defaultVfo 
 
 NodeHamLib::NodeHamLib(const Napi::CallbackInfo & info): ObjectWrap(info) {
   Napi::Env env = info.Env();
-  this->m_currentInfo = (Napi::CallbackInfo *)&info;
+  my_rig = nullptr;
+  freq_emit_cb = nullptr;
+  m_currentInfo = nullptr;
+  rig_is_open.store(false);
+  port_path[0] = '\0';
   if (info.Length() < 1) {
     Napi::TypeError::New(env, "Wrong number of arguments").ThrowAsJavaScriptException();
     return;
@@ -3080,7 +3419,15 @@ NodeHamLib::NodeHamLib(const Napi::CallbackInfo & info): ObjectWrap(info) {
     // Network connection will be established on open()
   }
 
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
+  auto rigLock = NodeHamLib::TryAcquireGlobalRigLockIfEnabled(std::chrono::milliseconds(0));
+  if (!rigLock.owns_lock() && NodeHamLib::IsGlobalRigLockEnabled()) {
+    Napi::Error::New(
+      env,
+      std::string(kGlobalLockTimeoutCode)
+        + ": Hamlib global lock is busy during constructor operation=constructor timeoutMs=0")
+      .ThrowAsJavaScriptException();
+    return;
+  }
   my_rig = shim_rig_init(myrig_model);
   //int retcode = 0;
   if (!my_rig) {
@@ -3089,6 +3436,7 @@ NodeHamLib::NodeHamLib(const Napi::CallbackInfo & info): ObjectWrap(info) {
                            std::to_string(myrig_model) +
                            "). Please check if the model number is valid.";
     Napi::TypeError::New(env, errorMsg).ThrowAsJavaScriptException();
+    return;
   }
   
   // Only set port path and type when user explicitly provided a port.
@@ -3111,20 +3459,23 @@ NodeHamLib::NodeHamLib(const Napi::CallbackInfo & info): ObjectWrap(info) {
   //       {Napi::String::New(env, "frequency_change"), Napi::Number::New(env, freq)});
   //   } 
 
-  rig_is_open = false;
+  rig_is_open.store(false, std::memory_order_release);
 }
 
 // 析构函数 - 确保资源正确清理
 NodeHamLib::~NodeHamLib() {
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
+  auto rigLock = NodeHamLib::TryAcquireGlobalRigLockIfEnabled(std::chrono::milliseconds(0));
+  if (!rigLock.owns_lock() && NodeHamLib::IsGlobalRigLockEnabled()) {
+    return;
+  }
   StopSpectrumStreamInternal();
 
   // 如果rig指针存在，执行清理
   if (my_rig) {
     // 如果rig是打开状态，先关闭
-    if (rig_is_open) {
+    if (rig_is_open.load(std::memory_order_acquire)) {
       shim_rig_close(my_rig);
-      rig_is_open = false;
+      rig_is_open.store(false, std::memory_order_release);
     }
     // 清理rig资源
     shim_rig_cleanup(my_rig);
@@ -3218,11 +3569,6 @@ Napi::Value NodeHamLib::Open(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::SetVFO(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
 
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!")
-      .ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   if (info.Length() < 1) {
     Napi::TypeError::New(env, "Must specify VFO")
@@ -3248,11 +3594,6 @@ Napi::Value NodeHamLib::SetVFO(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::SetFrequency(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!")
-      .ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   if (info.Length() < 1) {
     Napi::TypeError::New(env, "Must specify frequency")
@@ -3291,11 +3632,6 @@ Napi::Value NodeHamLib::SetFrequency(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::SetMode(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!")
-      .ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   if (info.Length() < 1) {
     Napi::TypeError::New(env, "Must specify mode")
@@ -3319,6 +3655,7 @@ Napi::Value NodeHamLib::SetMode(const Napi::CallbackInfo & info) {
   
   int bandwidth = SHIM_RIG_PASSBAND_NORMAL;
   int vfo = SHIM_RIG_VFO_CURR;
+  int passbandSelector = 0;
 
   // Parse parameters: setMode(mode) or setMode(mode, bandwidth) or setMode(mode, bandwidth, vfo)
   if (info.Length() >= 2) {
@@ -3327,10 +3664,7 @@ Napi::Value NodeHamLib::SetMode(const Napi::CallbackInfo & info) {
     } else if (info[1].IsString()) {
       std::string bandstr = info[1].As<Napi::String>().Utf8Value();
       if (bandstr == "narrow" || bandstr == "wide") {
-        auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-        bandwidth = bandstr == "narrow"
-          ? shim_rig_passband_narrow(my_rig, mode)
-          : shim_rig_passband_wide(my_rig, mode);
+        passbandSelector = bandstr == "narrow" ? 1 : 2;
       } else if (bandstr == "normal") {
         bandwidth = SHIM_RIG_PASSBAND_NORMAL;
       } else if (bandstr == "nochange") {
@@ -3353,7 +3687,7 @@ Napi::Value NodeHamLib::SetMode(const Napi::CallbackInfo & info) {
     RETURN_NULL_IF_INVALID_VFO(vfo);
   }
 
-  SetModeAsyncWorker* worker = new SetModeAsyncWorker(env, this, mode, bandwidth, vfo);
+  SetModeAsyncWorker* worker = new SetModeAsyncWorker(env, this, mode, bandwidth, vfo, passbandSelector);
   worker->Queue();
   
   return worker->GetPromise();
@@ -3362,11 +3696,6 @@ Napi::Value NodeHamLib::SetMode(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::SetPtt(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!")
-      .ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   if (info.Length() < 1) {
     Napi::TypeError::New(env, "Must specify PTT state")
@@ -3392,11 +3721,6 @@ Napi::Value NodeHamLib::SetPtt(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::GetVFO(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!")
-      .ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   GetVfoAsyncWorker* worker = new GetVfoAsyncWorker(env, this);
   worker->Queue();
@@ -3407,11 +3731,6 @@ Napi::Value NodeHamLib::GetVFO(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::GetFrequency(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!")
-      .ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   // Support optional VFO parameter
   int vfo = SHIM_RIG_VFO_CURR;
@@ -3430,11 +3749,6 @@ Napi::Value NodeHamLib::GetFrequency(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::GetMode(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!")
-      .ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   GetModeAsyncWorker* worker = new GetModeAsyncWorker(env, this);
   worker->Queue();
@@ -3445,11 +3759,6 @@ Napi::Value NodeHamLib::GetMode(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::GetStrength(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!")
-      .ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   // Support optional VFO parameter: getStrength() or getStrength(vfo)
   int vfo = SHIM_RIG_VFO_CURR;
@@ -3468,17 +3777,7 @@ Napi::Value NodeHamLib::GetStrength(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::Close(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!")
-      .ThrowAsJavaScriptException();
-    return env.Null();
-  }
 
-  {
-    auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-    StopSpectrumStreamInternal();
-  }
-  
   CloseAsyncWorker* worker = new CloseAsyncWorker(env, this);
   worker->Queue();
   
@@ -3488,11 +3787,6 @@ Napi::Value NodeHamLib::Close(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::Destroy(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
 
-  {
-    auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-    StopSpectrumStreamInternal();
-  }
-  
   DestroyAsyncWorker* worker = new DestroyAsyncWorker(env, this);
   worker->Queue();
   
@@ -3508,7 +3802,7 @@ Napi::Value NodeHamLib::GetConnectionInfo(const Napi::CallbackInfo & info) {
   obj.Set(Napi::String::New(env, "portPath"), 
           Napi::String::New(env, port_path));
   obj.Set(Napi::String::New(env, "isOpen"), 
-          Napi::Boolean::New(env, rig_is_open));
+          Napi::Boolean::New(env, rig_is_open.load(std::memory_order_acquire)));
   obj.Set(Napi::String::New(env, "originalModel"), 
           Napi::Number::New(env, original_model));
   obj.Set(Napi::String::New(env, "currentModel"), 
@@ -3521,10 +3815,6 @@ Napi::Value NodeHamLib::GetConnectionInfo(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::SetMemoryChannel(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   if (info.Length() < 2 || !info[0].IsNumber() || !info[1].IsObject()) {
     Napi::TypeError::New(env, "Expected (channelNumber: number, channelData: object)").ThrowAsJavaScriptException();
@@ -3548,10 +3838,6 @@ Napi::Value NodeHamLib::SetMemoryChannel(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::GetMemoryChannel(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   if (info.Length() < 2 || !info[0].IsNumber() || !info[1].IsBoolean()) {
     Napi::TypeError::New(env, "Expected (channelNumber: number, readOnly: boolean)").ThrowAsJavaScriptException();
@@ -3570,10 +3856,6 @@ Napi::Value NodeHamLib::GetMemoryChannel(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::SelectMemoryChannel(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   if (info.Length() < 1 || !info[0].IsNumber()) {
     Napi::TypeError::New(env, "Expected (channelNumber: number)").ThrowAsJavaScriptException();
@@ -3592,10 +3874,6 @@ Napi::Value NodeHamLib::SelectMemoryChannel(const Napi::CallbackInfo & info) {
 
 Napi::Value NodeHamLib::GetMemoryLayout(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   MemoryLayoutAsyncWorker* worker = new MemoryLayoutAsyncWorker(env, this);
   worker->Queue();
   return worker->GetPromise();
@@ -3603,10 +3881,6 @@ Napi::Value NodeHamLib::GetMemoryLayout(const Napi::CallbackInfo & info) {
 
 Napi::Value NodeHamLib::GetMemoryCapabilities(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   int channel_num = -1;
   if (info.Length() >= 1 && !info[0].IsUndefined() && !info[0].IsNull()) {
     if (!info[0].IsNumber()) {
@@ -3622,10 +3896,6 @@ Napi::Value NodeHamLib::GetMemoryCapabilities(const Napi::CallbackInfo & info) {
 
 Napi::Value NodeHamLib::GetMemoryList(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   bool read_only = true;
   bool include_empty = false;
   bool continue_on_error = true;
@@ -3642,10 +3912,6 @@ Napi::Value NodeHamLib::GetMemoryList(const Napi::CallbackInfo & info) {
 
 Napi::Value NodeHamLib::SetMemoryChannels(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   if (info.Length() < 1 || !info[0].IsArray()) {
     Napi::TypeError::New(env, "Expected channels array").ThrowAsJavaScriptException();
     return env.Null();
@@ -3676,10 +3942,6 @@ Napi::Value NodeHamLib::SetMemoryChannels(const Napi::CallbackInfo & info) {
 
 Napi::Value NodeHamLib::ReplaceMemoryChannels(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   if (info.Length() < 1 || !info[0].IsArray()) {
     Napi::TypeError::New(env, "Expected complete channels array").ThrowAsJavaScriptException();
     return env.Null();
@@ -3707,10 +3969,6 @@ Napi::Value NodeHamLib::ReplaceMemoryChannels(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::SetRit(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   if (info.Length() < 1 || !info[0].IsNumber()) {
     Napi::TypeError::New(env, "Expected (ritOffset: number)").ThrowAsJavaScriptException();
@@ -3728,10 +3986,6 @@ Napi::Value NodeHamLib::SetRit(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::GetRit(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   GetRitAsyncWorker* worker = new GetRitAsyncWorker(env, this);
   worker->Queue();
@@ -3742,10 +3996,6 @@ Napi::Value NodeHamLib::GetRit(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::SetXit(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   if (info.Length() < 1 || !info[0].IsNumber()) {
     Napi::TypeError::New(env, "Expected (xitOffset: number)").ThrowAsJavaScriptException();
@@ -3763,10 +4013,6 @@ Napi::Value NodeHamLib::SetXit(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::GetXit(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   GetXitAsyncWorker* worker = new GetXitAsyncWorker(env, this);
   worker->Queue();
@@ -3777,10 +4023,6 @@ Napi::Value NodeHamLib::GetXit(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::ClearRitXit(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   ClearRitXitAsyncWorker* worker = new ClearRitXitAsyncWorker(env, this);
   worker->Queue();
@@ -3792,10 +4034,6 @@ Napi::Value NodeHamLib::ClearRitXit(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::StartScan(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   if (info.Length() < 2 || !info[0].IsString() || !info[1].IsNumber()) {
     Napi::TypeError::New(env, "Expected (scanType: string, channel: number)").ThrowAsJavaScriptException();
@@ -3830,10 +4068,6 @@ Napi::Value NodeHamLib::StartScan(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::StopScan(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   StopScanAsyncWorker* asyncWorker = new StopScanAsyncWorker(env, this);
   asyncWorker->Queue();
@@ -3844,10 +4078,6 @@ Napi::Value NodeHamLib::StopScan(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::SetLevel(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   if (info.Length() < 2 || !info[0].IsString() || !info[1].IsNumber()) {
     Napi::TypeError::New(env, "Expected (levelType: string, value: number, vfo?: string)").ThrowAsJavaScriptException();
@@ -3868,31 +4098,6 @@ Napi::Value NodeHamLib::SetLevel(const Napi::CallbackInfo & info) {
     return env.Null();
   }
   
-  const bool isSpectrumLevel =
-    levelType == SHIM_RIG_LEVEL_SPECTRUM_MODE
-    || levelType == SHIM_RIG_LEVEL_SPECTRUM_SPAN
-    || levelType == SHIM_RIG_LEVEL_SPECTRUM_EDGE_LOW
-    || levelType == SHIM_RIG_LEVEL_SPECTRUM_EDGE_HIGH
-    || levelType == SHIM_RIG_LEVEL_SPECTRUM_SPEED
-    || levelType == SHIM_RIG_LEVEL_SPECTRUM_REF
-    || levelType == SHIM_RIG_LEVEL_SPECTRUM_AVG
-    || levelType == SHIM_RIG_LEVEL_SPECTRUM_ATT;
-
-  if (isSpectrumLevel) {
-    Napi::Promise::Deferred deferred = Napi::Promise::Deferred::New(env);
-    auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-    int result = shim_rig_level_is_float(levelType)
-      ? shim_rig_set_level_f(my_rig, vfo, levelType, static_cast<float>(levelValue))
-      : shim_rig_set_level_i(my_rig, vfo, levelType, static_cast<int>(levelValue));
-
-    if (result != SHIM_RIG_OK) {
-      deferred.Reject(Napi::Error::New(env, shim_rigerror(result)).Value());
-    } else {
-      deferred.Resolve(Napi::Number::New(env, result));
-    }
-    return deferred.Promise();
-  }
-
   float val = static_cast<float>(levelValue);
   SetLevelAsyncWorker* worker = new SetLevelAsyncWorker(env, this, levelType, val, vfo);
   worker->Queue();
@@ -3902,10 +4107,6 @@ Napi::Value NodeHamLib::SetLevel(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::GetLevel(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   if (info.Length() < 1 || !info[0].IsString()) {
     Napi::TypeError::New(env, "Expected (levelType: string)").ThrowAsJavaScriptException();
@@ -3933,70 +4134,66 @@ Napi::Value NodeHamLib::GetLevel(const Napi::CallbackInfo & info) {
   return worker->GetPromise();
 }
 
+
 Napi::Value NodeHamLib::GetSupportedLevels(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-  
-  // Get capabilities from rig caps instead of state (doesn't require rig to be open)
-  uint64_t levels = shim_rig_get_caps_has_get_level(my_rig) | shim_rig_get_caps_has_set_level(my_rig);
-  Napi::Array levelArray = Napi::Array::New(env);
-  uint32_t index = 0;
-  
-  // Check each level type
-  if (levels & SHIM_RIG_LEVEL_AF) levelArray[index++] = Napi::String::New(env, "AF");
-  if (levels & SHIM_RIG_LEVEL_PREAMP) levelArray[index++] = Napi::String::New(env, "PREAMP");
-  if (levels & SHIM_RIG_LEVEL_ATT) levelArray[index++] = Napi::String::New(env, "ATT");
-  if (levels & SHIM_RIG_LEVEL_RF) levelArray[index++] = Napi::String::New(env, "RF");
-  if (levels & SHIM_RIG_LEVEL_SQL) levelArray[index++] = Napi::String::New(env, "SQL");
-  if (levels & SHIM_RIG_LEVEL_RFPOWER) levelArray[index++] = Napi::String::New(env, "RFPOWER");
-  if (levels & SHIM_RIG_LEVEL_MICGAIN) levelArray[index++] = Napi::String::New(env, "MICGAIN");
-  if (levels & SHIM_RIG_LEVEL_IF) levelArray[index++] = Napi::String::New(env, "IF");
-  if (levels & SHIM_RIG_LEVEL_APF) levelArray[index++] = Napi::String::New(env, "APF");
-  if (levels & SHIM_RIG_LEVEL_NR) levelArray[index++] = Napi::String::New(env, "NR");
-  if (levels & SHIM_RIG_LEVEL_PBT_IN) levelArray[index++] = Napi::String::New(env, "PBT_IN");
-  if (levels & SHIM_RIG_LEVEL_PBT_OUT) levelArray[index++] = Napi::String::New(env, "PBT_OUT");
-  if (levels & SHIM_RIG_LEVEL_CWPITCH) levelArray[index++] = Napi::String::New(env, "CWPITCH");
-  if (levels & SHIM_RIG_LEVEL_KEYSPD) levelArray[index++] = Napi::String::New(env, "KEYSPD");
-  if (levels & SHIM_RIG_LEVEL_NOTCHF) levelArray[index++] = Napi::String::New(env, "NOTCHF");
-  if (levels & SHIM_RIG_LEVEL_COMP) levelArray[index++] = Napi::String::New(env, "COMP");
-  if (levels & SHIM_RIG_LEVEL_AGC) levelArray[index++] = Napi::String::New(env, "AGC");
-  if (levels & SHIM_RIG_LEVEL_BKINDL) levelArray[index++] = Napi::String::New(env, "BKINDL");
-  if (levels & SHIM_RIG_LEVEL_BALANCE) levelArray[index++] = Napi::String::New(env, "BALANCE");
-  if (levels & SHIM_RIG_LEVEL_VOXGAIN) levelArray[index++] = Napi::String::New(env, "VOXGAIN");
-  if (levels & SHIM_RIG_LEVEL_VOXDELAY) levelArray[index++] = Napi::String::New(env, "VOXDELAY");
-  if (levels & SHIM_RIG_LEVEL_ANTIVOX) levelArray[index++] = Napi::String::New(env, "ANTIVOX");
-  if (levels & SHIM_RIG_LEVEL_MONITOR_GAIN) levelArray[index++] = Napi::String::New(env, "MONITOR_GAIN");
-  if (levels & SHIM_RIG_LEVEL_STRENGTH) levelArray[index++] = Napi::String::New(env, "STRENGTH");
-  if (levels & SHIM_RIG_LEVEL_RAWSTR) levelArray[index++] = Napi::String::New(env, "RAWSTR");
-  if (levels & SHIM_RIG_LEVEL_SWR) levelArray[index++] = Napi::String::New(env, "SWR");
-  if (levels & SHIM_RIG_LEVEL_ALC) levelArray[index++] = Napi::String::New(env, "ALC");
-  if (levels & SHIM_RIG_LEVEL_RFPOWER_METER) levelArray[index++] = Napi::String::New(env, "RFPOWER_METER");
-  if (levels & SHIM_RIG_LEVEL_RFPOWER_METER_WATTS) levelArray[index++] = Napi::String::New(env, "RFPOWER_METER_WATTS");
-  if (levels & SHIM_RIG_LEVEL_COMP_METER) levelArray[index++] = Napi::String::New(env, "COMP_METER");
-  if (levels & SHIM_RIG_LEVEL_VD_METER) levelArray[index++] = Napi::String::New(env, "VD_METER");
-  if (levels & SHIM_RIG_LEVEL_ID_METER) levelArray[index++] = Napi::String::New(env, "ID_METER");
-  if (levels & SHIM_RIG_LEVEL_SPECTRUM_MODE) levelArray[index++] = Napi::String::New(env, "SPECTRUM_MODE");
-  if (levels & SHIM_RIG_LEVEL_SPECTRUM_SPAN) levelArray[index++] = Napi::String::New(env, "SPECTRUM_SPAN");
-  if (levels & SHIM_RIG_LEVEL_SPECTRUM_EDGE_LOW) levelArray[index++] = Napi::String::New(env, "SPECTRUM_EDGE_LOW");
-  if (levels & SHIM_RIG_LEVEL_SPECTRUM_EDGE_HIGH) levelArray[index++] = Napi::String::New(env, "SPECTRUM_EDGE_HIGH");
-  if (levels & SHIM_RIG_LEVEL_SPECTRUM_SPEED) levelArray[index++] = Napi::String::New(env, "SPECTRUM_SPEED");
-  if (levels & SHIM_RIG_LEVEL_SPECTRUM_REF) levelArray[index++] = Napi::String::New(env, "SPECTRUM_REF");
-  if (levels & SHIM_RIG_LEVEL_SPECTRUM_AVG) levelArray[index++] = Napi::String::New(env, "SPECTRUM_AVG");
-  if (levels & SHIM_RIG_LEVEL_SPECTRUM_ATT) levelArray[index++] = Napi::String::New(env, "SPECTRUM_ATT");
-  if (levels & SHIM_RIG_LEVEL_TEMP_METER) levelArray[index++] = Napi::String::New(env, "TEMP_METER");
-  
-  return levelArray;
+  auto values = std::make_shared<std::vector<std::string>>();
+  return QueueLockedCallbackWorker(env, this, "GetSupportedLevels",
+    [values](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      (void)result_code;
+      uint64_t levels = shim_rig_get_caps_has_get_level(instance->my_rig) | shim_rig_get_caps_has_set_level(instance->my_rig);
+      if (levels & SHIM_RIG_LEVEL_AF) values->push_back("AF");
+      if (levels & SHIM_RIG_LEVEL_PREAMP) values->push_back("PREAMP");
+      if (levels & SHIM_RIG_LEVEL_ATT) values->push_back("ATT");
+      if (levels & SHIM_RIG_LEVEL_RF) values->push_back("RF");
+      if (levels & SHIM_RIG_LEVEL_SQL) values->push_back("SQL");
+      if (levels & SHIM_RIG_LEVEL_RFPOWER) values->push_back("RFPOWER");
+      if (levels & SHIM_RIG_LEVEL_MICGAIN) values->push_back("MICGAIN");
+      if (levels & SHIM_RIG_LEVEL_IF) values->push_back("IF");
+      if (levels & SHIM_RIG_LEVEL_APF) values->push_back("APF");
+      if (levels & SHIM_RIG_LEVEL_NR) values->push_back("NR");
+      if (levels & SHIM_RIG_LEVEL_PBT_IN) values->push_back("PBT_IN");
+      if (levels & SHIM_RIG_LEVEL_PBT_OUT) values->push_back("PBT_OUT");
+      if (levels & SHIM_RIG_LEVEL_CWPITCH) values->push_back("CWPITCH");
+      if (levels & SHIM_RIG_LEVEL_KEYSPD) values->push_back("KEYSPD");
+      if (levels & SHIM_RIG_LEVEL_NOTCHF) values->push_back("NOTCHF");
+      if (levels & SHIM_RIG_LEVEL_COMP) values->push_back("COMP");
+      if (levels & SHIM_RIG_LEVEL_AGC) values->push_back("AGC");
+      if (levels & SHIM_RIG_LEVEL_BKINDL) values->push_back("BKINDL");
+      if (levels & SHIM_RIG_LEVEL_BALANCE) values->push_back("BALANCE");
+      if (levels & SHIM_RIG_LEVEL_VOXGAIN) values->push_back("VOXGAIN");
+      if (levels & SHIM_RIG_LEVEL_VOXDELAY) values->push_back("VOXDELAY");
+      if (levels & SHIM_RIG_LEVEL_ANTIVOX) values->push_back("ANTIVOX");
+      if (levels & SHIM_RIG_LEVEL_MONITOR_GAIN) values->push_back("MONITOR_GAIN");
+      if (levels & SHIM_RIG_LEVEL_STRENGTH) values->push_back("STRENGTH");
+      if (levels & SHIM_RIG_LEVEL_RAWSTR) values->push_back("RAWSTR");
+      if (levels & SHIM_RIG_LEVEL_SWR) values->push_back("SWR");
+      if (levels & SHIM_RIG_LEVEL_ALC) values->push_back("ALC");
+      if (levels & SHIM_RIG_LEVEL_RFPOWER_METER) values->push_back("RFPOWER_METER");
+      if (levels & SHIM_RIG_LEVEL_RFPOWER_METER_WATTS) values->push_back("RFPOWER_METER_WATTS");
+      if (levels & SHIM_RIG_LEVEL_COMP_METER) values->push_back("COMP_METER");
+      if (levels & SHIM_RIG_LEVEL_VD_METER) values->push_back("VD_METER");
+      if (levels & SHIM_RIG_LEVEL_ID_METER) values->push_back("ID_METER");
+      if (levels & SHIM_RIG_LEVEL_SPECTRUM_MODE) values->push_back("SPECTRUM_MODE");
+      if (levels & SHIM_RIG_LEVEL_SPECTRUM_SPAN) values->push_back("SPECTRUM_SPAN");
+      if (levels & SHIM_RIG_LEVEL_SPECTRUM_EDGE_LOW) values->push_back("SPECTRUM_EDGE_LOW");
+      if (levels & SHIM_RIG_LEVEL_SPECTRUM_EDGE_HIGH) values->push_back("SPECTRUM_EDGE_HIGH");
+      if (levels & SHIM_RIG_LEVEL_SPECTRUM_SPEED) values->push_back("SPECTRUM_SPEED");
+      if (levels & SHIM_RIG_LEVEL_SPECTRUM_REF) values->push_back("SPECTRUM_REF");
+      if (levels & SHIM_RIG_LEVEL_SPECTRUM_AVG) values->push_back("SPECTRUM_AVG");
+      if (levels & SHIM_RIG_LEVEL_SPECTRUM_ATT) values->push_back("SPECTRUM_ATT");
+      if (levels & SHIM_RIG_LEVEL_TEMP_METER) values->push_back("TEMP_METER");
+    },
+    [values](Napi::Env env) {
+      return StringVectorToArray(env, *values);
+    });
 }
+
 
 // Function Controls
 Napi::Value NodeHamLib::SetFunction(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   if (info.Length() < 2 || !info[0].IsString() || !info[1].IsBoolean()) {
     Napi::TypeError::New(env, "Expected (functionType: string, enable: boolean)").ThrowAsJavaScriptException();
@@ -4084,10 +4281,6 @@ Napi::Value NodeHamLib::SetFunction(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::GetFunction(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   if (info.Length() < 1 || !info[0].IsString()) {
     Napi::TypeError::New(env, "Expected (functionType: string)").ThrowAsJavaScriptException();
@@ -4171,88 +4364,79 @@ Napi::Value NodeHamLib::GetFunction(const Napi::CallbackInfo & info) {
   return worker->GetPromise();
 }
 
+
 Napi::Value NodeHamLib::GetSupportedFunctions(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-  
-  // Get capabilities from rig caps instead of state (doesn't require rig to be open)
-  uint64_t functions = shim_rig_get_caps_has_get_func(my_rig) | shim_rig_get_caps_has_set_func(my_rig);
-  Napi::Array funcArray = Napi::Array::New(env);
-  uint32_t index = 0;
-  
-  // Check each function type
-  if (functions & SHIM_RIG_FUNC_FAGC) funcArray[index++] = Napi::String::New(env, "FAGC");
-  if (functions & SHIM_RIG_FUNC_NB) funcArray[index++] = Napi::String::New(env, "NB");
-  if (functions & SHIM_RIG_FUNC_COMP) funcArray[index++] = Napi::String::New(env, "COMP");
-  if (functions & SHIM_RIG_FUNC_VOX) funcArray[index++] = Napi::String::New(env, "VOX");
-  if (functions & SHIM_RIG_FUNC_TONE) funcArray[index++] = Napi::String::New(env, "TONE");
-  if (functions & SHIM_RIG_FUNC_TSQL) funcArray[index++] = Napi::String::New(env, "TSQL");
-  if (functions & SHIM_RIG_FUNC_SBKIN) funcArray[index++] = Napi::String::New(env, "SBKIN");
-  if (functions & SHIM_RIG_FUNC_FBKIN) funcArray[index++] = Napi::String::New(env, "FBKIN");
-  if (functions & SHIM_RIG_FUNC_ANF) funcArray[index++] = Napi::String::New(env, "ANF");
-  if (functions & SHIM_RIG_FUNC_NR) funcArray[index++] = Napi::String::New(env, "NR");
-  if (functions & SHIM_RIG_FUNC_AIP) funcArray[index++] = Napi::String::New(env, "AIP");
-  if (functions & SHIM_RIG_FUNC_APF) funcArray[index++] = Napi::String::New(env, "APF");
-  if (functions & SHIM_RIG_FUNC_TUNER) funcArray[index++] = Napi::String::New(env, "TUNER");
-  if (functions & SHIM_RIG_FUNC_XIT) funcArray[index++] = Napi::String::New(env, "XIT");
-  if (functions & SHIM_RIG_FUNC_RIT) funcArray[index++] = Napi::String::New(env, "RIT");
-  if (functions & SHIM_RIG_FUNC_LOCK) funcArray[index++] = Napi::String::New(env, "LOCK");
-  if (functions & SHIM_RIG_FUNC_MUTE) funcArray[index++] = Napi::String::New(env, "MUTE");
-  if (functions & SHIM_RIG_FUNC_VSC) funcArray[index++] = Napi::String::New(env, "VSC");
-  if (functions & SHIM_RIG_FUNC_REV) funcArray[index++] = Napi::String::New(env, "REV");
-  if (functions & SHIM_RIG_FUNC_SQL) funcArray[index++] = Napi::String::New(env, "SQL");
-  if (functions & SHIM_RIG_FUNC_ABM) funcArray[index++] = Napi::String::New(env, "ABM");
-  if (functions & SHIM_RIG_FUNC_BC) funcArray[index++] = Napi::String::New(env, "BC");
-  if (functions & SHIM_RIG_FUNC_MBC) funcArray[index++] = Napi::String::New(env, "MBC");
-  if (functions & SHIM_RIG_FUNC_AFC) funcArray[index++] = Napi::String::New(env, "AFC");
-  if (functions & SHIM_RIG_FUNC_SATMODE) funcArray[index++] = Napi::String::New(env, "SATMODE");
-  if (functions & SHIM_RIG_FUNC_SCOPE) funcArray[index++] = Napi::String::New(env, "SCOPE");
-  if (functions & SHIM_RIG_FUNC_RESUME) funcArray[index++] = Napi::String::New(env, "RESUME");
-  if (functions & SHIM_RIG_FUNC_TBURST) funcArray[index++] = Napi::String::New(env, "TBURST");
-  if (functions & SHIM_RIG_FUNC_TRANSCEIVE) funcArray[index++] = Napi::String::New(env, "TRANSCEIVE");
-  if (functions & SHIM_RIG_FUNC_SPECTRUM) funcArray[index++] = Napi::String::New(env, "SPECTRUM");
-  if (functions & SHIM_RIG_FUNC_SPECTRUM_HOLD) funcArray[index++] = Napi::String::New(env, "SPECTRUM_HOLD");
-  
-  return funcArray;
+  auto values = std::make_shared<std::vector<std::string>>();
+  return QueueLockedCallbackWorker(env, this, "GetSupportedFunctions",
+    [values](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      (void)result_code;
+      uint64_t functions = shim_rig_get_caps_has_get_func(instance->my_rig) | shim_rig_get_caps_has_set_func(instance->my_rig);
+      if (functions & SHIM_RIG_FUNC_FAGC) values->push_back("FAGC");
+      if (functions & SHIM_RIG_FUNC_NB) values->push_back("NB");
+      if (functions & SHIM_RIG_FUNC_COMP) values->push_back("COMP");
+      if (functions & SHIM_RIG_FUNC_VOX) values->push_back("VOX");
+      if (functions & SHIM_RIG_FUNC_TONE) values->push_back("TONE");
+      if (functions & SHIM_RIG_FUNC_TSQL) values->push_back("TSQL");
+      if (functions & SHIM_RIG_FUNC_SBKIN) values->push_back("SBKIN");
+      if (functions & SHIM_RIG_FUNC_FBKIN) values->push_back("FBKIN");
+      if (functions & SHIM_RIG_FUNC_ANF) values->push_back("ANF");
+      if (functions & SHIM_RIG_FUNC_NR) values->push_back("NR");
+      if (functions & SHIM_RIG_FUNC_AIP) values->push_back("AIP");
+      if (functions & SHIM_RIG_FUNC_APF) values->push_back("APF");
+      if (functions & SHIM_RIG_FUNC_TUNER) values->push_back("TUNER");
+      if (functions & SHIM_RIG_FUNC_XIT) values->push_back("XIT");
+      if (functions & SHIM_RIG_FUNC_RIT) values->push_back("RIT");
+      if (functions & SHIM_RIG_FUNC_LOCK) values->push_back("LOCK");
+      if (functions & SHIM_RIG_FUNC_MUTE) values->push_back("MUTE");
+      if (functions & SHIM_RIG_FUNC_VSC) values->push_back("VSC");
+      if (functions & SHIM_RIG_FUNC_REV) values->push_back("REV");
+      if (functions & SHIM_RIG_FUNC_SQL) values->push_back("SQL");
+      if (functions & SHIM_RIG_FUNC_ABM) values->push_back("ABM");
+      if (functions & SHIM_RIG_FUNC_BC) values->push_back("BC");
+      if (functions & SHIM_RIG_FUNC_MBC) values->push_back("MBC");
+      if (functions & SHIM_RIG_FUNC_AFC) values->push_back("AFC");
+      if (functions & SHIM_RIG_FUNC_SATMODE) values->push_back("SATMODE");
+      if (functions & SHIM_RIG_FUNC_SCOPE) values->push_back("SCOPE");
+      if (functions & SHIM_RIG_FUNC_RESUME) values->push_back("RESUME");
+      if (functions & SHIM_RIG_FUNC_TBURST) values->push_back("TBURST");
+      if (functions & SHIM_RIG_FUNC_TRANSCEIVE) values->push_back("TRANSCEIVE");
+      if (functions & SHIM_RIG_FUNC_SPECTRUM) values->push_back("SPECTRUM");
+      if (functions & SHIM_RIG_FUNC_SPECTRUM_HOLD) values->push_back("SPECTRUM_HOLD");
+    },
+    [values](Napi::Env env) {
+      return StringVectorToArray(env, *values);
+    });
 }
+
 
 // Mode Query
+
 Napi::Value NodeHamLib::GetSupportedModes(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-
-  // Get mode list from rig state (populated during rig_open from rx/tx range lists)
-  uint64_t modes = shim_rig_get_mode_list(my_rig);
-  Napi::Array modeArray = Napi::Array::New(env);
-  uint32_t index = 0;
-
-  // Iterate through all possible mode bits (similar to rig_sprintf_mode)
-  for (unsigned int i = 0; i < SHIM_HAMLIB_MAX_MODES; i++) {
-    uint64_t mode_bit = modes & (1ULL << i);
-
-    if (mode_bit) {
-      const char* mode_str = shim_rig_strrmode(mode_bit);
-
-      // Skip empty or unknown modes
-      if (mode_str && mode_str[0] != '\0') {
-        modeArray[index++] = Napi::String::New(env, mode_str);
+  auto values = std::make_shared<std::vector<std::string>>();
+  return QueueLockedCallbackWorker(env, this, "GetSupportedModes",
+    [values](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      (void)result_code;
+      (void)error_message;
+      uint64_t modes = shim_rig_get_mode_list(instance->my_rig);
+      for (unsigned int i = 0; i < SHIM_HAMLIB_MAX_MODES; i++) {
+        uint64_t mode_bit = modes & (1ULL << i);
+        if (!mode_bit) continue;
+        const char* mode_str = shim_rig_strrmode(mode_bit);
+        if (mode_str && mode_str[0] != '\0') values->emplace_back(mode_str);
       }
-    }
-  }
-
-  return modeArray;
+    },
+    [values](Napi::Env env) {
+      return StringVectorToArray(env, *values);
+    });
 }
+
 
 // Split Operations
 Napi::Value NodeHamLib::SetSplitFreq(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   if (info.Length() < 1 || !info[0].IsNumber()) {
     Napi::TypeError::New(env, "Expected TX frequency").ThrowAsJavaScriptException();
@@ -4283,10 +4467,6 @@ Napi::Value NodeHamLib::SetSplitFreq(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::GetSplitFreq(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   int vfo = SHIM_RIG_VFO_CURR;
   
@@ -4305,10 +4485,6 @@ Napi::Value NodeHamLib::GetSplitFreq(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::SetSplitMode(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   if (info.Length() < 1 || !info[0].IsString()) {
     Napi::TypeError::New(env, "Expected TX mode string").ThrowAsJavaScriptException();
@@ -4351,10 +4527,6 @@ Napi::Value NodeHamLib::SetSplitMode(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::GetSplitMode(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   int vfo = SHIM_RIG_VFO_CURR;
   
@@ -4373,10 +4545,6 @@ Napi::Value NodeHamLib::GetSplitMode(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::SetSplit(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   if (info.Length() < 1 || !info[0].IsBoolean()) {
     Napi::TypeError::New(env, "Expected boolean split enable state").ThrowAsJavaScriptException();
@@ -4428,10 +4596,6 @@ Napi::Value NodeHamLib::SetSplit(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::GetSplit(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   int vfo = SHIM_RIG_VFO_CURR;
   
@@ -4451,10 +4615,6 @@ Napi::Value NodeHamLib::GetSplit(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::VfoOperation(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   if (info.Length() < 1 || !info[0].IsString()) {
     Napi::TypeError::New(env, "Expected VFO operation string").ThrowAsJavaScriptException();
@@ -4504,10 +4664,6 @@ Napi::Value NodeHamLib::VfoOperation(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::SetAntenna(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   if (info.Length() < 1 || !info[0].IsNumber()) {
     Napi::TypeError::New(env, "Expected antenna number").ThrowAsJavaScriptException();
@@ -4555,10 +4711,6 @@ Napi::Value NodeHamLib::SetAntenna(const Napi::CallbackInfo & info) {
 Napi::Value NodeHamLib::GetAntenna(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   // Support optional VFO parameter: getAntenna() or getAntenna(vfo)
   int vfo = SHIM_RIG_VFO_CURR;
@@ -4732,18 +4884,18 @@ Napi::Function NodeHamLib::GetClass(Napi::Env env) {
       NodeHamLib::InstanceMethod("setConf", & NodeHamLib::SetConf),
       NodeHamLib::InstanceMethod("getConf", & NodeHamLib::GetConf),
 
-      // Passband / Resolution (sync)
+      // Passband / Resolution (async)
       NodeHamLib::InstanceMethod("getPassbandNormal", & NodeHamLib::GetPassbandNormal),
       NodeHamLib::InstanceMethod("getPassbandNarrow", & NodeHamLib::GetPassbandNarrow),
       NodeHamLib::InstanceMethod("getPassbandWide", & NodeHamLib::GetPassbandWide),
       NodeHamLib::InstanceMethod("getResolution", & NodeHamLib::GetResolution),
 
-      // Capability queries (sync)
+      // Capability queries (async)
       NodeHamLib::InstanceMethod("getSupportedParms", & NodeHamLib::GetSupportedParms),
       NodeHamLib::InstanceMethod("getSupportedVfoOps", & NodeHamLib::GetSupportedVfoOps),
       NodeHamLib::InstanceMethod("getSupportedScanTypes", & NodeHamLib::GetSupportedScanTypes),
 
-      // Capability queries - batch 2 (sync)
+      // Capability queries - batch 2 (async)
       NodeHamLib::InstanceMethod("getPreampValues", & NodeHamLib::GetPreampValues),
       NodeHamLib::InstanceMethod("getAttenuatorValues", & NodeHamLib::GetAttenuatorValues),
       NodeHamLib::InstanceMethod("getAgcLevels", & NodeHamLib::GetAgcLevels),
@@ -4907,10 +5059,15 @@ bool NodeHamLib::IsGlobalRigLockEnabled() {
   return global_rig_lock_enabled_.load(std::memory_order_acquire);
 }
 
-std::unique_lock<std::mutex> NodeHamLib::AcquireGlobalRigLockIfEnabled() {
-  std::unique_lock<std::mutex> lock(global_rig_mutex_, std::defer_lock);
-  if (IsGlobalRigLockEnabled()) {
-    lock.lock();
+GlobalRigLock NodeHamLib::TryAcquireGlobalRigLockIfEnabled(std::chrono::milliseconds timeout) {
+  GlobalRigLock lock(global_rig_mutex_, std::defer_lock);
+  if (!IsGlobalRigLockEnabled()) {
+    return lock;
+  }
+  if (timeout.count() <= 0) {
+    lock.try_lock();
+  } else {
+    lock.try_lock_for(timeout);
   }
   return lock;
 }
@@ -5117,94 +5274,73 @@ int NodeHamLib::rig_config_callback(const shim_confparam_info_t* info, void* dat
   return 1;
 }
 
+
 Napi::Value NodeHamLib::GetConfigSchema(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-
-  RigConfigSchemaData schemaData{};
-  int result = shim_rig_cfgparams_foreach(my_rig, rig_config_callback, &schemaData);
-
-  if (result != SHIM_RIG_OK) {
-    Napi::Error::New(env, shim_rigerror(result)).ThrowAsJavaScriptException();
-    return env.Null();
-  }
-
-  Napi::Array schemaArray = Napi::Array::New(env, schemaData.fields.size());
-  for (size_t i = 0; i < schemaData.fields.size(); ++i) {
-    const RigConfigFieldDescriptor& descriptor = schemaData.fields[i];
-    Napi::Object field = Napi::Object::New(env);
-    field.Set("token", Napi::Number::New(env, descriptor.token));
-    field.Set("name", Napi::String::New(env, descriptor.name));
-    field.Set("label", Napi::String::New(env, descriptor.label));
-    field.Set("tooltip", Napi::String::New(env, descriptor.tooltip));
-    field.Set("defaultValue", Napi::String::New(env, descriptor.defaultValue));
-    field.Set("type", Napi::String::New(env, publicConfTypeName(descriptor.type)));
-
-    if (descriptor.type == 2 || descriptor.type == 6) {
-      Napi::Object numeric = Napi::Object::New(env);
-      numeric.Set("min", Napi::Number::New(env, descriptor.numericMin));
-      numeric.Set("max", Napi::Number::New(env, descriptor.numericMax));
-      numeric.Set("step", Napi::Number::New(env, descriptor.numericStep));
-      field.Set("numeric", numeric);
-    }
-
-    if (!descriptor.options.empty()) {
-      Napi::Array options = Napi::Array::New(env, descriptor.options.size());
-      for (size_t optionIndex = 0; optionIndex < descriptor.options.size(); ++optionIndex) {
-        options[static_cast<uint32_t>(optionIndex)] =
-            Napi::String::New(env, descriptor.options[optionIndex]);
+  auto schemaData = std::make_shared<RigConfigSchemaData>();
+  return QueueLockedCallbackWorker(env, this, "GetConfigSchema",
+    [schemaData](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      result_code = shim_rig_cfgparams_foreach(instance->my_rig, NodeHamLib::rig_config_callback, schemaData.get());
+      if (result_code != SHIM_RIG_OK) error_message = shim_rigerror(result_code);
+    },
+    [schemaData](Napi::Env env) {
+      Napi::Array schemaArray = Napi::Array::New(env, schemaData->fields.size());
+      for (size_t i = 0; i < schemaData->fields.size(); ++i) {
+        const RigConfigFieldDescriptor& descriptor = schemaData->fields[i];
+        Napi::Object field = Napi::Object::New(env);
+        field.Set("token", Napi::Number::New(env, descriptor.token));
+        field.Set("name", Napi::String::New(env, descriptor.name));
+        field.Set("label", Napi::String::New(env, descriptor.label));
+        field.Set("tooltip", Napi::String::New(env, descriptor.tooltip));
+        field.Set("defaultValue", Napi::String::New(env, descriptor.defaultValue));
+        field.Set("type", Napi::String::New(env, publicConfTypeName(descriptor.type)));
+        if (descriptor.type == 2 || descriptor.type == 6) {
+          Napi::Object numeric = Napi::Object::New(env);
+          numeric.Set("min", Napi::Number::New(env, descriptor.numericMin));
+          numeric.Set("max", Napi::Number::New(env, descriptor.numericMax));
+          numeric.Set("step", Napi::Number::New(env, descriptor.numericStep));
+          field.Set("numeric", numeric);
+        }
+        if (!descriptor.options.empty()) {
+          Napi::Array options = Napi::Array::New(env, descriptor.options.size());
+          for (size_t optionIndex = 0; optionIndex < descriptor.options.size(); ++optionIndex) {
+            options[static_cast<uint32_t>(optionIndex)] = Napi::String::New(env, descriptor.options[optionIndex]);
+          }
+          field.Set("options", options);
+        }
+        schemaArray[static_cast<uint32_t>(i)] = field;
       }
-      field.Set("options", options);
-    }
-
-    schemaArray[static_cast<uint32_t>(i)] = field;
-  }
-
-  return schemaArray;
+      return schemaArray;
+    });
 }
+
+
 
 Napi::Value NodeHamLib::GetPortCaps(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-
-  shim_rig_port_caps_t caps{};
-  int result = shim_rig_get_port_caps(my_rig, &caps);
-
-  if (result != SHIM_RIG_OK) {
-    Napi::Error::New(env, shim_rigerror(result)).ThrowAsJavaScriptException();
-    return env.Null();
-  }
-
-  Napi::Object portCaps = Napi::Object::New(env);
-  portCaps.Set("portType", Napi::String::New(env, caps.port_type));
-  portCaps.Set("writeDelay", Napi::Number::New(env, caps.write_delay));
-  portCaps.Set("postWriteDelay", Napi::Number::New(env, caps.post_write_delay));
-  portCaps.Set("timeout", Napi::Number::New(env, caps.timeout));
-  portCaps.Set("retry", Napi::Number::New(env, caps.retry));
-
-  if (hasPositiveValue(caps.serial_rate_min)) {
-    portCaps.Set("serialRateMin", Napi::Number::New(env, caps.serial_rate_min));
-  }
-  if (hasPositiveValue(caps.serial_rate_max)) {
-    portCaps.Set("serialRateMax", Napi::Number::New(env, caps.serial_rate_max));
-  }
-  if (hasPositiveValue(caps.serial_data_bits)) {
-    portCaps.Set("serialDataBits", Napi::Number::New(env, caps.serial_data_bits));
-  }
-  if (hasPositiveValue(caps.serial_stop_bits)) {
-    portCaps.Set("serialStopBits", Napi::Number::New(env, caps.serial_stop_bits));
-  }
-  if (caps.serial_parity[0] != '\0' && std::string(caps.serial_parity) != "Unknown") {
-    portCaps.Set("serialParity", Napi::String::New(env, caps.serial_parity));
-  }
-  if (caps.serial_handshake[0] != '\0' && std::string(caps.serial_handshake) != "Unknown") {
-    portCaps.Set("serialHandshake", Napi::String::New(env, caps.serial_handshake));
-  }
-
-  return portCaps;
+  auto caps = std::make_shared<shim_rig_port_caps_t>();
+  return QueueLockedCallbackWorker(env, this, "GetPortCaps",
+    [caps](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      result_code = shim_rig_get_port_caps(instance->my_rig, caps.get());
+      if (result_code != SHIM_RIG_OK) error_message = shim_rigerror(result_code);
+    },
+    [caps](Napi::Env env) {
+      Napi::Object portCaps = Napi::Object::New(env);
+      portCaps.Set("portType", Napi::String::New(env, caps->port_type));
+      portCaps.Set("writeDelay", Napi::Number::New(env, caps->write_delay));
+      portCaps.Set("postWriteDelay", Napi::Number::New(env, caps->post_write_delay));
+      portCaps.Set("timeout", Napi::Number::New(env, caps->timeout));
+      portCaps.Set("retry", Napi::Number::New(env, caps->retry));
+      if (hasPositiveValue(caps->serial_rate_min)) portCaps.Set("serialRateMin", Napi::Number::New(env, caps->serial_rate_min));
+      if (hasPositiveValue(caps->serial_rate_max)) portCaps.Set("serialRateMax", Napi::Number::New(env, caps->serial_rate_max));
+      if (hasPositiveValue(caps->serial_data_bits)) portCaps.Set("serialDataBits", Napi::Number::New(env, caps->serial_data_bits));
+      if (hasPositiveValue(caps->serial_stop_bits)) portCaps.Set("serialStopBits", Napi::Number::New(env, caps->serial_stop_bits));
+      if (caps->serial_parity[0] != '\0' && std::string(caps->serial_parity) != "Unknown") portCaps.Set("serialParity", Napi::String::New(env, caps->serial_parity));
+      if (caps->serial_handshake[0] != '\0' && std::string(caps->serial_handshake) != "Unknown") portCaps.Set("serialHandshake", Napi::String::New(env, caps->serial_handshake));
+      return portCaps;
+    });
 }
+
 
 // Power Control Methods
 Napi::Value NodeHamLib::SetPowerstat(const Napi::CallbackInfo& info) {
@@ -5359,6 +5495,8 @@ class SetCtcssToneAsyncWorker : public HamLibAsyncWorker {
 public:
     SetCtcssToneAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, unsigned int tone)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tone_(tone) {}
+
+    const char* OperationName() const override { return "SetCtcssTone"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -5392,6 +5530,8 @@ class GetCtcssToneAsyncWorker : public HamLibAsyncWorker {
 public:
     GetCtcssToneAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tone_(0) {}
+
+    const char* OperationName() const override { return "GetCtcssTone"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -5425,6 +5565,8 @@ class SetDcsCodeAsyncWorker : public HamLibAsyncWorker {
 public:
     SetDcsCodeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, unsigned int code)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), code_(code) {}
+
+    const char* OperationName() const override { return "SetDcsCode"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -5458,6 +5600,8 @@ class GetDcsCodeAsyncWorker : public HamLibAsyncWorker {
 public:
     GetDcsCodeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), code_(0) {}
+
+    const char* OperationName() const override { return "GetDcsCode"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -5491,6 +5635,8 @@ class SetCtcssSqlAsyncWorker : public HamLibAsyncWorker {
 public:
     SetCtcssSqlAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, unsigned int tone)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tone_(tone) {}
+
+    const char* OperationName() const override { return "SetCtcssSql"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -5524,6 +5670,8 @@ class GetCtcssSqlAsyncWorker : public HamLibAsyncWorker {
 public:
     GetCtcssSqlAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tone_(0) {}
+
+    const char* OperationName() const override { return "GetCtcssSql"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -5557,6 +5705,8 @@ class SetDcsSqlAsyncWorker : public HamLibAsyncWorker {
 public:
     SetDcsSqlAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, unsigned int code)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), code_(code) {}
+
+    const char* OperationName() const override { return "SetDcsSql"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -5590,6 +5740,8 @@ class GetDcsSqlAsyncWorker : public HamLibAsyncWorker {
 public:
     GetDcsSqlAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), code_(0) {}
+
+    const char* OperationName() const override { return "GetDcsSql"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -5625,6 +5777,8 @@ public:
     SetParmAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, uint64_t parm, float value)
         : HamLibAsyncWorker(env, hamlib_instance), parm_(parm), value_(value) {}
 
+    const char* OperationName() const override { return "SetParm"; }
+
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
 
@@ -5657,6 +5811,8 @@ class GetParmAsyncWorker : public HamLibAsyncWorker {
 public:
     GetParmAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, uint64_t parm)
         : HamLibAsyncWorker(env, hamlib_instance), parm_(parm), value_(0.0f) {}
+
+    const char* OperationName() const override { return "GetParm"; }
 
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -5691,6 +5847,8 @@ class SendDtmfAsyncWorker : public HamLibAsyncWorker {
 public:
     SendDtmfAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, const std::string& digits)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), digits_(digits) {}
+
+    const char* OperationName() const override { return "SendDtmf"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -5726,6 +5884,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), max_length_(maxLength), length_(0) {
         digits_.resize(maxLength + 1, '\0');
     }
+
+    const char* OperationName() const override { return "RecvDtmf"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -5767,6 +5927,8 @@ class GetMemAsyncWorker : public HamLibAsyncWorker {
 public:
     GetMemAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), ch_(0) {}
+
+    const char* OperationName() const override { return "GetMem"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -5800,6 +5962,8 @@ class SetBankAsyncWorker : public HamLibAsyncWorker {
 public:
     SetBankAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, int bank)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), bank_(bank) {}
+
+    const char* OperationName() const override { return "SetBank"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -5833,6 +5997,8 @@ class MemCountAsyncWorker : public HamLibAsyncWorker {
 public:
     MemCountAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance), count_(0) {}
+
+    const char* OperationName() const override { return "MemCount"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -5869,6 +6035,8 @@ class SendMorseAsyncWorker : public HamLibAsyncWorker {
 public:
     SendMorseAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, const std::string& msg)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), msg_(msg) {}
+
+    const char* OperationName() const override { return "SendMorse"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -5902,6 +6070,8 @@ class StopMorseAsyncWorker : public HamLibAsyncWorker {
 public:
     StopMorseAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo) {}
+
+    const char* OperationName() const override { return "StopMorse"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -5934,6 +6104,8 @@ class WaitMorseAsyncWorker : public HamLibAsyncWorker {
 public:
     WaitMorseAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo) {}
+
+    const char* OperationName() const override { return "WaitMorse"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -5967,6 +6139,8 @@ class SendVoiceMemAsyncWorker : public HamLibAsyncWorker {
 public:
     SendVoiceMemAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo, int ch)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), ch_(ch) {}
+
+    const char* OperationName() const override { return "SendVoiceMem"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -6000,6 +6174,8 @@ class StopVoiceMemAsyncWorker : public HamLibAsyncWorker {
 public:
     StopVoiceMemAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo) {}
+
+    const char* OperationName() const override { return "StopVoiceMem"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -6035,6 +6211,8 @@ public:
                                double tx_freq, int tx_mode, int tx_width)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tx_freq_(tx_freq), 
           tx_mode_(tx_mode), tx_width_(tx_width) {}
+
+    const char* OperationName() const override { return "SetSplitFreqMode"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -6070,6 +6248,8 @@ class GetSplitFreqModeAsyncWorker : public HamLibAsyncWorker {
 public:
     GetSplitFreqModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int vfo)
         : HamLibAsyncWorker(env, hamlib_instance), vfo_(vfo), tx_freq_(0), tx_mode_(SHIM_RIG_MODE_NONE), tx_width_(0) {}
+
+    const char* OperationName() const override { return "GetSplitFreqMode"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -6110,6 +6290,8 @@ class ResetAsyncWorker : public HamLibAsyncWorker {
 public:
     ResetAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int reset)
         : HamLibAsyncWorker(env, hamlib_instance), reset_(reset) {}
+
+    const char* OperationName() const override { return "Reset"; }
     
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -6485,10 +6667,6 @@ Napi::Value NodeHamLib::GetSplitFreqMode(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::Power2mW(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   if (info.Length() < 3 || !info[0].IsNumber() || !info[1].IsNumber() || !info[2].IsString()) {
     Napi::TypeError::New(env, "Expected power2mW(power, frequency, mode)").ThrowAsJavaScriptException();
@@ -6527,10 +6705,6 @@ Napi::Value NodeHamLib::Power2mW(const Napi::CallbackInfo& info) {
 Napi::Value NodeHamLib::MW2Power(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   
   if (info.Length() < 3 || !info[0].IsNumber() || !info[1].IsNumber() || !info[2].IsString()) {
     Napi::TypeError::New(env, "Expected mW2power(milliwatts, frequency, mode)").ThrowAsJavaScriptException();
@@ -6604,6 +6778,8 @@ public:
     SetLockModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, int lock)
         : HamLibAsyncWorker(env, hamlib_instance), lock_(lock) {}
 
+    const char* OperationName() const override { return "SetLockMode"; }
+
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         result_code_ = shim_rig_set_lock_mode(hamlib_instance_->my_rig, lock_);
@@ -6633,6 +6809,8 @@ class GetLockModeAsyncWorker : public HamLibAsyncWorker {
 public:
     GetLockModeAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance), lock_(0) {}
+
+    const char* OperationName() const override { return "GetLockMode"; }
 
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -6693,6 +6871,8 @@ public:
           year_(year), month_(month), day_(day),
           hour_(hour), min_(min), sec_(sec), msec_(msec), utc_offset_(utc_offset) {}
 
+    const char* OperationName() const override { return "SetClock"; }
+
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         result_code_ = shim_rig_set_clock(hamlib_instance_->my_rig,
@@ -6728,6 +6908,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance),
           year_(0), month_(0), day_(0),
           hour_(0), min_(0), sec_(0), msec_(0.0), utc_offset_(0) {}
+
+    const char* OperationName() const override { return "GetClock"; }
 
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -6821,6 +7003,8 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance),
           vfo_(vfo), freq_(0.0), mode_(0), width_(0), split_(0), satmode_(0) {}
 
+    const char* OperationName() const override { return "GetVfoInfo"; }
+
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         result_code_ = shim_rig_get_vfo_info(hamlib_instance_->my_rig, vfo_,
@@ -6876,6 +7060,8 @@ public:
     GetInfoAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance)
         : HamLibAsyncWorker(env, hamlib_instance) {}
 
+    const char* OperationName() const override { return "GetInfo"; }
+
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
         const char* info = shim_rig_get_info(hamlib_instance_->my_rig);
@@ -6884,7 +7070,11 @@ public:
 
     void OnOK() override {
         Napi::Env env = Env();
-        deferred_.Resolve(Napi::String::New(env, info_str_));
+        if (result_code_ != SHIM_RIG_OK && !error_message_.empty()) {
+            deferred_.Reject(Napi::Error::New(env, error_message_).Value());
+        } else {
+            deferred_.Resolve(Napi::String::New(env, info_str_));
+        }
     }
 
     void OnError(const Napi::Error& e) override {
@@ -6898,10 +7088,6 @@ private:
 Napi::Value NodeHamLib::GetInfo(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
 
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
 
   GetInfoAsyncWorker* asyncWorker = new GetInfoAsyncWorker(env, this);
   asyncWorker->Queue();
@@ -6921,6 +7107,8 @@ public:
           reply_len_(0) {
         reply_buf_.resize(reply_max_len > 0 ? reply_max_len : 1);
     }
+
+    const char* OperationName() const override { return "SendRaw"; }
 
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -6961,10 +7149,6 @@ private:
 Napi::Value NodeHamLib::SendRaw(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
 
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
 
   if (info.Length() < 2 || !info[0].IsBuffer() || !info[1].IsNumber()) {
     Napi::TypeError::New(env, "Expected (data: Buffer, replyMaxLen: number, terminator?: Buffer)").ThrowAsJavaScriptException();
@@ -6988,107 +7172,167 @@ Napi::Value NodeHamLib::SendRaw(const Napi::CallbackInfo& info) {
   return asyncWorker->GetPromise();
 }
 
+
 Napi::Value NodeHamLib::GetSpectrumCapabilities(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-  Napi::Object result = Napi::Object::New(env);
-
-  result.Set("asyncDataSupported", Napi::Boolean::New(env, shim_rig_is_async_data_supported(my_rig) != 0));
-
-  Napi::Array scopes = Napi::Array::New(env);
-  int scopeCount = shim_rig_get_caps_spectrum_scope_count(my_rig);
-  for (int i = 0; i < scopeCount; ++i) {
-    shim_spectrum_scope_t scope{};
-    if (shim_rig_get_caps_spectrum_scope(my_rig, i, &scope) != SHIM_RIG_OK) {
-      continue;
-    }
-    Napi::Object scopeObject = Napi::Object::New(env);
-    scopeObject.Set("id", Napi::Number::New(env, scope.id));
-    scopeObject.Set("name", Napi::String::New(env, scope.name));
-    scopes.Set(i, scopeObject);
-  }
-  result.Set("scopes", scopes);
-
-  Napi::Array modes = Napi::Array::New(env);
-  int modeCount = shim_rig_get_caps_spectrum_mode_count(my_rig);
-  for (int i = 0; i < modeCount; ++i) {
-    int modeId = 0;
-    if (shim_rig_get_caps_spectrum_mode(my_rig, i, &modeId) != SHIM_RIG_OK) {
-      continue;
-    }
-    Napi::Object modeObject = Napi::Object::New(env);
-    modeObject.Set("id", Napi::Number::New(env, modeId));
-    modeObject.Set("name", Napi::String::New(env, shim_rig_str_spectrum_mode(modeId)));
-    modes.Set(i, modeObject);
-  }
-  result.Set("modes", modes);
-
-  Napi::Array spans = Napi::Array::New(env);
-  int spanCount = shim_rig_get_caps_spectrum_span_count(my_rig);
-  for (int i = 0; i < spanCount; ++i) {
-    double spanHz = 0;
-    if (shim_rig_get_caps_spectrum_span(my_rig, i, &spanHz) != SHIM_RIG_OK) {
-      continue;
-    }
-    spans.Set(i, Napi::Number::New(env, spanHz));
-  }
-  result.Set("spans", spans);
-
-  Napi::Array avgModes = Napi::Array::New(env);
-  int avgModeCount = shim_rig_get_caps_spectrum_avg_mode_count(my_rig);
-  for (int i = 0; i < avgModeCount; ++i) {
-    shim_spectrum_avg_mode_t avgMode{};
-    if (shim_rig_get_caps_spectrum_avg_mode(my_rig, i, &avgMode) != SHIM_RIG_OK) {
-      continue;
-    }
-    Napi::Object avgModeObject = Napi::Object::New(env);
-    avgModeObject.Set("id", Napi::Number::New(env, avgMode.id));
-    avgModeObject.Set("name", Napi::String::New(env, avgMode.name));
-    avgModes.Set(i, avgModeObject);
-  }
-  result.Set("avgModes", avgModes);
-
-  return result;
+  struct SpectrumCapabilityData {
+    bool asyncDataSupported = false;
+    std::vector<shim_spectrum_scope_t> scopes;
+    std::vector<std::pair<int, std::string>> modes;
+    std::vector<double> spans;
+    std::vector<shim_spectrum_avg_mode_t> avgModes;
+  };
+  auto data = std::make_shared<SpectrumCapabilityData>();
+  return QueueLockedCallbackWorker(env, this, "GetSpectrumCapabilities",
+    [data](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      (void)result_code;
+      (void)error_message;
+      data->asyncDataSupported = shim_rig_is_async_data_supported(instance->my_rig) != 0;
+      int scopeCount = shim_rig_get_caps_spectrum_scope_count(instance->my_rig);
+      for (int i = 0; i < scopeCount; ++i) {
+        shim_spectrum_scope_t scope{};
+        if (shim_rig_get_caps_spectrum_scope(instance->my_rig, i, &scope) == SHIM_RIG_OK) data->scopes.push_back(scope);
+      }
+      int modeCount = shim_rig_get_caps_spectrum_mode_count(instance->my_rig);
+      for (int i = 0; i < modeCount; ++i) {
+        int modeId = 0;
+        if (shim_rig_get_caps_spectrum_mode(instance->my_rig, i, &modeId) == SHIM_RIG_OK) {
+          const char* modeName = shim_rig_str_spectrum_mode(modeId);
+          data->modes.emplace_back(modeId, modeName ? modeName : "");
+        }
+      }
+      int spanCount = shim_rig_get_caps_spectrum_span_count(instance->my_rig);
+      for (int i = 0; i < spanCount; ++i) {
+        double spanHz = 0;
+        if (shim_rig_get_caps_spectrum_span(instance->my_rig, i, &spanHz) == SHIM_RIG_OK) data->spans.push_back(spanHz);
+      }
+      int avgModeCount = shim_rig_get_caps_spectrum_avg_mode_count(instance->my_rig);
+      for (int i = 0; i < avgModeCount; ++i) {
+        shim_spectrum_avg_mode_t avgMode{};
+        if (shim_rig_get_caps_spectrum_avg_mode(instance->my_rig, i, &avgMode) == SHIM_RIG_OK) data->avgModes.push_back(avgMode);
+      }
+    },
+    [data](Napi::Env env) {
+      Napi::Object result = Napi::Object::New(env);
+      result.Set("asyncDataSupported", Napi::Boolean::New(env, data->asyncDataSupported));
+      Napi::Array scopes = Napi::Array::New(env, data->scopes.size());
+      for (size_t i = 0; i < data->scopes.size(); ++i) {
+        Napi::Object scopeObject = Napi::Object::New(env);
+        scopeObject.Set("id", Napi::Number::New(env, data->scopes[i].id));
+        scopeObject.Set("name", Napi::String::New(env, data->scopes[i].name));
+        scopes[static_cast<uint32_t>(i)] = scopeObject;
+      }
+      result.Set("scopes", scopes);
+      Napi::Array modes = Napi::Array::New(env, data->modes.size());
+      for (size_t i = 0; i < data->modes.size(); ++i) {
+        Napi::Object modeObject = Napi::Object::New(env);
+        modeObject.Set("id", Napi::Number::New(env, data->modes[i].first));
+        modeObject.Set("name", Napi::String::New(env, data->modes[i].second));
+        modes[static_cast<uint32_t>(i)] = modeObject;
+      }
+      result.Set("modes", modes);
+      result.Set("spans", DoubleVectorToArray(env, data->spans));
+      Napi::Array avgModes = Napi::Array::New(env, data->avgModes.size());
+      for (size_t i = 0; i < data->avgModes.size(); ++i) {
+        Napi::Object avgModeObject = Napi::Object::New(env);
+        avgModeObject.Set("id", Napi::Number::New(env, data->avgModes[i].id));
+        avgModeObject.Set("name", Napi::String::New(env, data->avgModes[i].name));
+        avgModes[static_cast<uint32_t>(i)] = avgModeObject;
+      }
+      result.Set("avgModes", avgModes);
+      return result;
+    });
 }
+
+
+
+class StartSpectrumStreamAsyncWorker : public HamLibAsyncWorker {
+public:
+    StartSpectrumStreamAsyncWorker(Napi::Env env, NodeHamLib* hamlib_instance, Napi::ThreadSafeFunction tsfn)
+        : HamLibAsyncWorker(env, hamlib_instance), tsfn_(tsfn) {}
+
+    const char* OperationName() const override { return "StartSpectrumStream"; }
+
+    void ExecuteWithRigLock() override {
+        CHECK_RIG_VALID();
+        if (!hamlib_instance_->rig_is_open.load(std::memory_order_acquire)) {
+            result_code_ = SHIM_RIG_EINVAL;
+            error_message_ = "Rig is not open!";
+            tsfn_.Release();
+            tsfn_released_ = true;
+            return;
+        }
+        std::lock_guard<std::mutex> lock(hamlib_instance_->spectrum_mutex_);
+        if (hamlib_instance_->spectrum_stream_running_) {
+            result_code_ = SHIM_RIG_EINVAL;
+            error_message_ = "Spectrum stream is already running";
+            tsfn_.Release();
+            tsfn_released_ = true;
+            return;
+        }
+        hamlib_instance_->spectrum_tsfn_ = tsfn_;
+        result_code_ = shim_rig_set_spectrum_callback(hamlib_instance_->my_rig, &NodeHamLib::spectrum_line_cb, hamlib_instance_);
+        if (result_code_ != SHIM_RIG_OK) {
+            error_message_ = shim_rigerror(result_code_);
+            hamlib_instance_->spectrum_tsfn_.Release();
+            hamlib_instance_->spectrum_tsfn_ = Napi::ThreadSafeFunction();
+            tsfn_released_ = true;
+            return;
+        }
+        hamlib_instance_->spectrum_stream_running_ = true;
+    }
+
+    void OnOK() override {
+        Napi::Env env = Env();
+        if (result_code_ != SHIM_RIG_OK || !error_message_.empty()) {
+            if (!tsfn_released_) {
+                tsfn_.Release();
+                tsfn_released_ = true;
+            }
+            Napi::Error error = Napi::Error::New(env, error_message_.empty() ? shim_rigerror(result_code_) : error_message_);
+            if (!error_code_.empty()) error.Value().Set("code", Napi::String::New(env, error_code_));
+            deferred_.Reject(error.Value());
+            return;
+        }
+        deferred_.Resolve(Napi::Boolean::New(env, true));
+    }
+
+    void OnError(const Napi::Error& e) override {
+        deferred_.Reject(Napi::Error::New(Env(), error_message_.empty() ? e.Message() : error_message_).Value());
+    }
+
+private:
+    Napi::ThreadSafeFunction tsfn_;
+    bool tsfn_released_ = false;
+};
 
 Napi::Value NodeHamLib::StartSpectrumStream(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  if (!rig_is_open) {
-    Napi::TypeError::New(env, "Rig is not open!").ThrowAsJavaScriptException();
-    return env.Null();
-  }
   if (info.Length() < 1 || !info[0].IsFunction()) {
     Napi::TypeError::New(env, "Expected (callback: Function)").ThrowAsJavaScriptException();
     return env.Null();
   }
 
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-  std::lock_guard<std::mutex> lock(spectrum_mutex_);
-  if (spectrum_stream_running_) {
-    Napi::Error::New(env, "Spectrum stream is already running").ThrowAsJavaScriptException();
-    return env.Null();
-  }
-
   Napi::Function callback = info[0].As<Napi::Function>();
-  spectrum_tsfn_ = Napi::ThreadSafeFunction::New(env, callback, "HamLibSpectrumStream", 0, 1);
-  int ret = shim_rig_set_spectrum_callback(my_rig, &NodeHamLib::spectrum_line_cb, this);
-  if (ret != SHIM_RIG_OK) {
-    spectrum_tsfn_.Release();
-    spectrum_tsfn_ = Napi::ThreadSafeFunction();
-    Napi::Error::New(env, shim_rigerror(ret)).ThrowAsJavaScriptException();
-    return env.Null();
-  }
-  spectrum_stream_running_ = true;
-  return Napi::Boolean::New(env, true);
+  Napi::ThreadSafeFunction tsfn = Napi::ThreadSafeFunction::New(env, callback, "HamLibSpectrumStream", 0, 1);
+  auto* worker = new StartSpectrumStreamAsyncWorker(env, this, tsfn);
+  worker->Queue();
+  return worker->GetPromise();
 }
+
+
 
 Napi::Value NodeHamLib::StopSpectrumStream(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-  StopSpectrumStreamInternal();
-  return Napi::Boolean::New(env, true);
+  return QueueLockedCallbackWorker(env, this, "StopSpectrumStream",
+    [](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      (void)result_code;
+      (void)error_message;
+      instance->StopSpectrumStreamInternal();
+    },
+    [](Napi::Env env) { return Napi::Boolean::New(env, true); });
 }
+
 
 // ===== SetConf (async) =====
 
@@ -7098,6 +7342,9 @@ public:
                        std::string name, std::string value)
         : HamLibAsyncWorker(env, hamlib_instance),
           name_(std::move(name)), value_(std::move(value)) {}
+
+    const char* OperationName() const override { return "SetConf"; }
+    bool RequiresOpenRig() const override { return false; }
 
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -7127,9 +7374,6 @@ private:
 
 Napi::Value NodeHamLib::SetConf(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-
   if (info.Length() < 2 || !info[0].IsString() || !info[1].IsString()) {
     Napi::TypeError::New(env, "Expected (name: string, value: string)").ThrowAsJavaScriptException();
     return env.Null();
@@ -7151,6 +7395,9 @@ public:
         : HamLibAsyncWorker(env, hamlib_instance), name_(std::move(name)) {
         memset(buf_, 0, sizeof(buf_));
     }
+
+    const char* OperationName() const override { return "GetConf"; }
+    bool RequiresOpenRig() const override { return false; }
 
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
@@ -7180,9 +7427,6 @@ private:
 
 Napi::Value NodeHamLib::GetConf(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-
   if (info.Length() < 1 || !info[0].IsString()) {
     Napi::TypeError::New(env, "Expected (name: string)").ThrowAsJavaScriptException();
     return env.Null();
@@ -7195,146 +7439,168 @@ Napi::Value NodeHamLib::GetConf(const Napi::CallbackInfo& info) {
   return asyncWorker->GetPromise();
 }
 
-// ===== Passband methods (sync) =====
+// ===== Passband methods (async) =====
+
 
 Napi::Value NodeHamLib::GetPassbandNormal(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-
   if (info.Length() < 1 || !info[0].IsString()) {
     Napi::TypeError::New(env, "Expected (mode: string)").ThrowAsJavaScriptException();
     return env.Null();
   }
-
   std::string modeStr = info[0].As<Napi::String>().Utf8Value();
   int mode = shim_rig_parse_mode(modeStr.c_str());
-  int pb = shim_rig_passband_normal(my_rig, mode);
-  return Napi::Number::New(env, pb);
+  auto value = std::make_shared<int>(0);
+  return QueueLockedCallbackWorker(env, this, "GetPassbandNormal",
+    [mode, value](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      (void)result_code;
+      (void)error_message;
+      *value = shim_rig_passband_normal(instance->my_rig, mode);
+    },
+    [value](Napi::Env env) { return Napi::Number::New(env, *value); });
 }
+
+
 
 Napi::Value NodeHamLib::GetPassbandNarrow(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-
   if (info.Length() < 1 || !info[0].IsString()) {
     Napi::TypeError::New(env, "Expected (mode: string)").ThrowAsJavaScriptException();
     return env.Null();
   }
-
   std::string modeStr = info[0].As<Napi::String>().Utf8Value();
   int mode = shim_rig_parse_mode(modeStr.c_str());
-  int pb = shim_rig_passband_narrow(my_rig, mode);
-  return Napi::Number::New(env, pb);
+  auto value = std::make_shared<int>(0);
+  return QueueLockedCallbackWorker(env, this, "GetPassbandNarrow",
+    [mode, value](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      (void)result_code;
+      (void)error_message;
+      *value = shim_rig_passband_narrow(instance->my_rig, mode);
+    },
+    [value](Napi::Env env) { return Napi::Number::New(env, *value); });
 }
+
+
 
 Napi::Value NodeHamLib::GetPassbandWide(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-
   if (info.Length() < 1 || !info[0].IsString()) {
     Napi::TypeError::New(env, "Expected (mode: string)").ThrowAsJavaScriptException();
     return env.Null();
   }
-
   std::string modeStr = info[0].As<Napi::String>().Utf8Value();
   int mode = shim_rig_parse_mode(modeStr.c_str());
-  int pb = shim_rig_passband_wide(my_rig, mode);
-  return Napi::Number::New(env, pb);
+  auto value = std::make_shared<int>(0);
+  return QueueLockedCallbackWorker(env, this, "GetPassbandWide",
+    [mode, value](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      (void)result_code;
+      (void)error_message;
+      *value = shim_rig_passband_wide(instance->my_rig, mode);
+    },
+    [value](Napi::Env env) { return Napi::Number::New(env, *value); });
 }
 
-// ===== Resolution (sync) =====
+
+// ===== Resolution (async) =====
+
 
 Napi::Value NodeHamLib::GetResolution(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-
   if (info.Length() < 1 || !info[0].IsString()) {
     Napi::TypeError::New(env, "Expected (mode: string)").ThrowAsJavaScriptException();
     return env.Null();
   }
-
   std::string modeStr = info[0].As<Napi::String>().Utf8Value();
   int mode = shim_rig_parse_mode(modeStr.c_str());
-  int res = shim_rig_get_resolution(my_rig, mode);
-  return Napi::Number::New(env, res);
+  auto value = std::make_shared<int>(0);
+  return QueueLockedCallbackWorker(env, this, "GetResolution",
+    [mode, value](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      (void)result_code;
+      (void)error_message;
+      *value = shim_rig_get_resolution(instance->my_rig, mode);
+    },
+    [value](Napi::Env env) { return Napi::Number::New(env, *value); });
 }
 
-// ===== getSupportedParms (sync) =====
 
-Napi::Value NodeHamLib::GetSupportedParms(const Napi::CallbackInfo& info) {
+// ===== getSupportedParms (async) =====
+
+
+Napi::Value NodeHamLib::GetSupportedParms(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-
-  uint64_t parms = shim_rig_get_caps_has_get_parm(my_rig) | shim_rig_get_caps_has_set_parm(my_rig);
-  Napi::Array parmArray = Napi::Array::New(env);
-  uint32_t index = 0;
-
-  if (parms & SHIM_RIG_PARM_ANN) parmArray[index++] = Napi::String::New(env, "ANN");
-  if (parms & SHIM_RIG_PARM_APO) parmArray[index++] = Napi::String::New(env, "APO");
-  if (parms & SHIM_RIG_PARM_BACKLIGHT) parmArray[index++] = Napi::String::New(env, "BACKLIGHT");
-  if (parms & SHIM_RIG_PARM_BEEP) parmArray[index++] = Napi::String::New(env, "BEEP");
-  if (parms & SHIM_RIG_PARM_TIME) parmArray[index++] = Napi::String::New(env, "TIME");
-  if (parms & SHIM_RIG_PARM_BAT) parmArray[index++] = Napi::String::New(env, "BAT");
-  if (parms & SHIM_RIG_PARM_KEYLIGHT) parmArray[index++] = Napi::String::New(env, "KEYLIGHT");
-  if (parms & SHIM_RIG_PARM_SCREENSAVER) parmArray[index++] = Napi::String::New(env, "SCREENSAVER");
-
-  return parmArray;
+  auto values = std::make_shared<std::vector<std::string>>();
+  return QueueLockedCallbackWorker(env, this, "GetSupportedParms",
+    [values](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      (void)result_code;
+      uint64_t parms = shim_rig_get_caps_has_get_parm(instance->my_rig) | shim_rig_get_caps_has_set_parm(instance->my_rig);
+      if (parms & SHIM_RIG_PARM_ANN) values->push_back("ANN");
+      if (parms & SHIM_RIG_PARM_APO) values->push_back("APO");
+      if (parms & SHIM_RIG_PARM_BACKLIGHT) values->push_back("BACKLIGHT");
+      if (parms & SHIM_RIG_PARM_BEEP) values->push_back("BEEP");
+      if (parms & SHIM_RIG_PARM_TIME) values->push_back("TIME");
+      if (parms & SHIM_RIG_PARM_BAT) values->push_back("BAT");
+      if (parms & SHIM_RIG_PARM_KEYLIGHT) values->push_back("KEYLIGHT");
+      if (parms & SHIM_RIG_PARM_SCREENSAVER) values->push_back("SCREENSAVER");
+    },
+    [values](Napi::Env env) {
+      return StringVectorToArray(env, *values);
+    });
 }
 
-// ===== getSupportedVfoOps (sync) =====
 
-Napi::Value NodeHamLib::GetSupportedVfoOps(const Napi::CallbackInfo& info) {
+// ===== getSupportedVfoOps (async) =====
+
+
+Napi::Value NodeHamLib::GetSupportedVfoOps(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-
-  int ops = shim_rig_get_caps_vfo_ops(my_rig);
-  Napi::Array opsArray = Napi::Array::New(env);
-  uint32_t index = 0;
-
-  if (ops & SHIM_RIG_OP_CPY) opsArray[index++] = Napi::String::New(env, "CPY");
-  if (ops & SHIM_RIG_OP_XCHG) opsArray[index++] = Napi::String::New(env, "XCHG");
-  if (ops & SHIM_RIG_OP_FROM_VFO) opsArray[index++] = Napi::String::New(env, "FROM_VFO");
-  if (ops & SHIM_RIG_OP_TO_VFO) opsArray[index++] = Napi::String::New(env, "TO_VFO");
-  if (ops & SHIM_RIG_OP_MCL) opsArray[index++] = Napi::String::New(env, "MCL");
-  if (ops & SHIM_RIG_OP_UP) opsArray[index++] = Napi::String::New(env, "UP");
-  if (ops & SHIM_RIG_OP_DOWN) opsArray[index++] = Napi::String::New(env, "DOWN");
-  if (ops & SHIM_RIG_OP_BAND_UP) opsArray[index++] = Napi::String::New(env, "BAND_UP");
-  if (ops & SHIM_RIG_OP_BAND_DOWN) opsArray[index++] = Napi::String::New(env, "BAND_DOWN");
-  if (ops & SHIM_RIG_OP_LEFT) opsArray[index++] = Napi::String::New(env, "LEFT");
-  if (ops & SHIM_RIG_OP_RIGHT) opsArray[index++] = Napi::String::New(env, "RIGHT");
-  if (ops & SHIM_RIG_OP_TUNE) opsArray[index++] = Napi::String::New(env, "TUNE");
-  if (ops & SHIM_RIG_OP_TOGGLE) opsArray[index++] = Napi::String::New(env, "TOGGLE");
-
-  return opsArray;
+  auto values = std::make_shared<std::vector<std::string>>();
+  return QueueLockedCallbackWorker(env, this, "GetSupportedVfoOps",
+    [values](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      (void)result_code;
+      int ops = shim_rig_get_caps_vfo_ops(instance->my_rig);
+      if (ops & SHIM_RIG_OP_CPY) values->push_back("CPY");
+      if (ops & SHIM_RIG_OP_XCHG) values->push_back("XCHG");
+      if (ops & SHIM_RIG_OP_FROM_VFO) values->push_back("FROM_VFO");
+      if (ops & SHIM_RIG_OP_TO_VFO) values->push_back("TO_VFO");
+      if (ops & SHIM_RIG_OP_MCL) values->push_back("MCL");
+      if (ops & SHIM_RIG_OP_UP) values->push_back("UP");
+      if (ops & SHIM_RIG_OP_DOWN) values->push_back("DOWN");
+      if (ops & SHIM_RIG_OP_BAND_UP) values->push_back("BAND_UP");
+      if (ops & SHIM_RIG_OP_BAND_DOWN) values->push_back("BAND_DOWN");
+      if (ops & SHIM_RIG_OP_LEFT) values->push_back("LEFT");
+      if (ops & SHIM_RIG_OP_RIGHT) values->push_back("RIGHT");
+      if (ops & SHIM_RIG_OP_TUNE) values->push_back("TUNE");
+      if (ops & SHIM_RIG_OP_TOGGLE) values->push_back("TOGGLE");
+    },
+    [values](Napi::Env env) {
+      return StringVectorToArray(env, *values);
+    });
 }
 
-// ===== getSupportedScanTypes (sync) =====
 
-Napi::Value NodeHamLib::GetSupportedScanTypes(const Napi::CallbackInfo& info) {
+// ===== getSupportedScanTypes (async) =====
+
+
+Napi::Value NodeHamLib::GetSupportedScanTypes(const Napi::CallbackInfo & info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-
-  int scan = shim_rig_get_caps_has_scan(my_rig);
-  Napi::Array scanArray = Napi::Array::New(env);
-  uint32_t index = 0;
-
-  if (scan & SHIM_RIG_SCAN_MEM) scanArray[index++] = Napi::String::New(env, "MEM");
-  if (scan & SHIM_RIG_SCAN_VFO) scanArray[index++] = Napi::String::New(env, "VFO");
-  if (scan & SHIM_RIG_SCAN_PROG) scanArray[index++] = Napi::String::New(env, "PROG");
-  if (scan & SHIM_RIG_SCAN_DELTA) scanArray[index++] = Napi::String::New(env, "DELTA");
-  if (scan & SHIM_RIG_SCAN_PRIO) scanArray[index++] = Napi::String::New(env, "PRIO");
-
-  return scanArray;
+  auto values = std::make_shared<std::vector<std::string>>();
+  return QueueLockedCallbackWorker(env, this, "GetSupportedScanTypes",
+    [values](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      (void)result_code;
+      int scan = shim_rig_get_caps_has_scan(instance->my_rig);
+      if (scan & SHIM_RIG_SCAN_MEM) values->push_back("MEM");
+      if (scan & SHIM_RIG_SCAN_VFO) values->push_back("VFO");
+      if (scan & SHIM_RIG_SCAN_PROG) values->push_back("PROG");
+      if (scan & SHIM_RIG_SCAN_DELTA) values->push_back("DELTA");
+      if (scan & SHIM_RIG_SCAN_PRIO) values->push_back("PRIO");
+    },
+    [values](Napi::Env env) {
+      return StringVectorToArray(env, *values);
+    });
 }
 
-// ===== Capability Query Batch 2 (sync) =====
+
+// ===== Capability Query Batch 2 (async) =====
 
 // Helper: convert mode bitmask to array of mode strings
 static Napi::Array ModeBitmaskToArray(Napi::Env env, uint64_t modes) {
@@ -7352,350 +7618,343 @@ static Napi::Array ModeBitmaskToArray(Napi::Env env, uint64_t modes) {
   return arr;
 }
 
+
 Napi::Value NodeHamLib::GetPreampValues(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-  int buf[SHIM_HAMLIB_MAX_MODES];
-  int count = shim_rig_get_caps_preamp(my_rig, buf, SHIM_HAMLIB_MAX_MODES);
-  Napi::Array arr = Napi::Array::New(env, count);
-  for (int i = 0; i < count; i++) {
-    arr[(uint32_t)i] = Napi::Number::New(env, buf[i]);
-  }
-  return arr;
+  auto values = std::make_shared<std::vector<int>>();
+  return QueueLockedCallbackWorker(env, this, "GetPreampValues",
+    [values](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      (void)result_code;
+      (void)error_message;
+      int buf[SHIM_HAMLIB_MAX_MODES];
+      int count = shim_rig_get_caps_preamp(instance->my_rig, buf, SHIM_HAMLIB_MAX_MODES);
+      values->assign(buf, buf + std::max(0, count));
+    },
+    [values](Napi::Env env) { return IntVectorToArray(env, *values); });
 }
+
+
 
 Napi::Value NodeHamLib::GetAttenuatorValues(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-  int buf[SHIM_HAMLIB_MAX_MODES];
-  int count = shim_rig_get_caps_attenuator(my_rig, buf, SHIM_HAMLIB_MAX_MODES);
-  Napi::Array arr = Napi::Array::New(env, count);
-  for (int i = 0; i < count; i++) {
-    arr[(uint32_t)i] = Napi::Number::New(env, buf[i]);
-  }
-  return arr;
+  auto values = std::make_shared<std::vector<int>>();
+  return QueueLockedCallbackWorker(env, this, "GetAttenuatorValues",
+    [values](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      (void)result_code;
+      (void)error_message;
+      int buf[SHIM_HAMLIB_MAX_MODES];
+      int count = shim_rig_get_caps_attenuator(instance->my_rig, buf, SHIM_HAMLIB_MAX_MODES);
+      values->assign(buf, buf + std::max(0, count));
+    },
+    [values](Napi::Env env) { return IntVectorToArray(env, *values); });
 }
+
+
 
 Napi::Value NodeHamLib::GetAgcLevels(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-  int buf[SHIM_HAMLIB_MAX_MODES];
-  int count = shim_rig_get_caps_agc_levels(my_rig, buf, SHIM_HAMLIB_MAX_MODES);
-  Napi::Array arr = Napi::Array::New(env, count);
-  for (int i = 0; i < count; i++) {
-    arr[(uint32_t)i] = Napi::Number::New(env, buf[i]);
-  }
-  return arr;
+  auto values = std::make_shared<std::vector<int>>();
+  return QueueLockedCallbackWorker(env, this, "GetAgcLevels",
+    [values](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      (void)result_code;
+      (void)error_message;
+      int buf[SHIM_HAMLIB_MAX_MODES];
+      int count = shim_rig_get_caps_agc_levels(instance->my_rig, buf, SHIM_HAMLIB_MAX_MODES);
+      values->assign(buf, buf + std::max(0, count));
+    },
+    [values](Napi::Env env) { return IntVectorToArray(env, *values); });
 }
+
+
 
 Napi::Value NodeHamLib::GetMaxRit(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-  return Napi::Number::New(info.Env(), (double)shim_rig_get_caps_max_rit(my_rig));
+  auto value = std::make_shared<double>(0);
+  return QueueLockedCallbackWorker(env, this, "GetMaxRit",
+    [value](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      (void)result_code;
+      (void)error_message;
+      *value = static_cast<double>(shim_rig_get_caps_max_rit(instance->my_rig));
+    },
+    [value](Napi::Env env) { return Napi::Number::New(env, *value); });
 }
+
+
 
 Napi::Value NodeHamLib::GetMaxXit(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-  return Napi::Number::New(info.Env(), (double)shim_rig_get_caps_max_xit(my_rig));
+  auto value = std::make_shared<double>(0);
+  return QueueLockedCallbackWorker(env, this, "GetMaxXit",
+    [value](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      (void)result_code;
+      (void)error_message;
+      *value = static_cast<double>(shim_rig_get_caps_max_xit(instance->my_rig));
+    },
+    [value](Napi::Env env) { return Napi::Number::New(env, *value); });
 }
+
+
 
 Napi::Value NodeHamLib::GetMaxIfShift(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-  return Napi::Number::New(info.Env(), (double)shim_rig_get_caps_max_ifshift(my_rig));
+  auto value = std::make_shared<double>(0);
+  return QueueLockedCallbackWorker(env, this, "GetMaxIfShift",
+    [value](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      (void)result_code;
+      (void)error_message;
+      *value = static_cast<double>(shim_rig_get_caps_max_ifshift(instance->my_rig));
+    },
+    [value](Napi::Env env) { return Napi::Number::New(env, *value); });
 }
+
+
 
 Napi::Value NodeHamLib::GetAvailableCtcssTones(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-  unsigned int buf[256];
-  int count = shim_rig_get_caps_ctcss_list(my_rig, buf, 256);
-  Napi::Array arr = Napi::Array::New(env, count);
-  for (int i = 0; i < count; i++) {
-    // CTCSS tones stored as tenths of Hz, convert to Hz
-    arr[(uint32_t)i] = Napi::Number::New(env, buf[i] / 10.0);
-  }
-  return arr;
+  auto values = std::make_shared<std::vector<double>>();
+  return QueueLockedCallbackWorker(env, this, "GetAvailableCtcssTones",
+    [values](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      (void)result_code;
+      (void)error_message;
+      unsigned int buf[256];
+      int count = shim_rig_get_caps_ctcss_list(instance->my_rig, buf, 256);
+      for (int i = 0; i < count; ++i) values->push_back(buf[i] / 10.0);
+    },
+    [values](Napi::Env env) { return DoubleVectorToArray(env, *values); });
 }
+
+
 
 Napi::Value NodeHamLib::GetAvailableDcsCodes(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-  unsigned int buf[256];
-  int count = shim_rig_get_caps_dcs_list(my_rig, buf, 256);
-  Napi::Array arr = Napi::Array::New(env, count);
-  for (int i = 0; i < count; i++) {
-    arr[(uint32_t)i] = Napi::Number::New(env, buf[i]);
-  }
-  return arr;
+  auto values = std::make_shared<std::vector<int>>();
+  return QueueLockedCallbackWorker(env, this, "GetAvailableDcsCodes",
+    [values](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      (void)result_code;
+      (void)error_message;
+      unsigned int buf[256];
+      int count = shim_rig_get_caps_dcs_list(instance->my_rig, buf, 256);
+      for (int i = 0; i < count; ++i) values->push_back(static_cast<int>(buf[i]));
+    },
+    [values](Napi::Env env) { return IntVectorToArray(env, *values); });
 }
+
+
 
 Napi::Value NodeHamLib::GetFrequencyRanges(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-
-  shim_freq_range_t rx_buf[30];
-  shim_freq_range_t tx_buf[30];
-  int rx_count = shim_rig_get_caps_rx_range(my_rig, rx_buf, 30);
-  int tx_count = shim_rig_get_caps_tx_range(my_rig, tx_buf, 30);
-
-  auto buildArray = [&](shim_freq_range_t* buf, int count) -> Napi::Array {
-    Napi::Array arr = Napi::Array::New(env, count);
-    for (int i = 0; i < count; i++) {
-      Napi::Object obj = Napi::Object::New(env);
-      obj.Set("startFreq", Napi::Number::New(env, buf[i].start_freq));
-      obj.Set("endFreq", Napi::Number::New(env, buf[i].end_freq));
-      obj.Set("modes", ModeBitmaskToArray(env, buf[i].modes));
-      obj.Set("lowPower", Napi::Number::New(env, buf[i].low_power));
-      obj.Set("highPower", Napi::Number::New(env, buf[i].high_power));
-      obj.Set("vfo", Napi::Number::New(env, buf[i].vfo));
-      obj.Set("antenna", Napi::Number::New(env, buf[i].ant));
-      arr[(uint32_t)i] = obj;
-    }
-    return arr;
-  };
-
-  Napi::Object result = Napi::Object::New(env);
-  result.Set("rx", buildArray(rx_buf, rx_count));
-  result.Set("tx", buildArray(tx_buf, tx_count));
-  return result;
+  struct RangeData { std::vector<shim_freq_range_t> rx; std::vector<shim_freq_range_t> tx; };
+  auto data = std::make_shared<RangeData>();
+  return QueueLockedCallbackWorker(env, this, "GetFrequencyRanges",
+    [data](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      (void)result_code;
+      (void)error_message;
+      shim_freq_range_t rx_buf[30];
+      shim_freq_range_t tx_buf[30];
+      int rx_count = shim_rig_get_caps_rx_range(instance->my_rig, rx_buf, 30);
+      int tx_count = shim_rig_get_caps_tx_range(instance->my_rig, tx_buf, 30);
+      data->rx.assign(rx_buf, rx_buf + std::max(0, rx_count));
+      data->tx.assign(tx_buf, tx_buf + std::max(0, tx_count));
+    },
+    [data](Napi::Env env) {
+      auto buildArray = [env](const std::vector<shim_freq_range_t>& ranges) {
+        Napi::Array arr = Napi::Array::New(env, ranges.size());
+        for (size_t i = 0; i < ranges.size(); ++i) {
+          Napi::Object obj = Napi::Object::New(env);
+          obj.Set("startFreq", Napi::Number::New(env, ranges[i].start_freq));
+          obj.Set("endFreq", Napi::Number::New(env, ranges[i].end_freq));
+          obj.Set("modes", ModeBitmaskToArray(env, ranges[i].modes));
+          obj.Set("lowPower", Napi::Number::New(env, ranges[i].low_power));
+          obj.Set("highPower", Napi::Number::New(env, ranges[i].high_power));
+          obj.Set("vfo", Napi::Number::New(env, ranges[i].vfo));
+          obj.Set("antenna", Napi::Number::New(env, ranges[i].ant));
+          arr[static_cast<uint32_t>(i)] = obj;
+        }
+        return arr;
+      };
+      Napi::Object result = Napi::Object::New(env);
+      result.Set("rx", buildArray(data->rx));
+      result.Set("tx", buildArray(data->tx));
+      return result;
+    });
 }
+
+
 
 Napi::Value NodeHamLib::GetTuningSteps(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-  shim_mode_value_t buf[20];
-  int count = shim_rig_get_caps_tuning_steps(my_rig, buf, 20);
-  Napi::Array arr = Napi::Array::New(env, count);
-  for (int i = 0; i < count; i++) {
-    Napi::Object obj = Napi::Object::New(env);
-    obj.Set("modes", ModeBitmaskToArray(env, buf[i].modes));
-    obj.Set("stepHz", Napi::Number::New(env, buf[i].value));
-    arr[(uint32_t)i] = obj;
-  }
-  return arr;
+  auto values = std::make_shared<std::vector<shim_mode_value_t>>();
+  return QueueLockedCallbackWorker(env, this, "GetTuningSteps",
+    [values](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      (void)result_code;
+      (void)error_message;
+      shim_mode_value_t buf[20];
+      int count = shim_rig_get_caps_tuning_steps(instance->my_rig, buf, 20);
+      values->assign(buf, buf + std::max(0, count));
+    },
+    [values](Napi::Env env) {
+      Napi::Array arr = Napi::Array::New(env, values->size());
+      for (size_t i = 0; i < values->size(); ++i) {
+        Napi::Object obj = Napi::Object::New(env);
+        obj.Set("modes", ModeBitmaskToArray(env, (*values)[i].modes));
+        obj.Set("stepHz", Napi::Number::New(env, (*values)[i].value));
+        arr[static_cast<uint32_t>(i)] = obj;
+      }
+      return arr;
+    });
 }
+
+
 
 Napi::Value NodeHamLib::GetFilterList(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-  shim_mode_value_t buf[60];
-  int count = shim_rig_get_caps_filters(my_rig, buf, 60);
-  Napi::Array arr = Napi::Array::New(env, count);
-  for (int i = 0; i < count; i++) {
-    Napi::Object obj = Napi::Object::New(env);
-    obj.Set("modes", ModeBitmaskToArray(env, buf[i].modes));
-    obj.Set("width", Napi::Number::New(env, buf[i].value));
-    arr[(uint32_t)i] = obj;
-  }
-  return arr;
+  auto values = std::make_shared<std::vector<shim_mode_value_t>>();
+  return QueueLockedCallbackWorker(env, this, "GetFilterList",
+    [values](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      (void)result_code;
+      (void)error_message;
+      shim_mode_value_t buf[60];
+      int count = shim_rig_get_caps_filters(instance->my_rig, buf, 60);
+      values->assign(buf, buf + std::max(0, count));
+    },
+    [values](Napi::Env env) {
+      Napi::Array arr = Napi::Array::New(env, values->size());
+      for (size_t i = 0; i < values->size(); ++i) {
+        Napi::Object obj = Napi::Object::New(env);
+        obj.Set("modes", ModeBitmaskToArray(env, (*values)[i].modes));
+        obj.Set("width", Napi::Number::New(env, (*values)[i].value));
+        arr[static_cast<uint32_t>(i)] = obj;
+      }
+      return arr;
+    });
 }
+
+
 
 Napi::Value NodeHamLib::GetLevelGranularity(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-
   if (info.Length() < 1 || !info[0].IsString()) {
     Napi::TypeError::New(env, "Expected (levelType: string)").ThrowAsJavaScriptException();
     return env.Null();
   }
-
   std::string levelTypeStr = info[0].As<Napi::String>().Utf8Value();
   uint64_t levelType = 0;
   if (!parseLevelTypeString(levelTypeStr, &levelType)) {
     Napi::TypeError::New(env, "Invalid level type").ThrowAsJavaScriptException();
     return env.Null();
   }
-
-  shim_granularity_t granularity{};
-  const int result = shim_rig_get_level_granularity(my_rig, levelType, &granularity);
-  if (result != SHIM_RIG_OK) {
-    Napi::Error::New(env, shim_rigerror(result)).ThrowAsJavaScriptException();
-    return env.Null();
-  }
-
-  if (!granularity.is_defined) {
-    return env.Null();
-  }
-
-  Napi::Object obj = Napi::Object::New(env);
-  obj.Set("min", Napi::Number::New(env, granularity.min_value));
-  obj.Set("max", Napi::Number::New(env, granularity.max_value));
-  obj.Set("step", Napi::Number::New(env, granularity.step_value));
-  obj.Set("kind", Napi::String::New(env, granularity.is_float ? "float" : "int"));
-  obj.Set("source", Napi::String::New(env, "rig_state.level_gran"));
-  return obj;
+  auto granularity = std::make_shared<shim_granularity_t>();
+  return QueueLockedCallbackWorker(env, this, "GetLevelGranularity",
+    [levelType, granularity](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      result_code = shim_rig_get_level_granularity(instance->my_rig, levelType, granularity.get());
+      if (result_code != SHIM_RIG_OK) error_message = shim_rigerror(result_code);
+    },
+    [granularity](Napi::Env env) -> Napi::Value {
+      if (!granularity->is_defined) return env.Null();
+      Napi::Object obj = Napi::Object::New(env);
+      obj.Set("min", Napi::Number::New(env, granularity->min_value));
+      obj.Set("max", Napi::Number::New(env, granularity->max_value));
+      obj.Set("step", Napi::Number::New(env, granularity->step_value));
+      obj.Set("kind", Napi::String::New(env, granularity->is_float ? "float" : "int"));
+      obj.Set("source", Napi::String::New(env, "rig_state.level_gran"));
+      return obj;
+    });
 }
+
+
 
 Napi::Value NodeHamLib::GetRfPowerStepTable(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  RETURN_NULL_IF_RIG_HANDLE_INVALID();
-  auto rigLock = NodeHamLib::AcquireGlobalRigLockIfEnabled();
-
   if (info.Length() < 2 || !info[0].IsNumber() || !info[1].IsString()) {
     Napi::TypeError::New(env, "Expected (frequency: number, mode: string)").ThrowAsJavaScriptException();
     return env.Null();
   }
-
   const double freq = info[0].As<Napi::Number>().DoubleValue();
   const std::string modeStr = info[1].As<Napi::String>().Utf8Value();
   if (freq < 1000 || freq > 10000000000) {
     Napi::Error::New(env, "Frequency out of range (1 kHz - 10 GHz)").ThrowAsJavaScriptException();
     return env.Null();
   }
-
   const int mode = shim_rig_parse_mode(modeStr.c_str());
   if (mode == SHIM_RIG_MODE_NONE) {
     Napi::Error::New(env, "Invalid mode: " + modeStr).ThrowAsJavaScriptException();
     return env.Null();
   }
-
-  shim_granularity_t granularity{};
-  int granularityResult = shim_rig_get_level_granularity(my_rig, SHIM_RIG_LEVEL_RFPOWER, &granularity);
-  if (granularityResult != SHIM_RIG_OK || !granularity.is_defined || !granularity.is_float) {
-    return env.Null();
-  }
-
-  int powerNow = 0;
-  int powerMin = 0;
-  int powerMax = 0;
-  (void)shim_rig_get_rfpower_metadata(my_rig, &powerNow, &powerMin, &powerMax);
-
-  double minValue = granularity.min_value;
-  double maxValue = granularity.max_value;
-  const double stepValue = granularity.step_value;
-  if (maxValue <= minValue || stepValue <= 0.0) {
-    return env.Null();
-  }
-
-  minValue = clampValue(minValue, 0.0, 1.0);
-  maxValue = clampValue(maxValue, 0.0, 1.0);
-  if (maxValue <= minValue) {
-    return env.Null();
-  }
-
-  std::vector<double> normalizedLevels;
-  constexpr double epsilon = 1e-9;
-  for (double value = minValue; value <= maxValue + epsilon; value += stepValue) {
-    normalizedLevels.push_back(clampValue(value, 0.0, 1.0));
-  }
-  normalizedLevels.push_back(minValue);
-  normalizedLevels.push_back(maxValue);
-
-  std::sort(normalizedLevels.begin(), normalizedLevels.end());
-  normalizedLevels.erase(
-    std::unique(
-      normalizedLevels.begin(),
-      normalizedLevels.end(),
-      [](double left, double right) { return std::abs(left - right) < 1e-6; }
-    ),
-    normalizedLevels.end()
-  );
-
-  if (normalizedLevels.size() < 2) {
-    return env.Null();
-  }
-
-  struct RfPowerStepRow {
-    double normalized;
-    unsigned int milliwatts;
-  };
-
-  std::vector<RfPowerStepRow> rows;
-  rows.reserve(normalizedLevels.size());
-  for (double candidateNormalized : normalizedLevels) {
-    unsigned int milliwatts = 0;
-    const int powerResult = shim_rig_power2mW(my_rig, &milliwatts, static_cast<float>(candidateNormalized), freq, mode);
-    if (powerResult != SHIM_RIG_OK || milliwatts == 0) {
-      continue;
-    }
-
-    float roundTripNormalized = 0.0f;
-    const int reversePowerResult = shim_rig_mW2power(my_rig, &roundTripNormalized, milliwatts, freq, mode);
-    if (reversePowerResult != SHIM_RIG_OK || !std::isfinite(roundTripNormalized)) {
-      continue;
-    }
-
-    const double normalized = clampValue(static_cast<double>(roundTripNormalized), 0.0, 1.0);
-    rows.push_back({normalized, milliwatts});
-  }
-
-  if (rows.size() < 2) {
-    return env.Null();
-  }
-
-  std::sort(
-    rows.begin(),
-    rows.end(),
-    [](const RfPowerStepRow& left, const RfPowerStepRow& right) {
-      if (std::abs(left.normalized - right.normalized) >= 1e-6) {
-        return left.normalized < right.normalized;
+  struct RfPowerStepRow { double normalized; unsigned int milliwatts; };
+  struct RfPowerTableData { std::vector<RfPowerStepRow> rows; int powerNow = 0; int powerMin = 0; int powerMax = 0; bool available = false; };
+  auto data = std::make_shared<RfPowerTableData>();
+  return QueueLockedCallbackWorker(env, this, "GetRfPowerStepTable",
+    [freq, mode, data](NodeHamLib* instance, int& result_code, std::string& error_message) {
+      (void)result_code;
+      (void)error_message;
+      shim_granularity_t granularity{};
+      int granularityResult = shim_rig_get_level_granularity(instance->my_rig, SHIM_RIG_LEVEL_RFPOWER, &granularity);
+      if (granularityResult != SHIM_RIG_OK || !granularity.is_defined || !granularity.is_float) return;
+      (void)shim_rig_get_rfpower_metadata(instance->my_rig, &data->powerNow, &data->powerMin, &data->powerMax);
+      double minValue = clampValue(granularity.min_value, 0.0, 1.0);
+      double maxValue = clampValue(granularity.max_value, 0.0, 1.0);
+      const double stepValue = granularity.step_value;
+      if (maxValue <= minValue || stepValue <= 0.0) return;
+      std::vector<double> normalizedLevels;
+      constexpr double epsilon = 1e-9;
+      for (double value = minValue; value <= maxValue + epsilon; value += stepValue) normalizedLevels.push_back(clampValue(value, 0.0, 1.0));
+      normalizedLevels.push_back(minValue);
+      normalizedLevels.push_back(maxValue);
+      std::sort(normalizedLevels.begin(), normalizedLevels.end());
+      normalizedLevels.erase(std::unique(normalizedLevels.begin(), normalizedLevels.end(), [](double left, double right) { return std::abs(left - right) < 1e-6; }), normalizedLevels.end());
+      if (normalizedLevels.size() < 2) return;
+      std::vector<RfPowerStepRow> rows;
+      rows.reserve(normalizedLevels.size());
+      for (double candidateNormalized : normalizedLevels) {
+        unsigned int milliwatts = 0;
+        const int powerResult = shim_rig_power2mW(instance->my_rig, &milliwatts, static_cast<float>(candidateNormalized), freq, mode);
+        if (powerResult != SHIM_RIG_OK || milliwatts == 0) continue;
+        float roundTripNormalized = 0.0f;
+        const int reversePowerResult = shim_rig_mW2power(instance->my_rig, &roundTripNormalized, milliwatts, freq, mode);
+        if (reversePowerResult != SHIM_RIG_OK || !std::isfinite(roundTripNormalized)) continue;
+        rows.push_back({clampValue(static_cast<double>(roundTripNormalized), 0.0, 1.0), milliwatts});
       }
-      return left.milliwatts < right.milliwatts;
-    }
-  );
-
-  std::vector<RfPowerStepRow> dedupedRows;
-  dedupedRows.reserve(rows.size());
-  for (const RfPowerStepRow& row : rows) {
-    if (!dedupedRows.empty()) {
-      const RfPowerStepRow& previous = dedupedRows.back();
-      if (std::abs(row.normalized - previous.normalized) < 1e-6) {
-        if (row.milliwatts != previous.milliwatts) {
-          return env.Null();
+      if (rows.size() < 2) return;
+      std::sort(rows.begin(), rows.end(), [](const RfPowerStepRow& left, const RfPowerStepRow& right) {
+        if (std::abs(left.normalized - right.normalized) >= 1e-6) return left.normalized < right.normalized;
+        return left.milliwatts < right.milliwatts;
+      });
+      for (const RfPowerStepRow& row : rows) {
+        if (!data->rows.empty()) {
+          const RfPowerStepRow& previous = data->rows.back();
+          if (std::abs(row.normalized - previous.normalized) < 1e-6) {
+            if (row.milliwatts != previous.milliwatts) { data->rows.clear(); return; }
+            continue;
+          }
+          if (row.milliwatts == previous.milliwatts) continue;
+          if (row.milliwatts < previous.milliwatts) { data->rows.clear(); return; }
         }
-        continue;
+        data->rows.push_back(row);
       }
-      if (row.milliwatts == previous.milliwatts) {
-        continue;
+      data->available = data->rows.size() >= 2;
+    },
+    [data](Napi::Env env) -> Napi::Value {
+      if (!data->available) return env.Null();
+      Napi::Array table = Napi::Array::New(env, data->rows.size());
+      for (size_t i = 0; i < data->rows.size(); ++i) {
+        const auto& row = data->rows[i];
+        Napi::Object item = Napi::Object::New(env);
+        item.Set("normalized", Napi::Number::New(env, row.normalized));
+        item.Set("milliwatts", Napi::Number::New(env, row.milliwatts));
+        item.Set("watts", Napi::Number::New(env, row.milliwatts / 1000.0));
+        if (data->powerMin != 0 || data->powerMax != 0 || data->powerNow != 0) {
+          Napi::Object range = Napi::Object::New(env);
+          range.Set("current", Napi::Number::New(env, data->powerNow));
+          range.Set("min", Napi::Number::New(env, data->powerMin));
+          range.Set("max", Napi::Number::New(env, data->powerMax));
+          item.Set("rigUnitRange", range);
+        }
+        table[static_cast<uint32_t>(i)] = item;
       }
-      if (row.milliwatts < previous.milliwatts) {
-        return env.Null();
-      }
-    }
-    dedupedRows.push_back(row);
-  }
-
-  if (dedupedRows.size() < 2) {
-    return env.Null();
-  }
-
-  Napi::Array table = Napi::Array::New(env);
-  uint32_t index = 0;
-  for (const RfPowerStepRow& row : dedupedRows) {
-    Napi::Object item = Napi::Object::New(env);
-    item.Set("normalized", Napi::Number::New(env, row.normalized));
-    item.Set("milliwatts", Napi::Number::New(env, row.milliwatts));
-    item.Set("watts", Napi::Number::New(env, row.milliwatts / 1000.0));
-    if (powerMin != 0 || powerMax != 0 || powerNow != 0) {
-      item.Set("rigUnitRange", Napi::Object::New(env));
-      Napi::Object range = item.Get("rigUnitRange").As<Napi::Object>();
-      range.Set("current", Napi::Number::New(env, powerNow));
-      range.Set("min", Napi::Number::New(env, powerMin));
-      range.Set("max", Napi::Number::New(env, powerMax));
-    }
-    table[index++] = item;
-  }
-
-  if (index < 2) {
-    return env.Null();
-  }
-
-  return table;
+      return table;
+    });
 }
+
 
 // ===== Static: getCopyright / getLicense =====
 

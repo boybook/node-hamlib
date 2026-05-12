@@ -708,6 +708,8 @@ declare class HamLib extends EventEmitter {
    *
    * Enabled by default. Set NODE_HAMLIB_GLOBAL_LOCK=0, false, off, or no before
    * loading the package to start with the current no-lock behavior.
+   * Async radio calls wait up to NODE_HAMLIB_GLOBAL_LOCK_TIMEOUT_MS (default 5000)
+   * for this lock before rejecting with HAMLIB_GLOBAL_LOCK_TIMEOUT.
    *
    * Runtime changes only affect later lock checks; calls that have already
    * entered Hamlib are not interrupted.
@@ -911,7 +913,7 @@ declare class HamLib extends EventEmitter {
    * Get list of supported level types
    * @returns Array of supported level types
    */
-  getSupportedLevels(): string[];
+  getSupportedLevels(): Promise<string[]>;
 
   // Function Controls
 
@@ -933,7 +935,7 @@ declare class HamLib extends EventEmitter {
    * Get list of supported function types
    * @returns Array of supported function types
    */
-  getSupportedFunctions(): string[];
+  getSupportedFunctions(): Promise<string[]>;
 
   /**
    * Get list of supported radio modes
@@ -942,7 +944,7 @@ declare class HamLib extends EventEmitter {
    * const modes = rig.getSupportedModes();
    * console.log('Supported modes:', modes); // ['USB', 'LSB', 'CW', 'FM', 'AM', ...]
    */
-  getSupportedModes(): string[];
+  getSupportedModes(): Promise<string[]>;
 
   // Split Operations
 
@@ -1126,12 +1128,12 @@ declare class HamLib extends EventEmitter {
    * This can be queried before opening the connection and is suitable for
    * driving dynamic configuration UIs.
    */
-  getConfigSchema(): HamlibConfigFieldDescriptor[];
+  getConfigSchema(): Promise<HamlibConfigFieldDescriptor[]>;
 
   /**
    * Get backend port capabilities and effective connection defaults.
    */
-  getPortCaps(): HamlibPortCaps;
+  getPortCaps(): Promise<HamlibPortCaps>;
 
   // Power Control
 
@@ -1629,130 +1631,130 @@ declare class HamLib extends EventEmitter {
    */
   getConf(name: string): Promise<string>;
 
-  // ===== Passband / Resolution (sync) =====
+  // ===== Passband / Resolution (async) =====
 
   /**
    * Get normal passband width for a given mode
    * @param mode Radio mode
    * @returns Normal passband width in Hz
    */
-  getPassbandNormal(mode: RadioMode): number;
+  getPassbandNormal(mode: RadioMode): Promise<number>;
 
   /**
    * Get narrow passband width for a given mode
    * @param mode Radio mode
    * @returns Narrow passband width in Hz
    */
-  getPassbandNarrow(mode: RadioMode): number;
+  getPassbandNarrow(mode: RadioMode): Promise<number>;
 
   /**
    * Get wide passband width for a given mode
    * @param mode Radio mode
    * @returns Wide passband width in Hz
    */
-  getPassbandWide(mode: RadioMode): number;
+  getPassbandWide(mode: RadioMode): Promise<number>;
 
   /**
    * Get frequency resolution (step) for a given mode
    * @param mode Radio mode
    * @returns Resolution in Hz
    */
-  getResolution(mode: RadioMode): number;
+  getResolution(mode: RadioMode): Promise<number>;
 
-  // ===== Capability queries (sync) =====
+  // ===== Capability queries (async) =====
 
   /**
    * Get list of supported parameter types
    * @returns Array of supported parameter type names
    */
-  getSupportedParms(): string[];
+  getSupportedParms(): Promise<string[]>;
 
   /**
    * Get list of supported VFO operations
    * @returns Array of supported VFO operation types
    */
-  getSupportedVfoOps(): VfoOperationType[];
+  getSupportedVfoOps(): Promise<VfoOperationType[]>;
 
   /**
    * Get list of supported scan types
    * @returns Array of supported scan types
    */
-  getSupportedScanTypes(): ScanType[];
+  getSupportedScanTypes(): Promise<ScanType[]>;
 
-  // ===== Capability Queries - Batch 2 (sync) =====
+  // ===== Capability Queries - Batch 2 (async) =====
 
   /**
    * Get supported preamplifier values
    * @returns Array of preamp dB values
    */
-  getPreampValues(): number[];
+  getPreampValues(): Promise<number[]>;
 
   /**
    * Get supported attenuator values
    * @returns Array of attenuator dB values
    */
-  getAttenuatorValues(): number[];
+  getAttenuatorValues(): Promise<number[]>;
 
   /**
    * Get supported AGC mode values
    * @returns Array of Hamlib AGC enum values
    */
-  getAgcLevels(): number[];
+  getAgcLevels(): Promise<number[]>;
 
   /**
    * Get maximum RIT offset supported
    * @returns Maximum RIT offset in Hz
    */
-  getMaxRit(): number;
+  getMaxRit(): Promise<number>;
 
   /**
    * Get maximum XIT offset supported
    * @returns Maximum XIT offset in Hz
    */
-  getMaxXit(): number;
+  getMaxXit(): Promise<number>;
 
   /**
    * Get maximum IF shift supported
    * @returns Maximum IF shift in Hz
    */
-  getMaxIfShift(): number;
+  getMaxIfShift(): Promise<number>;
 
   /**
    * Get list of available CTCSS tone frequencies
    * @returns Array of CTCSS tones in Hz
    */
-  getAvailableCtcssTones(): number[];
+  getAvailableCtcssTones(): Promise<number[]>;
 
   /**
    * Get list of available DCS codes
    * @returns Array of DCS codes
    */
-  getAvailableDcsCodes(): number[];
+  getAvailableDcsCodes(): Promise<number[]>;
 
   /**
    * Get supported frequency ranges for RX and TX
    */
-  getFrequencyRanges(): { rx: FrequencyRange[]; tx: FrequencyRange[] };
+  getFrequencyRanges(): Promise<{ rx: FrequencyRange[]; tx: FrequencyRange[] }>;
 
   /**
    * Get supported tuning steps per mode
    */
-  getTuningSteps(): TuningStepInfo[];
+  getTuningSteps(): Promise<TuningStepInfo[]>;
 
   /**
    * Get supported filter widths per mode
    */
-  getFilterList(): FilterInfo[];
+  getFilterList(): Promise<FilterInfo[]>;
 
   /**
    * Get granularity metadata for a level setting from Hamlib rig state.
    */
-  getLevelGranularity(levelType: LevelType): LevelGranularityInfo | null;
+  getLevelGranularity(levelType: LevelType): Promise<LevelGranularityInfo | null>;
 
   /**
    * Get a discrete RF power step table for the current rig, frequency, and mode.
    */
-  getRfPowerStepTable(frequency: number, mode: RadioMode): RfPowerStepInfo[] | null;
+  getRfPowerStepTable(frequency: number, mode: RadioMode): Promise<RfPowerStepInfo[] | null>;
 
   // ===== Static: Copyright / License =====
 

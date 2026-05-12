@@ -58,6 +58,20 @@ function readGlobalLockEnabledFromChild(value) {
   return result.stdout.trim();
 }
 
+function runLoaderChild(script, extraArgs = []) {
+  const result = spawnSync(
+    process.execPath,
+    [...extraArgs, '-e', script],
+    { cwd: require('path').join(__dirname, '..'), env: process.env, encoding: 'utf8' }
+  );
+
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || `child exited with ${result.status}`);
+  }
+
+  return true;
+}
+
 try {
   // 1. 模块加载测试
   console.log('📦 模块加载测试:');
@@ -250,6 +264,87 @@ try {
   capQueryMethods.forEach(method => {
     test(`能力查询方法 ${method} 存在`, () => typeof testRig[method] === 'function');
   });
+  [
+    'getSpectrumCapabilities',
+    'stopSpectrumStream',
+    'getConfigSchema',
+    'getPortCaps',
+    'getPassbandNormal',
+    'getSupportedLevels',
+    'getSupportedFunctions',
+    'getSupportedModes',
+    'getSupportedParms',
+    'getFrequencyRanges',
+    'getTuningSteps',
+    'getFilterList',
+  ].forEach(method => {
+    test(`${method} 返回 Promise API`, () => {
+      const result = method.startsWith('getPassband') ? testRig[method]('USB') : testRig[method]();
+      result.catch(() => {});
+      return result && typeof result.then === 'function';
+    });
+  });
+  test('销毁后的异步能力查询以 Promise reject 返回统一 operation 字段', () => runLoaderChild(`
+    (async () => {
+      const { HamLib } = require('./index.js');
+      const rig = new HamLib(1);
+      await rig.destroy();
+      const result = rig.getSpectrumCapabilities();
+      if (!result || typeof result.then !== 'function') throw new Error('expected Promise');
+      try {
+        await result;
+        throw new Error('expected rejection');
+      } catch (error) {
+        if (error && error.message === 'expected rejection') throw error;
+        if (!error || error.operation !== 'GetSpectrumCapabilities') {
+          throw new Error('missing operation on rejection: ' + JSON.stringify({
+            message: error && error.message,
+            operation: error && error.operation,
+            code: error && error.code,
+          }));
+        }
+      }
+    })().catch((error) => {
+      console.error(error && error.stack || error);
+      process.exit(1);
+    });
+  `));
+  test('未打开的核心 CAT 调用以 Promise reject 返回统一错误字段', () => runLoaderChild(`
+    (async () => {
+      const { HamLib } = require('./index.js');
+      const rig = new HamLib(1);
+      const result = rig.getFrequency();
+      if (!result || typeof result.then !== 'function') throw new Error('expected Promise');
+      try {
+        await result;
+        throw new Error('expected rejection');
+      } catch (error) {
+        if (error && error.message === 'expected rejection') throw error;
+        if (!error || error.operation !== 'GetFrequency' || error.code !== 'HAMLIB_ERROR') {
+          throw new Error('unexpected rejection metadata: ' + JSON.stringify({
+            message: error && error.message,
+            operation: error && error.operation,
+            code: error && error.code,
+            hamlibCode: error && error.hamlibCode,
+          }));
+        }
+      } finally {
+        await rig.destroy().catch(() => {});
+      }
+    })().catch((error) => {
+      console.error(error && error.stack || error);
+      process.exit(1);
+    });
+  `));
+  test('构造失败或异常构造后 GC 不访问未初始化 rig 指针', () => runLoaderChild(`
+    const { HamLib } = require('./index.js');
+    try {
+      new HamLib(999999999);
+    } catch {}
+    if (global.gc) {
+      for (let i = 0; i < 5; i += 1) global.gc();
+    }
+  `, ['--expose-gc']));
 
   console.log('\n🛰️ Rotator 方法存在性测试:');
   const rotatorMethods = [

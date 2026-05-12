@@ -184,7 +184,7 @@ async function runCompleteTest() {
     console.log('\n🔊 第七部分：电平控制');
     
     await testWithErrorHandling('获取支持的电平类型', async () => {
-      const levels = rig.getSupportedLevels();
+      const levels = await rig.getSupportedLevels();
       return `支持${levels.length}种电平: ${levels.slice(0, 5).join(', ')}...`;
     });
     
@@ -212,7 +212,7 @@ async function runCompleteTest() {
     console.log('\n⚙️ 第八部分：功能控制');
     
     await testWithErrorHandling('获取支持的功能', async () => {
-      const functions = rig.getSupportedFunctions();
+      const functions = await rig.getSupportedFunctions();
       return `支持${functions.length}种功能: ${functions.slice(0, 5).join(', ')}...`;
     });
     
