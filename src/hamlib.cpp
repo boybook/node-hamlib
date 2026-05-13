@@ -4403,6 +4403,9 @@ Napi::Value NodeHamLib::GetSupportedFunctions(const Napi::CallbackInfo & info) {
       if (functions & SHIM_RIG_FUNC_TRANSCEIVE) values->push_back("TRANSCEIVE");
       if (functions & SHIM_RIG_FUNC_SPECTRUM) values->push_back("SPECTRUM");
       if (functions & SHIM_RIG_FUNC_SPECTRUM_HOLD) values->push_back("SPECTRUM_HOLD");
+      if (functions & SHIM_RIG_FUNC_SEND_MORSE) values->push_back("SEND_MORSE");
+      if (functions & SHIM_RIG_FUNC_SEND_VOICE_MEM) values->push_back("SEND_VOICE_MEM");
+      if (functions & SHIM_RIG_FUNC_OVF_STATUS) values->push_back("OVF_STATUS");
     },
     [values](Napi::Env env) {
       return StringVectorToArray(env, *values);

@@ -476,6 +476,7 @@ type FunctionType = 'FAGC' | 'NB' | 'COMP' | 'VOX' | 'TONE' | 'TSQL' | 'SBKIN' |
                     'RIT' | 'LOCK' | 'MUTE' | 'VSC' | 'REV' | 'SQL' | 'ABM' | 
                     'BC' | 'MBC' | 'AFC' | 'SATMODE' | 'SCOPE' | 'RESUME' | 'TRANSCEIVE' |
                     'SPECTRUM' | 'SPECTRUM_HOLD' |
+                    'SEND_MORSE' | 'SEND_VOICE_MEM' | 'OVF_STATUS' |
                     'TBURST' | string;
 
 /**

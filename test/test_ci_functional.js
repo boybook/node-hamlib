@@ -468,6 +468,12 @@ async function run() {
     assert(Array.isArray(parms), `expected array, got ${typeof parms}`);
   });
 
+  await test('getSupportedFunctions exposes extended Hamlib function bits', async () => {
+    const funcs = await rig.getSupportedFunctions();
+    assert(Array.isArray(funcs), `expected array, got ${typeof funcs}`);
+    assert(funcs.includes('SEND_MORSE'), `expected SEND_MORSE in ${funcs.join(', ')}`);
+  });
+
   await test('getSupportedVfoOps returns array', async () => {
     const ops = await rig.getSupportedVfoOps();
     assert(Array.isArray(ops), `expected array, got ${typeof ops}`);
