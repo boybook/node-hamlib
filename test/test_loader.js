@@ -230,7 +230,7 @@ try {
 
   // 新增静态方法测试
   console.log('\n🆕 新增静态方法测试:');
-  const newStaticMethods = ['getCopyright', 'getLicense'];
+  const newStaticMethods = ['getCopyright', 'getLicense', 'getConfigSchemaForModel', 'getPortCapsForModel'];
   newStaticMethods.forEach(method => {
     test(`静态方法 ${method} 存在`, () => typeof HamLib[method] === 'function');
   });
@@ -248,6 +248,14 @@ try {
   test('无环境变量时子进程默认开启全局串行锁', () => readGlobalLockEnabledFromChild(undefined) === 'true');
   ['0', 'false', 'off', 'no'].forEach(value => {
     test(`NODE_HAMLIB_GLOBAL_LOCK=${value} 时默认关闭`, () => readGlobalLockEnabledFromChild(value) === 'false');
+  });
+  test('静态型号配置 schema 同步返回数组', () => {
+    const schema = HamLib.getConfigSchemaForModel(1);
+    return Array.isArray(schema) && schema.length > 0 && typeof schema[0].name === 'string';
+  });
+  test('静态型号端口能力同步返回对象', () => {
+    const caps = HamLib.getPortCapsForModel(1);
+    return caps && typeof caps === 'object' && typeof caps.portType === 'string';
   });
 
   // Capability Query Batch 2 方法存在性测试
@@ -381,8 +389,8 @@ try {
   const totalMethods = instanceMethods.length + staticMethods.length;
 
   test('实例方法数量不少于97个', () => instanceMethods.length >= 97);
-  test('静态方法数量不少于8个', () => staticMethods.length >= 8);
-  test('总方法数量不少于103个', () => totalMethods >= 103);
+  test('静态方法数量不少于10个', () => staticMethods.length >= 10);
+  test('总方法数量不少于105个', () => totalMethods >= 105);
 
   console.log(`   📊 实例方法: ${instanceMethods.length}个`);
   console.log(`   📊 静态方法: ${staticMethods.length}个`);

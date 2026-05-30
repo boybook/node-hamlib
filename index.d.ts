@@ -723,6 +723,18 @@ declare class HamLib extends EventEmitter {
   static isGlobalLockEnabled(): boolean;
 
   /**
+   * Get backend-specific configuration schema for a rig model without creating
+   * a live HamLib instance or acquiring the live rig I/O lock.
+   */
+  static getConfigSchemaForModel(model: number): HamlibConfigFieldDescriptor[];
+
+  /**
+   * Get backend port capabilities for a rig model without creating a live
+   * HamLib instance or acquiring the live rig I/O lock.
+   */
+  static getPortCapsForModel(model: number): HamlibPortCaps;
+
+  /**
    * Open connection to device
    * Must be called before other operations
    * @throws Throws error when connection fails

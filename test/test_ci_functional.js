@@ -86,6 +86,27 @@ async function run() {
     assert(rigs[0].modelName !== undefined, 'rig entry missing modelName');
   });
 
+  await test('getConfigSchemaForModel returns dummy schema without instance', () => {
+    const schema = HamLib.getConfigSchemaForModel(1);
+    assert(Array.isArray(schema), 'schema should be an array');
+    assert(schema.length > 0, 'schema should not be empty');
+    assert(schema.some((field) => field.name === 'rig_pathname'), 'schema should include rig_pathname');
+  });
+
+  await test('getPortCapsForModel returns dummy port caps without instance', () => {
+    const caps = HamLib.getPortCapsForModel(1);
+    assert(caps && typeof caps === 'object', 'caps should be an object');
+    assert(typeof caps.portType === 'string', 'caps.portType should be a string');
+    assert(typeof caps.timeout === 'number', 'caps.timeout should be a number');
+  });
+
+  await test('getPortCapsForModel exposes IC-705 serial defaults', () => {
+    const caps = HamLib.getPortCapsForModel(3085);
+    assert(caps.portType === 'serial', `IC-705 port type should be serial, got ${caps.portType}`);
+    assert(caps.serialRateMax === 19200, `IC-705 serialRateMax should be 19200, got ${caps.serialRateMax}`);
+    assert(caps.serialDataBits === 8, `IC-705 serialDataBits should be 8, got ${caps.serialDataBits}`);
+  });
+
   // --- Instance lifecycle ---
   console.log('\n[Instance Lifecycle]');
 

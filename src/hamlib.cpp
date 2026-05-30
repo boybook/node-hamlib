@@ -88,12 +88,15 @@ Napi::FunctionReference NodeHamLib::constructor;
 Napi::ThreadSafeFunction tsfn;
 std::timed_mutex NodeHamLib::global_rig_mutex_;
 std::atomic<bool> NodeHamLib::global_rig_lock_enabled_{readGlobalRigLockDefault()};
+std::mutex NodeHamLib::metadata_mutex_;
 
 constexpr const char* kGlobalLockTimeoutCode = "HAMLIB_GLOBAL_LOCK_TIMEOUT";
 
 constexpr int kInvalidVfoParameter = std::numeric_limits<int>::min();
 
 static int parseVfoString(Napi::Env env, const std::string& vfoToken);
+static Napi::Array rigConfigSchemaToArray(Napi::Env env, const RigConfigSchemaData& schemaData);
+static Napi::Object portCapsToObject(Napi::Env env, const shim_rig_port_caps_t& caps);
 
 static std::string publicVfoToken(int vfo) {
   const char* rawToken = shim_rig_strvfo(vfo);
@@ -753,6 +756,52 @@ static Napi::Promise QueueLockedCallbackWorker(
   auto* worker = new LockedCallbackWorker(env, hamlib_instance, std::move(operation), std::move(execute), std::move(resolve));
   worker->Queue();
   return worker->GetPromise();
+}
+
+static Napi::Array rigConfigSchemaToArray(Napi::Env env, const RigConfigSchemaData& schemaData) {
+  Napi::Array schemaArray = Napi::Array::New(env, schemaData.fields.size());
+  for (size_t i = 0; i < schemaData.fields.size(); ++i) {
+    const RigConfigFieldDescriptor& descriptor = schemaData.fields[i];
+    Napi::Object field = Napi::Object::New(env);
+    field.Set("token", Napi::Number::New(env, descriptor.token));
+    field.Set("name", Napi::String::New(env, descriptor.name));
+    field.Set("label", Napi::String::New(env, descriptor.label));
+    field.Set("tooltip", Napi::String::New(env, descriptor.tooltip));
+    field.Set("defaultValue", Napi::String::New(env, descriptor.defaultValue));
+    field.Set("type", Napi::String::New(env, publicConfTypeName(descriptor.type)));
+    if (descriptor.type == 2 || descriptor.type == 6) {
+      Napi::Object numeric = Napi::Object::New(env);
+      numeric.Set("min", Napi::Number::New(env, descriptor.numericMin));
+      numeric.Set("max", Napi::Number::New(env, descriptor.numericMax));
+      numeric.Set("step", Napi::Number::New(env, descriptor.numericStep));
+      field.Set("numeric", numeric);
+    }
+    if (!descriptor.options.empty()) {
+      Napi::Array options = Napi::Array::New(env, descriptor.options.size());
+      for (size_t optionIndex = 0; optionIndex < descriptor.options.size(); ++optionIndex) {
+        options[static_cast<uint32_t>(optionIndex)] = Napi::String::New(env, descriptor.options[optionIndex]);
+      }
+      field.Set("options", options);
+    }
+    schemaArray[static_cast<uint32_t>(i)] = field;
+  }
+  return schemaArray;
+}
+
+static Napi::Object portCapsToObject(Napi::Env env, const shim_rig_port_caps_t& caps) {
+  Napi::Object portCaps = Napi::Object::New(env);
+  portCaps.Set("portType", Napi::String::New(env, caps.port_type));
+  portCaps.Set("writeDelay", Napi::Number::New(env, caps.write_delay));
+  portCaps.Set("postWriteDelay", Napi::Number::New(env, caps.post_write_delay));
+  portCaps.Set("timeout", Napi::Number::New(env, caps.timeout));
+  portCaps.Set("retry", Napi::Number::New(env, caps.retry));
+  if (hasPositiveValue(caps.serial_rate_min)) portCaps.Set("serialRateMin", Napi::Number::New(env, caps.serial_rate_min));
+  if (hasPositiveValue(caps.serial_rate_max)) portCaps.Set("serialRateMax", Napi::Number::New(env, caps.serial_rate_max));
+  if (hasPositiveValue(caps.serial_data_bits)) portCaps.Set("serialDataBits", Napi::Number::New(env, caps.serial_data_bits));
+  if (hasPositiveValue(caps.serial_stop_bits)) portCaps.Set("serialStopBits", Napi::Number::New(env, caps.serial_stop_bits));
+  if (caps.serial_parity[0] != '\0' && std::string(caps.serial_parity) != "Unknown") portCaps.Set("serialParity", Napi::String::New(env, caps.serial_parity));
+  if (caps.serial_handshake[0] != '\0' && std::string(caps.serial_handshake) != "Unknown") portCaps.Set("serialHandshake", Napi::String::New(env, caps.serial_handshake));
+  return portCaps;
 }
 
 static Napi::Array StringVectorToArray(Napi::Env env, const std::vector<std::string>& values) {
@@ -4924,6 +4973,8 @@ Napi::Function NodeHamLib::GetClass(Napi::Env env) {
       NodeHamLib::StaticMethod("getDebugLevel", & NodeHamLib::GetDebugLevel),
       NodeHamLib::StaticMethod("setGlobalLockEnabled", & NodeHamLib::SetGlobalLockEnabled),
       NodeHamLib::StaticMethod("isGlobalLockEnabled", & NodeHamLib::IsGlobalLockEnabled),
+      NodeHamLib::StaticMethod("getConfigSchemaForModel", & NodeHamLib::GetConfigSchemaForModel),
+      NodeHamLib::StaticMethod("getPortCapsForModel", & NodeHamLib::GetPortCapsForModel),
       NodeHamLib::StaticMethod("getCopyright", & NodeHamLib::GetCopyright),
       NodeHamLib::StaticMethod("getLicense", & NodeHamLib::GetLicense),
     });
@@ -5075,6 +5126,10 @@ GlobalRigLock NodeHamLib::TryAcquireGlobalRigLockIfEnabled(std::chrono::millisec
   return lock;
 }
 
+std::mutex& NodeHamLib::MetadataMutex() {
+  return metadata_mutex_;
+}
+
 Napi::Value NodeHamLib::SetGlobalLockEnabled(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
 
@@ -5089,6 +5144,62 @@ Napi::Value NodeHamLib::SetGlobalLockEnabled(const Napi::CallbackInfo& info) {
 
 Napi::Value NodeHamLib::IsGlobalLockEnabled(const Napi::CallbackInfo& info) {
   return Napi::Boolean::New(info.Env(), IsGlobalRigLockEnabled());
+}
+
+Napi::Value NodeHamLib::GetConfigSchemaForModel(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  if (info.Length() < 1 || !info[0].IsNumber()) {
+    Napi::TypeError::New(env, "Expected (model: number)").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+
+  unsigned int model = info[0].As<Napi::Number>().Uint32Value();
+  RigConfigSchemaData schemaData{};
+  int result = SHIM_RIG_OK;
+  {
+    std::lock_guard<std::mutex> metadataLock(MetadataMutex());
+    hamlib_shim_handle_t rig = shim_rig_init(model);
+    if (!rig) {
+      Napi::TypeError::New(env, "Unable to initialize rig metadata for model: " + std::to_string(model)).ThrowAsJavaScriptException();
+      return env.Null();
+    }
+    result = shim_rig_cfgparams_foreach(rig, NodeHamLib::rig_config_callback, &schemaData);
+    shim_rig_cleanup(rig);
+  }
+
+  if (result != SHIM_RIG_OK) {
+    Napi::Error::New(env, shim_rigerror(result)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  return rigConfigSchemaToArray(env, schemaData);
+}
+
+Napi::Value NodeHamLib::GetPortCapsForModel(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  if (info.Length() < 1 || !info[0].IsNumber()) {
+    Napi::TypeError::New(env, "Expected (model: number)").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+
+  unsigned int model = info[0].As<Napi::Number>().Uint32Value();
+  shim_rig_port_caps_t caps{};
+  int result = SHIM_RIG_OK;
+  {
+    std::lock_guard<std::mutex> metadataLock(MetadataMutex());
+    hamlib_shim_handle_t rig = shim_rig_init(model);
+    if (!rig) {
+      Napi::TypeError::New(env, "Unable to initialize rig metadata for model: " + std::to_string(model)).ThrowAsJavaScriptException();
+      return env.Null();
+    }
+    result = shim_rig_get_port_caps(rig, &caps);
+    shim_rig_cleanup(rig);
+  }
+
+  if (result != SHIM_RIG_OK) {
+    Napi::Error::New(env, shim_rigerror(result)).ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  return portCapsToObject(env, caps);
 }
 
 // Serial Port Configuration Methods

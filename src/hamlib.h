@@ -262,6 +262,9 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
   static void SetGlobalRigLockEnabled(bool enabled);
   static bool IsGlobalRigLockEnabled();
   static GlobalRigLock TryAcquireGlobalRigLockIfEnabled(std::chrono::milliseconds timeout);
+  static std::mutex& MetadataMutex();
+  static Napi::Value GetConfigSchemaForModel(const Napi::CallbackInfo&);
+  static Napi::Value GetPortCapsForModel(const Napi::CallbackInfo&);
 
   // Static copyright/license
   static Napi::Value GetCopyright(const Napi::CallbackInfo&);
@@ -300,4 +303,5 @@ class NodeHamLib : public Napi::ObjectWrap<NodeHamLib> {
  private:
   static std::timed_mutex global_rig_mutex_;
   static std::atomic<bool> global_rig_lock_enabled_;
+  static std::mutex metadata_mutex_;
 };
