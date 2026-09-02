@@ -7219,21 +7219,25 @@ public:
           send_data_(std::move(send_data)), reply_max_len_(reply_max_len),
           terminator_(std::move(terminator)), has_terminator_(has_terminator),
           reply_len_(0) {
-        reply_buf_.resize(reply_max_len > 0 ? reply_max_len : 1);
+        if (reply_max_len_ > 0) {
+            reply_buf_.resize(reply_max_len_);
+        }
     }
 
     const char* OperationName() const override { return "SendRaw"; }
 
     void ExecuteWithRigLock() override {
         CHECK_RIG_VALID();
-        const unsigned char* term = has_terminator_ ? terminator_.data() : nullptr;
+        const bool expects_reply = reply_max_len_ > 0;
+        unsigned char* reply = expects_reply ? reply_buf_.data() : nullptr;
+        const unsigned char* term = expects_reply && has_terminator_ ? terminator_.data() : nullptr;
         result_code_ = shim_rig_send_raw(hamlib_instance_->my_rig,
             send_data_.data(), (int)send_data_.size(),
-            reply_buf_.data(), reply_max_len_, term);
+            reply, reply_max_len_, term);
         if (result_code_ < 0) {
             error_message_ = shim_rigerror(result_code_);
         } else {
-            reply_len_ = result_code_;
+            reply_len_ = expects_reply ? result_code_ : 0;
             result_code_ = SHIM_RIG_OK;
         }
     }
@@ -7271,14 +7275,33 @@ Napi::Value NodeHamLib::SendRaw(const Napi::CallbackInfo& info) {
 
   Napi::Buffer<unsigned char> dataBuf = info[0].As<Napi::Buffer<unsigned char>>();
   std::vector<unsigned char> send_data(dataBuf.Data(), dataBuf.Data() + dataBuf.Length());
-  int replyMaxLen = info[1].As<Napi::Number>().Int32Value();
+  const double rawReplyMaxLen = info[1].As<Napi::Number>().DoubleValue();
+  if (!std::isfinite(rawReplyMaxLen) || rawReplyMaxLen < 0 || rawReplyMaxLen > 200
+      || std::floor(rawReplyMaxLen) != rawReplyMaxLen) {
+    Napi::RangeError::New(env, "replyMaxLen must be an integer between 0 and 200").ThrowAsJavaScriptException();
+    return env.Null();
+  }
+  const int replyMaxLen = static_cast<int>(rawReplyMaxLen);
 
   std::vector<unsigned char> terminator;
   bool has_terminator = false;
-  if (info.Length() >= 3 && info[2].IsBuffer()) {
+  if (info.Length() >= 3 && !info[2].IsUndefined()) {
+    if (!info[2].IsBuffer()) {
+      Napi::TypeError::New(env, "terminator must be a one-byte Buffer").ThrowAsJavaScriptException();
+      return env.Null();
+    }
     Napi::Buffer<unsigned char> termBuf = info[2].As<Napi::Buffer<unsigned char>>();
+    if (termBuf.Length() != 1) {
+      Napi::RangeError::New(env, "terminator must contain exactly one byte").ThrowAsJavaScriptException();
+      return env.Null();
+    }
     terminator.assign(termBuf.Data(), termBuf.Data() + termBuf.Length());
     has_terminator = true;
+  }
+
+  if (replyMaxLen == 0 && has_terminator) {
+    Napi::RangeError::New(env, "terminator is not valid when replyMaxLen is 0 (write-only mode)").ThrowAsJavaScriptException();
+    return env.Null();
   }
 
   SendRawAsyncWorker* asyncWorker = new SendRawAsyncWorker(env, this, std::move(send_data), replyMaxLen, std::move(terminator), has_terminator);

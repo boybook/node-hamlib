@@ -189,7 +189,7 @@ try {
   // 新增 API 方法存在性测试
   console.log('\n🆕 补齐 API 方法存在性测试:');
   const newApiMethods = [
-    'getInfo', 'sendRaw', 'getSpectrumCapabilities',
+    'getInfo', 'sendRaw', 'sendRawWrite', 'getSpectrumCapabilities',
     'startSpectrumStream', 'stopSpectrumStream', 'setConf', 'getConf', 'getConfigSchema', 'getPortCaps',
     'getPassbandNormal', 'getPassbandNarrow', 'getPassbandWide',
     'getResolution',

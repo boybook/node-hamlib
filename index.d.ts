@@ -1594,11 +1594,14 @@ declare class HamLib extends EventEmitter {
   /**
    * Send raw command bytes and receive reply
    * @param data Raw command data to send
-   * @param replyMaxLen Maximum reply length in bytes
+   * @param replyMaxLen Reply buffer length in bytes (2-200 for request/response, 0 for write-only)
    * @param terminator Optional terminator bytes
    * @returns Reply data as Buffer
    */
   sendRaw(data: Buffer, replyMaxLen: number, terminator?: Buffer): Promise<Buffer>;
+
+  /** Send raw command bytes without reading a reply. */
+  sendRawWrite(data: Buffer): Promise<void>;
 
   /**
    * Get official Hamlib spectrum metadata exposed by the backend.

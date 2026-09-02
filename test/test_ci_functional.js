@@ -420,6 +420,30 @@ async function run() {
     }
   });
 
+  await test('sendRaw write-only mode returns an empty Buffer', async () => {
+    const reply = await rig.sendRaw(Buffer.from([0xFE, 0xFE]), 0);
+    assert(Buffer.isBuffer(reply), `expected Buffer, got ${typeof reply}`);
+    assert(reply.length === 0, `expected empty Buffer, got ${reply.length} bytes`);
+  });
+
+  await test('sendRawWrite sends without requesting a reply', async () => {
+    const result = await rig.sendRawWrite(Buffer.from([0xFE, 0xFE]));
+    assert(result === undefined, `expected undefined, got ${typeof result}`);
+  });
+
+  await test('sendRaw rejects invalid reply lengths', async () => {
+    await assertRejects(() => rig.sendRaw(Buffer.from([0xFE]), -1), /integer between 0 and 200/);
+    await assertRejects(() => rig.sendRaw(Buffer.from([0xFE]), 201), /integer between 0 and 200/);
+    await assertRejects(() => rig.sendRaw(Buffer.from([0xFE]), 1.5), /integer between 0 and 200/);
+  });
+
+  await test('sendRaw rejects a terminator in write-only mode', async () => {
+    await assertRejects(
+      () => rig.sendRaw(Buffer.from([0xFE]), 0, Buffer.from([0xFD])),
+      /terminator is not valid when replyMaxLen is 0/,
+    );
+  });
+
   // --- New API: setConf / getConf ---
   console.log('\n[Configuration]');
 

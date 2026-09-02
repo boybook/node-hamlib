@@ -200,8 +200,18 @@ const reply = await rig.sendRaw(
 );
 ```
 
+For commands that intentionally have no reply, use the explicit write-only API:
+
+```javascript
+await rig.sendRawWrite(
+  Buffer.from([0xfe, 0xfe, 0xa4, 0xe0, 0x1a, 0x05, 0x01, 0x19, 0x01, 0xfd])
+);
+```
+
 Notes:
 - `sendRaw()` is request/response oriented.
+- `sendRaw(data, 0)` is the low-level write-only form and returns an empty `Buffer`; `sendRawWrite()` is preferred for clarity.
+- `replyMaxLen` must be an integer from 0 through 200. A terminator is only valid when a reply is requested.
 - Continuous spectrum streaming now uses Hamlib's official spectrum callback APIs instead of a raw serial byte subscription.
 - The main `HamLib` class stays a bridge. High-level spectrum helpers live under the `hamlib/spectrum` subpath.
 
