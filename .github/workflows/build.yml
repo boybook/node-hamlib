@@ -110,7 +110,7 @@ jobs:
       run: npm run build:all -- --skip-hamlib --skip-shim --minimal
 
     - name: Build (Unix)
-      if: !startsWith(matrix.os, 'windows')
+      if: startsWith(matrix.os, 'windows') == false
       run: npm run build:all -- --minimal
 
     - name: Run tests
