@@ -28,7 +28,7 @@
   "license": "LGPL",
   "repository": {
     "type": "git",
-    "url": "https://github.com/boybook/node-hamlib.git"
+    "url": "git+https://github.com/boybook/node-hamlib.git"
   },
   "keywords": [
     "ham",
