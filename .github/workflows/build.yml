@@ -117,6 +117,7 @@ jobs:
       run: |
         node test/test_loader.js
         node test/test_ci_functional.js
+        node test/test_tone_functions.js
 
     - name: Check prebuild dependencies (Linux)
       if: startsWith(matrix.os, 'ubuntu')

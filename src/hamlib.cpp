@@ -254,7 +254,8 @@ static const NamedBit kMemoryFunctionBits[] = {
   {"ABM", SHIM_RIG_FUNC_ABM}, {"BC", SHIM_RIG_FUNC_BC}, {"MBC", SHIM_RIG_FUNC_MBC},
   {"RIT", SHIM_RIG_FUNC_RIT}, {"AFC", SHIM_RIG_FUNC_AFC}, {"SATMODE", SHIM_RIG_FUNC_SATMODE},
   {"SCOPE", SHIM_RIG_FUNC_SCOPE}, {"RESUME", SHIM_RIG_FUNC_RESUME}, {"TBURST", SHIM_RIG_FUNC_TBURST},
-  {"TUNER", SHIM_RIG_FUNC_TUNER}, {"XIT", SHIM_RIG_FUNC_XIT}, {"TRANSCEIVE", SHIM_RIG_FUNC_TRANSCEIVE},
+  {"TUNER", SHIM_RIG_FUNC_TUNER}, {"XIT", SHIM_RIG_FUNC_XIT}, {"CSQL", SHIM_RIG_FUNC_CSQL},
+  {"TRANSCEIVE", SHIM_RIG_FUNC_TRANSCEIVE},
   {"SPECTRUM", SHIM_RIG_FUNC_SPECTRUM}, {"SPECTRUM_HOLD", SHIM_RIG_FUNC_SPECTRUM_HOLD},
   {"SEND_MORSE", SHIM_RIG_FUNC_SEND_MORSE}, {"SEND_VOICE_MEM", SHIM_RIG_FUNC_SEND_VOICE_MEM},
   {"OVF_STATUS", SHIM_RIG_FUNC_OVF_STATUS},
@@ -4264,6 +4265,8 @@ Napi::Value NodeHamLib::SetFunction(const Napi::CallbackInfo & info) {
     funcType = SHIM_RIG_FUNC_VOX;
   } else if (funcTypeStr == "TONE") {
     funcType = SHIM_RIG_FUNC_TONE;
+  } else if (funcTypeStr == "CSQL") {
+    funcType = SHIM_RIG_FUNC_CSQL;
   } else if (funcTypeStr == "TSQL") {
     funcType = SHIM_RIG_FUNC_TSQL;
   } else if (funcTypeStr == "SBKIN") {
@@ -4350,6 +4353,8 @@ Napi::Value NodeHamLib::GetFunction(const Napi::CallbackInfo & info) {
     funcType = SHIM_RIG_FUNC_VOX;
   } else if (funcTypeStr == "TONE") {
     funcType = SHIM_RIG_FUNC_TONE;
+  } else if (funcTypeStr == "CSQL") {
+    funcType = SHIM_RIG_FUNC_CSQL;
   } else if (funcTypeStr == "TSQL") {
     funcType = SHIM_RIG_FUNC_TSQL;
   } else if (funcTypeStr == "SBKIN") {
@@ -4426,6 +4431,7 @@ Napi::Value NodeHamLib::GetSupportedFunctions(const Napi::CallbackInfo & info) {
       if (functions & SHIM_RIG_FUNC_COMP) values->push_back("COMP");
       if (functions & SHIM_RIG_FUNC_VOX) values->push_back("VOX");
       if (functions & SHIM_RIG_FUNC_TONE) values->push_back("TONE");
+      if (functions & SHIM_RIG_FUNC_CSQL) values->push_back("CSQL");
       if (functions & SHIM_RIG_FUNC_TSQL) values->push_back("TSQL");
       if (functions & SHIM_RIG_FUNC_SBKIN) values->push_back("SBKIN");
       if (functions & SHIM_RIG_FUNC_FBKIN) values->push_back("FBKIN");
